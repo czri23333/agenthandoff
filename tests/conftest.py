@@ -18,18 +18,19 @@ def zcode_store(tmp_path: Path) -> Path:
     con.executescript(
         """
         CREATE TABLE session (id TEXT, project_id TEXT, title TEXT, directory TEXT,
-            time_created INTEGER, time_updated INTEGER);
+            time_created INTEGER, time_updated INTEGER, parent_id TEXT);
         CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER,
             data TEXT, sequence INTEGER);
         CREATE TABLE part (id TEXT, message_id TEXT, session_id TEXT,
             data TEXT, sequence INTEGER);
         CREATE TABLE todo (session_id TEXT, content TEXT, status TEXT,
             priority TEXT, position INTEGER);
+        CREATE TABLE model_usage (session_id TEXT, provider_id TEXT, started_at INTEGER);
         """
     )
     con.execute(
         "INSERT INTO session VALUES ('sess_a','p','Fix login loop','D:/demo',"
-        "1756500000000,1756503600000)"
+        "1756500000000,1756503600000,NULL)"
     )
     msgs = [
         ("m1", "user", 1756500001000,
@@ -60,6 +61,9 @@ def zcode_store(tmp_path: Path) -> Path:
                 }
             ),
         ),
+    )
+    con.execute(
+        "INSERT INTO model_usage VALUES ('sess_a','builtin:bigmodel-start-plan',1756500009000)"
     )
     con.execute("INSERT INTO todo VALUES ('sess_a','reproduce bug','completed','high',0)")
     con.execute("INSERT INTO todo VALUES ('sess_a','patch middleware','in_progress','high',1)")

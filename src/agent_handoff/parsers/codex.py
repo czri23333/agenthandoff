@@ -49,6 +49,8 @@ class CodexParser(Parser):
             updated = ts_to_iso(int(path.stat().st_mtime * 1000))
         except OSError:
             updated = None
+        src = p.get("source") or {}
+        spawn = src.get("subagent", {}).get("thread_spawn", {}) if isinstance(src, dict) else {}
         return SessionMeta(
             cli=self.cli,
             session_id=str(p.get("session_id") or p.get("id") or path.stem),
@@ -58,6 +60,10 @@ class CodexParser(Parser):
             updated_at=updated,
             model=str(p.get("model_provider") or "") or None,
             source_path=str(path),
+            origin=str(p.get("originator") or "") or None,
+            parent_session_id=(
+                p.get("parent_thread_id") or spawn.get("parent_thread_id")
+            ),
         )
 
     def load(self, session_id: str) -> RawSession | None:
@@ -81,6 +87,9 @@ class CodexParser(Parser):
                     updated = ts_to_iso(int(path.stat().st_mtime * 1000))
                 except OSError:
                     updated = None
+                src = payload.get("source") or {}
+                spawn = (src.get("subagent", {}).get("thread_spawn", {})
+                         if isinstance(src, dict) else {})
                 meta = SessionMeta(
                     cli=self.cli,
                     session_id=str(payload.get("session_id") or path.stem),
@@ -90,6 +99,10 @@ class CodexParser(Parser):
                     updated_at=updated,
                     model=str(payload.get("model_provider") or "") or None,
                     source_path=str(path),
+                    origin=str(payload.get("originator") or "") or None,
+                    parent_session_id=(
+                        payload.get("parent_thread_id") or spawn.get("parent_thread_id")
+                    ),
                 )
             elif rtype == "response_item" and payload.get("type") == "message":
                 role = payload.get("role")

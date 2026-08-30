@@ -64,7 +64,8 @@ class ZcodeParser(Parser):
             return None
         with self._connect() as con:
             sess = con.execute(
-                "SELECT id, title, directory, time_created, time_updated FROM session WHERE id=?",
+                "SELECT id, title, directory, time_created, time_updated, parent_id "
+                "FROM session WHERE id=?",
                 (session_id,),
             ).fetchone()
             if sess is None:
@@ -139,6 +140,14 @@ class ZcodeParser(Parser):
             ]
 
         interruption = self._interruption(con, session_id)
+        try:
+            provider_row = con.execute(
+                "SELECT provider_id FROM model_usage WHERE session_id=? "
+                "ORDER BY started_at DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        except sqlite3.Error:
+            provider_row = None
 
         meta = SessionMeta(
             cli=self.cli,
@@ -151,6 +160,8 @@ class ZcodeParser(Parser):
             tokens_in=tokens_in or None,
             tokens_out=tokens_out or None,
             source_path=str(self.db_path),
+            provider=provider_row[0] if provider_row else None,
+            parent_session_id=sess["parent_id"],
         )
         return self.build_raw(meta, messages, todos, files, tools, interruption)
 

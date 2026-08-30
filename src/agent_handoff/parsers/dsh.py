@@ -68,6 +68,7 @@ class DshParser(Parser):
         title = ""
         cwd = ""
         created = updated = None
+        parent = None
         for line in head.splitlines():
             line = line.strip()
             if not line:
@@ -84,6 +85,7 @@ class DshParser(Parser):
                 cwd = row.get("cwd") or cwd
                 created = ts_to_iso(row.get("createdAt")) or created
                 updated = ts_to_iso(row.get("updatedAt")) or updated
+                parent = row.get("parentSession") or parent
             elif t == "session/title" and not title:
                 title = (row.get("data") or {}).get("title") or ""
         return SessionMeta(
@@ -94,6 +96,7 @@ class DshParser(Parser):
             started_at=created,
             updated_at=updated,
             source_path=str(path),
+            parent_session_id=parent,
         )
 
     # -- extraction ----------------------------------------------------------
@@ -115,6 +118,7 @@ class DshParser(Parser):
         title = ""
         cwd = ""
         created = updated = None
+        parent = None
 
         for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -130,6 +134,7 @@ class DshParser(Parser):
                 cwd = row.get("cwd") or cwd
                 created = ts_to_iso(row.get("createdAt")) or created
                 updated = ts_to_iso(row.get("updatedAt")) or updated
+                parent = row.get("parentSession") or parent
             elif t == "session/title":
                 title = (row.get("data") or {}).get("title") or title
             elif t == "user/message":
@@ -159,6 +164,7 @@ class DshParser(Parser):
             started_at=created,
             updated_at=updated,
             source_path=str(path),
+            parent_session_id=parent,
         )
         return self.build_raw(meta, messages, [], files, tools)
 

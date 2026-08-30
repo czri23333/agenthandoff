@@ -72,6 +72,13 @@ def render_brief(b: HandoffBundle, lang: str = "en", max_chars: int = 12000) -> 
             f"cwd: {b.meta.cwd}\n"
             f"source: {b.meta.cli} session {b.meta.session_id} "
             f'("{b.meta.title}"), last active {updated}'
+            + (f"\nprovider: {b.meta.provider}" if b.meta.provider else "")
+            + (f"\nparent session: {b.meta.parent_session_id}" if b.meta.parent_session_id else "")
+            + (
+                "\nnotes: " + "; ".join(b.meta.notes)
+                if b.meta.notes
+                else ""
+            )
         ),
         "objective": b.objective or "(not captured)",
         "facts": _bullet(b.done),

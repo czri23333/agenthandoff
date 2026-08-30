@@ -39,7 +39,16 @@ def ts_to_iso(value: float | int | str | None) -> str | None:
 
 @dataclass
 class SessionMeta:
-    """Identity and provenance of the captured session."""
+    """Identity and provenance of the captured session.
+
+    ``provider`` is the model route behind the session when the store
+    exposes one (e.g. ``builtin:bigmodel-start-plan``) — the thing that runs
+    out of quota. ``origin`` distinguishes harness variants of the same CLI
+    (desktop vs CLI vs IDE). ``parent_session_id`` links subagent/child
+    sessions to their spawner. ``account`` is intentionally *not* scraped
+    from stores: multi-account setups differ per CLI and credentials are
+    none of our business — the user annotates it via ``capture --note``.
+    """
 
     cli: str
     session_id: str
@@ -51,6 +60,10 @@ class SessionMeta:
     tokens_in: int | None = None
     tokens_out: int | None = None
     source_path: str = ""
+    provider: str | None = None
+    origin: str | None = None
+    parent_session_id: str | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -162,6 +175,10 @@ class HandoffBundle:
                 "tokens_in": self.meta.tokens_in,
                 "tokens_out": self.meta.tokens_out,
                 "source_path": self.meta.source_path,
+                "provider": self.meta.provider,
+                "origin": self.meta.origin,
+                "parent_session_id": self.meta.parent_session_id,
+                "notes": self.meta.notes,
             },
             "objective": self.objective,
             "state": {

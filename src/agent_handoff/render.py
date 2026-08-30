@@ -26,6 +26,10 @@ cwd: "{cwd}"
 started_at: {started_at}
 updated_at: {updated_at}
 model: {model}
+provider: {provider}
+origin: {origin}
+parent_session_id: {parent_session_id}
+meta_notes: {meta_notes}
 tokens_in: {tokens_in}
 tokens_out: {tokens_out}
 source_path: "{source_path}"
@@ -109,6 +113,10 @@ def render_markdown(b: HandoffBundle) -> str:
         started_at=_yaml_str(b.meta.started_at),
         updated_at=_yaml_str(b.meta.updated_at),
         model=_yaml_str(b.meta.model),
+        provider=_yaml_str(b.meta.provider),
+        origin=_yaml_str(b.meta.origin),
+        parent_session_id=_yaml_str(b.meta.parent_session_id),
+        meta_notes=_yaml_str("; ".join(b.meta.notes) or None),
         tokens_in=b.meta.tokens_in if b.meta.tokens_in is not None else "null",
         tokens_out=b.meta.tokens_out if b.meta.tokens_out is not None else "null",
         source_path=b.meta.source_path,
@@ -216,6 +224,10 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
         tokens_in=meta_raw.get("tokens_in"),
         tokens_out=meta_raw.get("tokens_out"),
         source_path=str(meta_raw.get("source_path") or ""),
+        provider=meta_raw.get("provider"),
+        origin=meta_raw.get("origin"),
+        parent_session_id=meta_raw.get("parent_session_id"),
+        notes=[s.strip() for s in str(meta_raw.get("meta_notes") or "").split(";") if s.strip()],
     )
 
     files: list[tuple[str, int]] = []
@@ -264,6 +276,10 @@ def load_bundle(path: str) -> HandoffBundle:
             tokens_in=m.get("tokens_in"),
             tokens_out=m.get("tokens_out"),
             source_path=m.get("source_path", ""),
+            provider=m.get("provider"),
+            origin=m.get("origin"),
+            parent_session_id=m.get("parent_session_id"),
+            notes=list(m.get("notes", [])),
         )
         state = d.get("state", {})
         it_raw = d.get("interruption", {})

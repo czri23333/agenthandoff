@@ -1,4 +1,4 @@
-"""Command-line interface: handoff doctor|list|capture|resume."""
+"""Command-line interface: handoff doctor|list|capture|resume|publish|inbox|claim."""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ import sys
 from pathlib import Path
 
 from agent_handoff import __version__
+from agent_handoff.exchange import claim as exchange_claim
+from agent_handoff.exchange import inbox as exchange_inbox
+from agent_handoff.exchange import publish as exchange_publish
 from agent_handoff.locations import discover
 from agent_handoff.parsers import available_parsers, resolve_session
 from agent_handoff.render import load_bundle, render_json, render_markdown
@@ -71,6 +74,8 @@ def _cmd_capture(args: argparse.Namespace) -> int:
         return 1
 
     bundle = summarize(raw)
+    if args.note:
+        bundle.meta.notes = list(args.note)
     out = render_json(bundle) if args.json else render_markdown(bundle)
     if args.out:
         dest = Path(args.out)
@@ -93,6 +98,46 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         print(f"brief written: {args.out} ({len(brief)} chars)")
     else:
         print(brief)
+    return 0
+
+
+def _cmd_publish(args: argparse.Namespace) -> int:
+    try:
+        dest = exchange_publish(
+            Path(args.bundle),
+            global_scope=args.to_global,
+            note=args.note,
+        )
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    scope = "global" if args.to_global else "project"
+    print(f"published ({scope}): {dest}")
+    return 0
+
+
+def _cmd_inbox(args: argparse.Namespace) -> int:
+    items = exchange_inbox(global_scope=args.to_global)
+    if not items:
+        scope = "global" if args.to_global else "project"
+        print(f"inbox empty ({scope}).")
+        return 0
+    print(f"{'published':<18} {'cli':<12} {'status':<9} title")
+    print("-" * 84)
+    for it in items:
+        status = f"claimed({it.claimed_by[:12]})" if it.claimed else "open"
+        print(f"{it.published_at:<18} {it.cli:<12} {status:<9} {it.title[:44]}")
+        print(f"{'':<18} file: {it.path}")
+    return 0
+
+
+def _cmd_claim(args: argparse.Namespace) -> int:
+    try:
+        sidecar = exchange_claim(Path(args.bundle), claimed_by=args.by)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"claimed: {sidecar}")
     return 0
 
 
@@ -121,6 +166,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_cap.add_argument("--cli", help="restrict the search to one cli")
     p_cap.add_argument("--out", help="write bundle to file (default: stdout)")
     p_cap.add_argument("--json", action="store_true", help="emit JSON instead of markdown")
+    p_cap.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        help="attach a provenance note (repeatable), e.g. --note 'account:work'",
+    )
+
+    p_pub = sub.add_parser(
+        "publish", help="copy a bundle into the exchange dir for other agents"
+    )
+    p_pub.add_argument("bundle", help="path to a bundle .md/.json file")
+    p_pub.add_argument(
+        "--global",
+        dest="to_global",
+        action="store_true",
+        help="publish to ~/.agenthandoff instead of <cwd>/.handoff",
+    )
+    p_pub.add_argument("--note", help="publication note (who it is for, why)")
+
+    p_inb = sub.add_parser("inbox", help="list published handoffs waiting for pickup")
+    p_inb.add_argument(
+        "--global",
+        dest="to_global",
+        action="store_true",
+        help="read ~/.agenthandoff instead of <cwd>/.handoff",
+    )
+
+    p_clm = sub.add_parser("claim", help="mark a published handoff as taken")
+    p_clm.add_argument("bundle", help="path to the published bundle")
+    p_clm.add_argument("--by", help="who is claiming (default: hostname)")
 
     p_res = sub.add_parser("resume", help="generate a continuation brief from a bundle")
     p_res.add_argument("bundle", help="path to a bundle .md or .json file")
@@ -136,6 +211,9 @@ _HANDLERS = {
     "list": _cmd_list,
     "capture": _cmd_capture,
     "resume": _cmd_resume,
+    "publish": _cmd_publish,
+    "inbox": _cmd_inbox,
+    "claim": _cmd_claim,
 }
 
 
