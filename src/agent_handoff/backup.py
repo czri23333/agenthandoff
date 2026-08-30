@@ -21,6 +21,16 @@ from agent_handoff.exchange import global_dir, project_dir
 from agent_handoff.locations import discover
 
 
+def _is_under(parent: Path, child: Path) -> bool:
+    """True when `child` is `parent` or lives inside it (resolved, case-safe)."""
+    try:
+        p = Path(parent).resolve()
+        c = Path(child).resolve()
+    except OSError:
+        return False
+    return c == p or p in c.parents
+
+
 def _manifest(stores: list, dest: Path) -> dict:
     return {
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -69,11 +79,28 @@ def backup(dest: Path | None = None) -> Path:
                     if f.is_file():
                         z.write(f, f.relative_to(p.parent))
 
-    # Exchange dirs (small — copy directly)
-    for ex_dir in [project_dir(), global_dir()]:
-        if ex_dir.is_dir() and any(ex_dir.iterdir()):
-            target = dest / ("exchange_global" if ex_dir == global_dir() else "exchange_project")
-            shutil.copytree(ex_dir, target, dirs_exist_ok=True)
+    # Exchange dirs. The global dir IS ~/.agenthandoff, which is also where this
+    # backup lands — so the destination and the previous backups must be excluded
+    # or copytree walks into its own output until the path explodes (WinError 206).
+    # The search index is a cache and gets skipped; the vault is the lossless
+    # archive, so it is deliberately kept.
+    skip = shutil.ignore_patterns(
+        "backups", "search-index.sqlite3*", "*.tmp*", "exchange_project"
+    )
+    for ex_dir, label in [(project_dir(), "exchange_project"), (global_dir(), "exchange_global")]:
+        if not ex_dir.is_dir():
+            continue
+        target = dest / label
+        if _is_under(dest, ex_dir) or _is_under(target, ex_dir):
+            continue  # never copy a directory into itself
+        entries = [
+            p
+            for p in ex_dir.rglob("*")
+            if p.is_file() and not _is_under(dest, p) and "backups" not in p.parts
+        ]
+        if not entries:
+            continue
+        shutil.copytree(ex_dir, target, dirs_exist_ok=True, ignore=skip)
 
     manifest = json.loads((dest / "manifest.json").read_text(encoding="utf-8"))
     manifest["archived_files"] = sum(1 for _ in dest.rglob("*") if _.is_file())
