@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Empty, List, Switch, Tag, Tooltip, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 import { api, type InboxItem } from "../api";
-import { useT } from "../i18n";
 import { CliBadge, CopyButton } from "../components";
+import { useT } from "../i18n";
 
 export default function Inbox() {
   const t = useT();
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [globalScope, setGlobalScope] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => setItems(await api.inbox(globalScope));
   useEffect(() => {
@@ -25,40 +27,59 @@ export default function Inbox() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-zinc-800/70 px-5 py-2.5">
-        <p className="text-[12px] text-zinc-500">{t("inboxDesc")}</p>
-        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-zinc-500">
-          <input type="checkbox" checked={globalScope} onChange={(e) => setGlobalScope(e.target.checked)} />
-          {t("global")}
-        </label>
-        <button onClick={load} className="rounded-md border border-zinc-700 bg-zinc-800/60 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700">{t("refresh")}</button>
+      <div className="flex flex-wrap items-center gap-3 border-b border-zinc-800/70 px-5 py-2.5">
+        <Typography.Text type="secondary" className="text-[12px]">{t("inboxDesc")}</Typography.Text>
+        <div className="ml-auto flex items-center gap-3">
+          <Tooltip title="跨项目交接箱：~/.agenthandoff">
+            <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+              <Switch size="small" checked={globalScope} onChange={setGlobalScope} /> {t("global")}
+            </span>
+          </Tooltip>
+          <Button icon={<ReloadOutlined spin={items === null} />} size="small" onClick={load}>
+            {t("refresh")}
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {msg && <p className="mb-2 text-[12px] text-red-400">{msg}</p>}
-        {items === null && <p className="text-[13px] text-zinc-600">{t("loading")}</p>}
-        {items?.length === 0 && (
-          <p className="text-[13px] text-zinc-600">
-            {t("inboxEmpty")} <code className="text-zinc-500">handoff publish &lt;bundle&gt;</code>.
-          </p>
-        )}
-        <ul className="space-y-1.5">
-          {items?.map((it) => (
-            <li key={it.path} className="flex items-center gap-3 rounded-lg border border-zinc-800/70 bg-zinc-900/40 px-3 py-2">
-              <CliBadge cli={it.cli} />
-              <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-200">{it.title}</span>
-              <span className="font-mono text-[11px] text-zinc-600">{it.published_at}</span>
-              {it.claimed ? (
-                <span className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-px font-mono text-[10px] text-zinc-400">{t("claimed")} · {it.claimed_by}</span>
-              ) : (
-                <button onClick={() => doClaim(it.path)} className="rounded-md border border-emerald-700/50 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-500/20">
-                  {t("claim")}
-                </button>
-              )}
-              <CopyButton text={it.path} label="path" />
-            </li>
-          ))}
-        </ul>
+        {msg && <Alert type="error" showIcon message={msg} className="mb-3!" />}
+        {items === null && <Skeleton active />}
+        {items?.length === 0 && <Empty description={<span className="text-[12px]">{t("inboxEmpty")} <code>handoff publish &lt;bundle&gt;</code></span>} />}
+        <List
+          dataSource={items ?? []}
+          renderItem={(it) => (
+            <List.Item
+              className="mb-1.5! rounded-lg border border-zinc-800/70 bg-zinc-900/40 px-3! py-2!"
+              actions={[
+                it.claimed ? (
+                  <Tag key="c" className="mr-0! font-mono!">{t("claimed")} · {it.claimed_by}</Tag>
+                ) : (
+                  <Button key="c" size="small" color="green" variant="outlined" onClick={() => doClaim(it.path)}>
+                    {t("claim")}
+                  </Button>
+                ),
+                <CopyButton key="p" text={it.path} label="path" />,
+              ]}
+            >
+              <List.Item.Meta
+                avatar={<CliBadge cli={it.cli} />}
+                title={<span className="text-[13px] text-zinc-200">{it.title}</span>}
+                description={<span className="font-mono text-[11px] text-zinc-600">{it.published_at} · {it.session_id}</span>}
+              />
+            </List.Item>
+          )}
+        />
       </div>
+    </div>
+  );
+}
+
+function Skeleton({ active }: { active: boolean }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="h-11 animate-pulse rounded-lg bg-zinc-900" style={{ opacity: 1 - i * 0.12 }} />
+      ))}
+      {active ? null : null}
     </div>
   );
 }

@@ -1,117 +1,124 @@
+import { App, Badge, Button, Card, Tag, Typography } from "antd";
 import { useState } from "react";
 import type { Interruption } from "./api";
 
 const CLI_COLORS: Record<string, string> = {
-  zcode: "text-sky-300 border-sky-300/30 bg-sky-300/10",
-  claude: "text-red-300 border-red-300/30 bg-red-300/10",
-  codebuddy: "text-green-300 border-green-300/30 bg-green-300/10",
-  "codebuddy-cn": "text-green-400 border-green-400/30 bg-green-400/10",
-  qoderwork: "text-orange-300 border-orange-300/30 bg-orange-300/10",
-  "qoderwork-cn": "text-orange-400 border-orange-400/30 bg-orange-400/10",
-  "qodercn-ide": "text-amber-400 border-amber-400/30 bg-amber-400/10",
-  qwenwork: "text-violet-300 border-violet-300/30 bg-violet-300/10",
-  dsh: "text-cyan-300 border-cyan-300/30 bg-cyan-300/10",
-  kimi: "text-purple-300 border-purple-300/30 bg-purple-300/10",
-  codex: "text-indigo-300 border-indigo-300/30 bg-indigo-300/10",
+  zcode: "sky",
+  claude: "red",
+  codebuddy: "green",
+  "codebuddy-cn": "lime",
+  qoderwork: "orange",
+  "qoderwork-cn": "gold",
+  "qodercn-ide": "amber",
+  qwenwork: "purple",
+  dsh: "cyan",
+  kimi: "magenta",
+  codex: "geekblue",
 };
 
 export function CliBadge({ cli, origin }: { cli: string; origin?: string | null }) {
-  const color = CLI_COLORS[cli] ?? "text-zinc-300 border-zinc-600/40 bg-zinc-800";
+  const color = CLI_COLORS[cli] ?? "default";
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-px font-mono text-[10px] ${color}`}>
+    <Tag color={color} className="mr-0 font-mono!">
       {cli}
-      {origin && origin !== `.${cli}` && <span className="opacity-50">·{origin}</span>}
-    </span>
+      {origin && origin !== `.${cli}` && <span className="opacity-60">·{origin.replace(".", "")}</span>}
+    </Tag>
   );
 }
 
-export const INTERRUPTION_STYLE: Record<string, { dot: string; label: string; note: string }> = {
-  clean: { dot: "bg-emerald-400", label: "clean", note: "ended normally" },
-  user_pending: { dot: "bg-orange-400 animate-pulse", label: "pending", note: "un-answered user instruction" },
-  cancelled: { dot: "bg-yellow-400", label: "cancelled", note: "cancelled by user" },
-  context_exceeded: { dot: "bg-red-400", label: "context", note: "context window exceeded" },
-  length_truncated: { dot: "bg-red-400", label: "truncated", note: "reply cut by token limit" },
-  error: { dot: "bg-red-500", label: "error", note: "model error" },
-  unknown: { dot: "bg-zinc-400", label: "abrupt", note: "abrupt end" },
+export const INTERRUPTION_STYLE: Record<string, { badge: "success" | "warning" | "error" | "default"; label: string }> = {
+  clean: { badge: "success", label: "正常结束" },
+  user_pending: { badge: "warning", label: "有未执行的指令" },
+  cancelled: { badge: "warning", label: "用户取消" },
+  context_exceeded: { badge: "error", label: "上下文超限" },
+  length_truncated: { badge: "error", label: "回复被截断" },
+  error: { badge: "error", label: "模型错误" },
+  unknown: { badge: "default", label: "异常结束" },
 };
 
 export function StatusDot({ kind }: { kind: string }) {
   const s = INTERRUPTION_STYLE[kind] ?? INTERRUPTION_STYLE.unknown;
-  return <span title={s.label} className={`inline-block h-2 w-2 rounded-full ${s.dot}`} />;
+  return <Badge status={s.badge} title={`${kind}: ${s.label}`} />;
 }
 
 export function InterruptionBanner({ it }: { it: Interruption }) {
   if (it.kind === "clean") return null;
   const s = INTERRUPTION_STYLE[it.kind] ?? INTERRUPTION_STYLE.unknown;
   return (
-    <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[13px] text-yellow-200">
-      <span className="font-medium">Interrupted session</span> — {s.note}
-      {it.detail && <span className="text-yellow-300/60"> · {it.detail}</span>}
-      {it.kind === "user_pending" && it.pending_user_text && (
-        <div className="mt-1 rounded bg-yellow-500/10 px-2 py-1 font-mono text-[12px]">
-          pending instruction: {it.pending_user_text}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function Spinner({ className = "" }: { className?: string }) {
-  return (
-    <span
-      className={`inline-block h-3 w-3 animate-spin rounded-full border-[1.5px] border-zinc-500 border-t-transparent ${className}`}
+    <Alert
+      type={it.kind === "error" || it.kind === "context_exceeded" ? "error" : "warning"}
+      showIcon
+      message={`会话曾中断 — ${s.label}`}
+      description={
+        <>
+          {it.detail && <div className="text-[12px] opacity-70">{it.detail}</div>}
+          {it.kind === "user_pending" && it.pending_user_text && (
+            <div className="mt-1 rounded bg-black/20 px-2 py-1 font-mono text-[12px]">
+              未执行的指令：{it.pending_user_text}
+            </div>
+          )}
+        </>
+      }
     />
   );
 }
 
-export function CopyButton({ text, label = "copy" }: { text: string; label?: string }) {
+import { Alert } from "antd";
+
+export function CopyButton({ text, label = "复制" }: { text: string; label?: string }) {
+  const { message } = App.useApp();
   const [done, setDone] = useState(false);
   return (
-    <button
+    <Button
+      size="small"
+      type={done ? "primary" : "default"}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
           setDone(true);
-          setTimeout(() => setDone(false), 1200);
+          message.success("已复制到剪贴板");
+          setTimeout(() => setDone(false), 1500);
         } catch {
-          /* clipboard denied */
+          message.error("复制失败：浏览器拒绝了剪贴板访问");
         }
       }}
-      className={`rounded-md border px-2 py-1 text-[11px] ${
-        done
-          ? "border-emerald-600/50 bg-emerald-500/15 text-emerald-300"
-          : "border-zinc-700 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
-      }`}
     >
       {done ? "✓ 已复制" : label}
-    </button>
+    </Button>
   );
 }
 
-export function SectionCard({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+export function SectionCard({
+  title,
+  extra,
+  children,
+}: {
+  title: React.ReactNode;
+  extra?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900/50">
-      <header className="flex items-center justify-between border-b border-zinc-800/70 px-3 py-2">
-        <h3 className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">{title}</h3>
-        {right}
-      </header>
-      <div className="px-3 py-2.5 text-[13px] leading-relaxed">{children}</div>
-    </section>
+    <Card size="small" title={<span className="text-[11px] tracking-wider">{title}</span>} extra={extra}>
+      {children}
+    </Card>
   );
 }
 
-export function Bullets({ items, empty = "none recorded", numbered = false }: { items: string[]; empty?: string; numbered?: boolean }) {
-  if (!items.length) return <p className="text-[12px] italic text-zinc-600">{empty}</p>;
+export function Bullets({ items, numbered = false }: { items: string[]; numbered?: boolean }) {
+  if (!items.length)
+    return <Typography.Text type="secondary" className="text-[12px] italic">（无记录）</Typography.Text>;
   return (
-    <ol className="space-y-1">
+    <ol className="space-y-1 pl-0 list-none m-0 p-0">
       {items.map((s, i) => (
-        <li key={i} className="flex gap-2">
+        <li key={i} className="flex items-start gap-2 text-[13px] text-zinc-300">
           {numbered ? (
-            <span className="mt-px min-w-[16px] rounded bg-zinc-800 px-1 text-center font-mono text-[10px] leading-5 text-zinc-400">{i + 1}</span>
+            <span className="mt-0.5 min-w-[18px] rounded bg-zinc-800 px-1 text-center font-mono text-[10px] leading-5 text-zinc-400">
+              {i + 1}
+            </span>
           ) : (
-            <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-zinc-600" />
+            <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-zinc-600" />
           )}
-          <span className="break-words text-zinc-300">{s}</span>
+          <span className="break-words">{s}</span>
         </li>
       ))}
     </ol>

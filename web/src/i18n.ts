@@ -164,6 +164,11 @@ export type TKey = keyof (typeof dict)["zh"];
 
 export const LangContext = createContext<Lang>("zh");
 
+export function setAppLang(lang: Lang) {
+  localStorage.setItem("ah-lang", lang);
+  window.dispatchEvent(new Event("ah-lang-change"));
+}
+
 export function useT(): (key: TKey) => string {
   const lang = useContext(LangContext);
   return (key: TKey) => dict[lang][key] ?? key;

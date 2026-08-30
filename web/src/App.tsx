@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { LangContext, useT, type Lang, type TKey } from "./i18n";
+import { Layout, Menu, Segmented, Typography } from "antd";
+import { setAppLang, useT, type Lang } from "./i18n";
 import Dashboard from "./views/Dashboard";
 import SessionDetail from "./views/SessionDetail";
 import Threads from "./views/Threads";
 import Inbox from "./views/Inbox";
 import Doctor from "./views/Doctor";
 
-// Hash routing: every view and session is a shareable, bookmarkable URL
-// (#/session/<cli>/<sid>, #threads, #inbox, #doctor).
+// Hash routing: every view and session is a shareable, bookmarkable URL.
 type View =
   | { name: "dashboard" }
   | { name: "detail"; cli: string; sid: string }
@@ -15,7 +15,7 @@ type View =
   | { name: "inbox" }
   | { name: "doctor" };
 
-const TABS: { id: View["name"]; key: string; labelKey: TKey; hash: string }[] = [
+const TABS: { id: View["name"]; key: string; labelKey: Parameters<ReturnType<typeof useT>>[0]; hash: string }[] = [
   { id: "dashboard", key: "1", labelKey: "sessions", hash: "" },
   { id: "threads", key: "2", labelKey: "threads", hash: "threads" },
   { id: "inbox", key: "3", labelKey: "inbox", hash: "inbox" },
@@ -41,13 +41,15 @@ function toHash(v: View): string {
 export default function App() {
   const t = useT();
   const [view, setView] = useState<View>(parseHash);
-  const [lang, setLang] = useState<Lang>(
+  const [lang, setLangState] = useState<Lang>(
     () => (localStorage.getItem("ah-lang") as Lang) || "zh",
   );
-  // How deep we are in in-app history. "← back" pops via history.back() so
-  // the browser's own back button stays consistent; a session opened cold
-  // from a link has nothing to pop, so back pushes the list instead.
   const navDepth = useRef(0);
+
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    setAppLang(l);
+  };
 
   const navigate = (v: View) => {
     navDepth.current += 1;
@@ -58,7 +60,7 @@ export default function App() {
   const goBack = () => {
     if (navDepth.current > 0) {
       navDepth.current -= 1;
-      history.back(); // popstate syncs the view
+      history.back();
     } else {
       navigate({ name: "dashboard" });
     }
@@ -70,16 +72,12 @@ export default function App() {
       setView(parseHash());
     };
     window.addEventListener("popstate", sync);
-    window.addEventListener("hashchange", sync); // address-bar hash edits
+    window.addEventListener("hashchange", sync);
     return () => {
       window.removeEventListener("popstate", sync);
       window.removeEventListener("hashchange", sync);
     };
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem("ah-lang", lang);
-  }, [lang]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -92,56 +90,42 @@ export default function App() {
   }, []);
 
   return (
-    <LangContext.Provider value={lang}>
-      <div className="mx-auto flex h-screen max-w-[1400px] flex-col">
-        <header className="flex items-center gap-6 border-b border-zinc-800 px-5 py-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[15px] font-semibold tracking-tight text-zinc-100">agenthandoff</span>
-            <span className="text-[11px] text-zinc-500">cockpit</span>
-          </div>
-          <nav className="flex gap-1">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => navigate({ name: tab.id } as View)}
-                className={`rounded-md px-3 py-1.5 text-[13px] transition-colors ${
-                  view.name === tab.id || (view.name === "detail" && tab.id === "dashboard")
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                }`}
-              >
-                {t(tab.labelKey)} <span className="ml-0.5 text-[9px] text-zinc-600">{tab.key}</span>
-              </button>
-            ))}
-          </nav>
-          <div className="ml-auto flex rounded-lg border border-zinc-700 bg-zinc-900 p-0.5">
-            {(["zh", "en"] as Lang[]).map((l) => (
-              <button
-                key={l}
-                onClick={() => setLang(l)}
-                className={`rounded-md px-2.5 py-1 text-[11px] transition-all ${
-                  lang === l
-                    ? "bg-zinc-600 text-zinc-50 shadow-inner ring-1 ring-zinc-500/40"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                {l === "zh" ? "中" : "EN"}
-              </button>
-            ))}
-          </div>
-          <div className="text-[11px] text-zinc-600">127.0.0.1 · {t("localOnly").split("·").pop()?.trim()}</div>
-        </header>
+    <Layout className="mx-auto h-screen max-w-[1400px] bg-zinc-950">
+      <Layout.Header className="flex items-center gap-5 border-b border-zinc-800 px-5!">
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          agenthandoff <span className="text-[11px] font-normal text-zinc-500">cockpit</span>
+        </Typography.Title>
+        <Menu
+          theme="dark"
+          mode="horizontal"
+          selectedKeys={[view.name === "detail" ? "dashboard" : view.name]}
+          onClick={(e) => navigate({ name: e.key } as View)}
+          items={TABS.map((tb) => ({
+            key: tb.id,
+            label: `${t(tb.labelKey)} ${tb.key}`,
+          }))}
+          style={{ flex: 1, minWidth: 300, borderBottom: "none" }}
+        />
+        <Segmented
+          value={lang}
+          onChange={(v) => setLang(v as Lang)}
+          options={[
+            { label: "中", value: "zh" },
+            { label: "EN", value: "en" },
+          ]}
+        />
+        <Typography.Text type="secondary" className="text-[11px]">127.0.0.1</Typography.Text>
+      </Layout.Header>
 
-        <main className="min-h-0 flex-1 overflow-hidden" key={view.name + (view.name === "detail" ? view.sid : "")}>
-          <div className="view-enter h-full">
-            {view.name === "dashboard" && <Dashboard onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })} />}
-            {view.name === "detail" && <SessionDetail cli={view.cli} sid={view.sid} onBack={goBack} />}
-            {view.name === "threads" && <Threads />}
-            {view.name === "inbox" && <Inbox />}
-            {view.name === "doctor" && <Doctor />}
-          </div>
-        </main>
-      </div>
-    </LangContext.Provider>
+      <Layout.Content className="min-h-0 flex-1 overflow-hidden" key={view.name + (view.name === "detail" ? view.sid : "")}>
+        <div className="view-enter h-full">
+          {view.name === "dashboard" && <Dashboard onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })} />}
+          {view.name === "detail" && <SessionDetail cli={view.cli} sid={view.sid} onBack={goBack} />}
+          {view.name === "threads" && <Threads />}
+          {view.name === "inbox" && <Inbox />}
+          {view.name === "doctor" && <Doctor />}
+        </div>
+      </Layout.Content>
+    </Layout>
   );
 }

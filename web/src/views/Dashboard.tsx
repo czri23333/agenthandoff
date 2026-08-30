@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Badge, Button, Empty, Input, Select, Tooltip } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 import { api, relTime, type SessionMeta, type StoreInfo } from "../api";
-import { CliBadge, Spinner, StatusDot } from "../components";
+import { CliBadge, StatusDot } from "../components";
 import { useT } from "../i18n";
 
 export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: string) => void }) {
@@ -13,7 +15,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [, tick] = useState(0); // re-render the freshness counter every second
+  const [, tick] = useState(0);
 
   const load = async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -21,8 +23,6 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       api.sessions({ cli: cliFilter || undefined, q: q || undefined }),
       api.stores(),
     ]);
-    // Only re-render when data actually changed — a steady DOM keeps scroll
-    // position and hover state stable between polls.
     setSessions((prev) => (JSON.stringify(prev) === JSON.stringify(s) ? prev : s));
     setStores((prev) => (JSON.stringify(prev) === JSON.stringify(st) ? prev : st));
     setUpdatedAt(Date.now());
@@ -31,15 +31,13 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
 
   useEffect(() => {
     load();
-    const poll = setInterval(() => load(), 30_000); // stores change slowly; see ADR-006
+    const poll = setInterval(() => load(), 30_000);
     const clock = setInterval(() => tick((n) => n + 1), 1000);
     return () => {
       clearInterval(poll);
       clearInterval(clock);
     };
   }, [cliFilter, q]);
-
-  const freshSecs = updatedAt === null ? null : Math.round((Date.now() - updatedAt) / 1000);
 
   const cliOptions = useMemo(() => [...new Set(stores.map((s) => s.cli))], [stores]);
   const domains = useMemo(() => {
@@ -48,11 +46,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [sessions]);
 
-  const visible = (sessions ?? []).filter(
-    (s) => !domainFilter || s.domain === domainFilter,
-  );
-
-  // Group rows by domain so the cockpit reads as "projects", not a dump.
+  const visible = (sessions ?? []).filter((s) => !domainFilter || s.domain === domainFilter);
   const grouped = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
     for (const s of visible) {
@@ -63,108 +57,114 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [visible]);
 
+  const freshSecs = updatedAt === null ? null : Math.round((Date.now() - updatedAt) / 1000);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 px-5 py-2.5">
-        <input
+        <Input.Search
+          allowClear
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={t("searchTitles")}
-          className="w-56 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-[13px] outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+          className="w-60"
         />
-        <select
-          value={cliFilter}
-          onChange={(e) => setCliFilter(e.target.value)}
-          className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[13px] outline-none focus:border-zinc-600"
-        >
-          <option value="">{t("allClis")}</option>
-          {cliOptions.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          value={domainFilter}
-          onChange={(e) => setDomainFilter(e.target.value)}
-          className="max-w-56 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[13px] outline-none focus:border-zinc-600"
-          title="domains come from cwd + optional ~/.agenthandoff/domains.toml (ADR-009)"
-        >
-          <option value="">{t("allClis") === "全部 CLI" ? "全部项目域" : "all domains"}</option>
-          {domains.map(([d, n]) => (
-            <option key={d} value={d}>{d} ({n})</option>
-          ))}
-        </select>
+        <Select
+          value={cliFilter || undefined}
+          onChange={setCliFilter}
+          placeholder={t("allClis")}
+          allowClear
+          className="w-40"
+          options={cliOptions.map((c) => ({ value: c, label: c }))}
+        />
+        <Tooltip title="项目域来自 cwd，可用 ~/.agenthandoff/domains.toml 自定义规则（ADR-009）">
+          <Select
+            value={domainFilter || undefined}
+            onChange={setDomainFilter}
+            placeholder="全部项目域"
+            allowClear
+            className="min-w-52 max-w-72"
+            options={domains.map(([d, n]) => ({ value: d, label: `${d.split(/[\\/]/).filter(Boolean).pop()} (${n})` }))}
+          />
+        </Tooltip>
         <div className="ml-auto flex items-center gap-3">
           {stores.filter((s) => !s.readable).length > 0 && (
-            <span className="text-[11px] text-yellow-500/80">
-              {stores.filter((s) => !s.readable).length} {t("unreadable")}
-            </span>
+            <Badge count={stores.filter((s) => !s.readable).length} color="gold">
+              <span className="text-[11px] text-zinc-500">{t("doctor")}</span>
+            </Badge>
           )}
-          <span className="text-[11px] text-zinc-600">{visible.length} {t("sessionsN")}</span>
-          <span className="flex items-center gap-1.5 text-[11px] text-zinc-600" title={t("autoRefresh")}>
-            <span className={`h-1.5 w-1.5 rounded-full bg-emerald-400 ${refreshing ? "freshness-pulse" : ""}`} />
-            {refreshing
-              ? t("updating")
-              : freshSecs !== null && freshSecs < 60
-                ? t("updatedAgo").replace("{n}", String(freshSecs))
-                : t("autoRefresh")}
+          <span className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+            <span className={`h-1.5 w-1.5 rounded-full bg-emerald-400 ${refreshing ? "opacity-40" : ""}`} />
+            {refreshing ? t("updating") : freshSecs !== null && freshSecs < 60 ? t("updatedAgo").replace("{n}", String(freshSecs)) : t("autoRefresh")}
           </span>
-          <button onClick={() => load(true)} className="flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800/60 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700">
-            {refreshing && <Spinner />} {t("refresh")}
-          </button>
+          <Button icon={<ReloadOutlined spin={refreshing} />} onClick={() => load(true)} size="small">
+            {t("refresh")}
+          </Button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
-        {sessions === null && <p className="text-[13px] text-zinc-600">{t("loading")}</p>}
-        {sessions?.length === 0 && <p className="text-[13px] text-zinc-600">{t("noSessions")}</p>}
+        {sessions === null && <Skeleton active />}
+        {sessions?.length === 0 && <Empty description={t("noSessions")} />}
         {grouped.map(([domain, rows]) => {
           const isCollapsed = collapsed.has(domain);
+          const short = domain.split(/[\\/]/).filter(Boolean).pop() || domain;
           return (
-          <div key={domain} className="mb-5">
-            <button
-              onClick={() =>
-                setCollapsed((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(domain)) next.delete(domain);
-                  else next.add(domain);
-                  return next;
-                })
-              }
-              className="mb-1.5 flex w-full items-baseline gap-2 text-left"
-              title={isCollapsed ? "点击展开" : "点击折叠"}
-            >
-              <span className="w-3 text-[10px] text-zinc-600">{isCollapsed ? "▸" : "▾"}</span>
-              <h2 className="font-mono text-[12px] font-medium text-zinc-300 hover:text-zinc-100">
-                {domain.split(/[\\/]/).filter(Boolean).slice(-1)[0] || domain}
-              </h2>
-              <span className="font-mono text-[10px] text-zinc-600" title={domain}>{rows.length} {t("sessionsN")}</span>
-            </button>
-            {!isCollapsed && (
-            <ul className="space-y-1.5">
-              {rows.map((s) => (
-                <li key={`${s.cli}:${s.session_id}`} className="row-enter">
-                  <button
-                    onClick={() => onOpen(s.cli, s.session_id)}
-                    className="group flex w-full items-center gap-3 rounded-lg border border-zinc-800/70 bg-zinc-900/40 px-3 py-2 text-left hover:border-zinc-600 hover:bg-zinc-900"
-                  >
-                    <CliBadge cli={s.cli} origin={s.origin} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-200 group-hover:text-white">{s.title}</span>
-                    {s.parent_session_id && (
-                      <span className="hidden shrink-0 font-mono text-[10px] text-zinc-600 xl:inline" title={`child of ${s.parent_session_id}`}>
-                        ⤷ child
-                      </span>
-                    )}
-                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-zinc-500">{relTime(s.updated_at)}</span>
-                    {s.status ? <StatusDot kind={s.status} /> : <span className="w-2 shrink-0" title={t("unknownEnd")} />}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            )}
-          </div>
+            <div key={domain} className="mb-4">
+              <button
+                onClick={() =>
+                  setCollapsed((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(domain)) next.delete(domain);
+                    else next.add(domain);
+                    return next;
+                  })
+                }
+                className="mb-1.5 flex w-full items-baseline gap-2 text-left"
+              >
+                <span className="w-3 text-[10px] text-zinc-600">{isCollapsed ? "▸" : "▾"}</span>
+                <span className="font-mono text-[12px] font-medium text-zinc-300 hover:text-zinc-100">{short}</span>
+                <Tooltip title={domain}>
+                  <span className="font-mono text-[10px] text-zinc-600">{rows.length} {t("sessionsN")}</span>
+                </Tooltip>
+              </button>
+              {!isCollapsed && (
+                <ul className="m-0 list-none space-y-1.5 p-0">
+                  {rows.map((s) => (
+                    <li key={`${s.cli}:${s.session_id}`} className="row-enter">
+                      <button
+                        onClick={() => onOpen(s.cli, s.session_id)}
+                        className="group flex w-full items-center gap-3 rounded-lg border border-zinc-800/70 bg-zinc-900/40 px-3 py-2 text-left transition-colors hover:border-zinc-600 hover:bg-zinc-900"
+                      >
+                        <CliBadge cli={s.cli} origin={s.origin} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-200 group-hover:text-white">{s.title}</span>
+                        {s.parent_session_id && (
+                          <Tooltip title={`子任务 · ${s.parent_session_id}`}>
+                            <span className="hidden shrink-0 font-mono text-[10px] text-zinc-600 xl:inline">⤷ 子会话</span>
+                          </Tooltip>
+                        )}
+                        <span className="w-16 shrink-0 text-right font-mono text-[11px] text-zinc-500">{relTime(s.updated_at)}</span>
+                        {s.status ? <StatusDot kind={s.status} /> : <span className="w-2 shrink-0" title={t("unknownEnd")} />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function Skeleton({ active }: { active: boolean }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 10 }).map((_, i) => (
+        <div key={i} className="h-11 animate-pulse rounded-lg bg-zinc-900" style={{ opacity: 1 - i * 0.07 }} />
+      ))}
+      {active ? null : null}
     </div>
   );
 }
