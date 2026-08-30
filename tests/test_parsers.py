@@ -101,3 +101,20 @@ def test_codex_rollout(codex_store):
     assert "codex ask" in texts and "codex answer" in texts
     # developer role filtered
     assert "<app-context>" not in "".join(texts)
+
+
+def test_account_config_count(tmp_path):
+    from agent_handoff.locations import _count_account_configs
+
+    root = tmp_path / ".qoderworkcn"
+    models = root / ".models"
+    (models / "019f4786-292e-70b9-b2e7-2427bbbee917").mkdir(parents=True)
+    (models / "019f59cd-0c18-77aa-87be-77c90882e185").mkdir(parents=True)
+    (models / "default").mkdir()
+    assert _count_account_configs(root) == 2  # only uuid dirs count
+
+    single = tmp_path / ".qoderwork"
+    (single / ".models" / "019f3554-c9cc-4000-8000-000000000000").mkdir(parents=True)
+    assert _count_account_configs(single) == 1
+
+    assert _count_account_configs(tmp_path / ".nonexistent") is None

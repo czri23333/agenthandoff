@@ -45,17 +45,27 @@ able to read bundles via MCP later, but the storage must not require a
 running server), a queue DB (same daemon problem, plus SQLite-over-network
 is a known footgun).
 
-## ADR-003: Account identity — variant directories are the account scope
+## ADR-003: Account identity — evidence of accounts, not attribution
 
-Live stores show that multi-account usage manifests as per-variant
-directories (e.g. `~/.qoderwork` vs `~/.qoderworkcn`, each with its own
-`.auth/`), while session rows carry no account field. Scraping credential
-stores would couple us to auth implementations and touch secrets.
+Superseded earlier (wrong) claim that "variant directories are the account
+scope". Live verification on a real dual-account setup showed:
 
-**Decision**: each store variant is registered as its own CLI id
-(`qoderwork`, `qoderwork-cn`), and `SessionMeta.origin` records the store
-directory a session came from. Users annotate anything finer-grained with
-`capture --note account:work`. We never read credential files.
+* Product variant directories (`.qoderwork`, `.qoderworkcn`) are separate
+  *harness* installs, not accounts — a single install can switch between
+  multiple accounts.
+* Account count is visible as per-account model-config directories
+  (`.models/<uuid>/`, one per login, contents encrypted/opaque). `doctor`
+  reports their count as multi-account evidence.
+* Which account produced a *historical* session is **not recoverable** from
+  local stores: session rows carry no account field, CLI logs expose no
+  account uid, and auth tokens live in browser OAuth rather than on disk.
+  Attributing sessions by correlating timestamps with account switches
+  would be speculation, violating ADR-004.
+
+**Decision**: report account-config evidence (`doctor`), never scrape
+credentials, and let the user attribute sessions explicitly via
+`capture --note account:work`. `SessionMeta.origin` keeps recording the
+store directory (harness provenance — still useful, just not an account).
 
 ## ADR-004: Clustering & extraction — deterministic heuristics, no embeddings
 

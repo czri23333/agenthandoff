@@ -8,6 +8,7 @@ read via the `\\wsl.localhost` UNC path with the same parsers.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,7 +54,32 @@ def _projects_store(cli: str, dirname: str) -> StoreInfo | None:
     if not p.is_dir():
         return None
     n = sum(1 for _ in p.rglob("*.jsonl"))
-    return StoreInfo(cli, "jsonl-dir", p, n > 0, f"{n} session file(s)")
+    detail = f"{n} session file(s)"
+    accounts = _count_account_configs(home() / dirname)
+    if accounts is not None:
+        detail += f"; {accounts} account config(s)"
+    return StoreInfo(cli, "jsonl-dir", p, n > 0, detail)
+
+
+def _count_account_configs(store_root: Path) -> int | None:
+    """Count per-account model-config directories (.models/<uuid>).
+
+    Some harnesses (e.g. Qoderwork) keep one encrypted model catalog per
+    logged-in account under ``.models/<uuid>/``. The contents are opaque by
+    design — we only report *how many* account configurations exist, as
+    evidence of multi-account usage. Session-level attribution stays with
+    the user (``capture --note account:...``) because the stores themselves
+    do not record which account produced a session.
+    """
+    models = store_root / ".models"
+    if not models.is_dir():
+        return None
+    uuid_dirs = [d for d in models.iterdir() if _UUID_DIRNAME.match(d.name)]
+    return len(uuid_dirs) or None
+
+
+_UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_UUID_DIRNAME = re.compile(_UUID_RE)
 
 
 def claude_code_store() -> StoreInfo | None:
