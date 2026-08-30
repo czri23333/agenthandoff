@@ -12,6 +12,31 @@ export interface SessionMeta {
   origin: string | null;
   parent_session_id: string | null;
   status: string | null; // proven end-state, null = unknown
+  domain: string; // config-driven project grouping (ADR-009)
+}
+
+export interface UsageModel {
+  model: string;
+  calls: number;
+  tokens_in: number;
+  tokens_out: number;
+  reasoning: number | null;
+  cache_write: number | null;
+  cache_read: number | null;
+  avg_ttft_ms: number | null;
+  tok_per_s: number | null;
+  avg_duration_ms: number | null;
+}
+
+export interface UsageData {
+  models: UsageModel[];
+  totals: { calls: number; tokens_in: number; tokens_out: number };
+}
+
+export interface TranscriptMessage {
+  role: string;
+  text: string;
+  at: string | null;
 }
 
 export interface StoreInfo {
@@ -49,6 +74,8 @@ export interface SessionDetail {
   brief: string;
   interruption: Interruption;
   topics: { opener: string; messages: number }[];
+  usage: UsageData | null;
+  messages: TranscriptMessage[];
 }
 
 export interface ThreadGroup {

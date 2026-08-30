@@ -78,6 +78,22 @@ break it and add model dependencies. Heuristic quality is a maintained
 surface: thresholds are CLI flags (`--min-overlap`, `--window-days`), and
 every signal is individually inspectable in the output.
 
+## ADR-009: Scene independence — config over hardcode
+
+The owner's setup (paths, project names like "h3"/"webgal", accounts,
+price files) is *one* scene, never the product. Anything that smells like
+"my machine" must be either:
+
+* **derived from data shapes at runtime** — cwd is already a project
+  boundary; a store's usage table is that CLI's business, read through its
+  parser; or
+* **declared in a user config file** — e.g. `~/.agenthandoff/domains.toml`
+  mapping path patterns to user-chosen domain names; a future price file
+  for billing; per-CLI notes.
+
+A feature that only works with the owner's directories hardcoded into
+source is a bug even when it works.
+
 ## ADR-005: Session end state — evidence over inference
 
 Parsers report only what their store can prove (ZCode's usage tables carry

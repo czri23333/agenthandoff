@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { api, type StoreInfo } from "../api";
+import { api, type StoreInfo } from "../api"
+import { useT } from "../i18n";
 
 export default function Doctor() {
   const [stores, setStores] = useState<StoreInfo[] | null>(null);
+  const t = useT();
 
   useEffect(() => {
     api.stores().then(setStores);
@@ -11,13 +13,13 @@ export default function Doctor() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-zinc-800/70 px-5 py-2.5">
-        <p className="text-[12px] text-zinc-500">which CLI session stores exist on this machine, and are they readable</p>
+        <p className="text-[12px] text-zinc-500">{t("doctorDesc")}</p>
         <button onClick={() => api.stores().then(setStores)} className="ml-auto rounded-md border border-zinc-700 bg-zinc-800/60 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700">
-          re-probe
+          {t("reprobe")}
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {stores === null && <p className="text-[13px] text-zinc-600">probing…</p>}
+        {stores === null && <p className="text-[13px] text-zinc-600">{t("loading")}</p>}
         <ul className="space-y-1.5">
           {stores?.map((s) => (
             <li key={`${s.cli}:${s.path}`} className="flex items-center gap-3 rounded-lg border border-zinc-800/70 bg-zinc-900/40 px-3 py-2">
@@ -29,7 +31,7 @@ export default function Doctor() {
             </li>
           ))}
         </ul>
-        {stores?.length === 0 && <p className="text-[13px] text-zinc-600">no known CLI stores found on this machine.</p>}
+        {stores?.length === 0 && <p className="text-[13px] text-zinc-600">{t("noStores")}</p>}
       </div>
     </div>
   );

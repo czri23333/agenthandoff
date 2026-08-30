@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/components.tsx","./src/main.tsx","./src/views/dashboard.tsx","./src/views/doctor.tsx","./src/views/inbox.tsx","./src/views/sessiondetail.tsx","./src/views/threads.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/components.tsx","./src/i18n.ts","./src/main.tsx","./src/views/dashboard.tsx","./src/views/doctor.tsx","./src/views/inbox.tsx","./src/views/sessiondetail.tsx","./src/views/threads.tsx"],"version":"5.9.3"}

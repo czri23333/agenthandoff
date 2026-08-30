@@ -72,6 +72,40 @@ _sessions_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 20.0
 
 
+def _domain_for(cwd: str) -> str:
+    """Classify a session's project domain — config-driven, never hardcoded
+    (ADR-009). Default domain is the cwd itself; ~/.agenthandoff/domains.toml
+    may map path patterns (glob prefixes or regex) to user-chosen names.
+
+        [domains]
+        "D:/work/ComfyUI" = "h3"
+        'regex:D:\\\\引擎.*native' = "rustwebgal"
+
+    First matching rule wins; unmatched sessions keep their cwd.
+    """
+    cfg = Path.home() / ".agenthandoff" / "domains.toml"
+    if cfg.is_file() and cwd:
+        try:
+            import tomllib
+
+            rules = tomllib.loads(cfg.read_text(encoding="utf-8")).get("domains", {})
+            norm = cwd.replace("\\\\", "/").replace("\\", "/")
+            for pattern, name in rules.items():
+                pat = str(pattern)
+                if pat.startswith("regex:"):
+                    import re
+
+                    if re.search(pat[6:], norm):
+                        return str(name)
+                elif norm.lower().startswith(
+                    pat.replace("\\\\", "/").replace("\\", "/").lower().rstrip("/")
+                ):
+                    return str(name)
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            pass
+    return cwd
+
+
 @app.get("/api/sessions")
 def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = None):
     cache_key = f"{cli}|{cwd}|{q}"
@@ -104,9 +138,21 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),
+                    # config-driven project domain (ADR-009): cwd by default
+                    "domain": _domain_for(m.cwd),
                 }
             )
     out.sort(key=lambda s: s["updated_at"] or "", reverse=True)
+    # Windows paths vary in case; merge domain variants, keeping the most
+    # frequent original spelling for display.
+    merge: dict[str, dict[str, int]] = {}
+    for s in out:
+        key = s["domain"].casefold()
+        merge.setdefault(key, {})
+        merge[key][s["domain"]] = merge[key].get(s["domain"], 0) + 1
+    canonical = {k: max(v, key=v.get) for k, v in merge.items()}
+    for s in out:
+        s["domain"] = canonical[s["domain"].casefold()]
     _sessions_cache[cache_key] = (now, out)
     return out
 
@@ -125,6 +171,13 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
             "pending_user_text": bundle.interruption.pending_user_text,
         },
         "topics": [{"opener": o, "messages": n} for o, n in bundle.topics],
+        "usage": _parser_or_404(cli).usage(sid),
+        # Newest-first; long histories are capped — the store is the archive,
+        # the cockpit is a window onto it.
+        "messages": [
+            {"role": m.role, "text": m.text[:2000], "at": m.at}
+            for m in sorted(raw.messages, key=lambda m: m.at or "")[-200:]
+        ][::-1],
     }
 
 

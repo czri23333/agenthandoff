@@ -49,6 +49,19 @@ class Parser(ABC):
         """
         return None
 
+    def usage(self, session_id: str) -> dict | None:
+        """Token/latency accounting for a session, or None if the store
+        records none.
+
+        Shape (per-model rows plus totals; missing fields stay None so
+        honest absence beats invented zeros):
+            {"models": [{"model", "calls", "tokens_in", "tokens_out",
+                          "reasoning", "cache_write", "cache_read",
+                          "avg_ttft_ms", "tok_per_s"}],
+             "totals": {"calls", "tokens_in", "tokens_out"}}
+        """
+        return None
+
     # -- shared helpers -----------------------------------------------------
 
     @staticmethod

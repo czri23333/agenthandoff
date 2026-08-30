@@ -16,3 +16,41 @@
 }
 
 html, body { height: 100%; }
+
+/* ── Tactile interaction spec ──────────────────────────────────────────────
+   Every pressable element answers within ~100ms: press = shrink + dim,
+   release = spring back. Hover lifts brightness slightly. This is the
+   whole-app feel, not per-button styling. */
+button, [role="button"], select, input[type="range"] {
+  transition: transform 120ms ease, filter 120ms ease, background-color 150ms ease,
+    color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+button:active:not(:disabled), [role="button"]:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.82);
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* View switch: content slides up softly instead of hard-swapping. */
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.view-enter { animation: view-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+/* Rows/cards appear staggered on first paint of a list. */
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.row-enter { animation: row-in 160ms ease-out both; }
+
+/* Live pulse for the freshness dot while a background poll is running. */
+@keyframes breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+.freshness-pulse { animation: breathe 2s ease-in-out infinite; }
+
+html { scroll-behavior: smooth; }
+

@@ -56,6 +56,14 @@ export function InterruptionBanner({ it }: { it: Interruption }) {
   );
 }
 
+export function Spinner({ className = "" }: { className?: string }) {
+  return (
+    <span
+      className={`inline-block h-3 w-3 animate-spin rounded-full border-[1.5px] border-zinc-500 border-t-transparent ${className}`}
+    />
+  );
+}
+
 export function CopyButton({ text, label = "copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
@@ -69,9 +77,13 @@ export function CopyButton({ text, label = "copy" }: { text: string; label?: str
           /* clipboard denied */
         }
       }}
-      className="rounded-md border border-zinc-700 bg-zinc-800/60 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+      className={`rounded-md border px-2 py-1 text-[11px] ${
+        done
+          ? "border-emerald-600/50 bg-emerald-500/15 text-emerald-300"
+          : "border-zinc-700 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+      }`}
     >
-      {done ? "copied ✓" : label}
+      {done ? "✓ 已复制" : label}
     </button>
   );
 }

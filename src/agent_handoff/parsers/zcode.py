@@ -165,6 +165,61 @@ class ZcodeParser(Parser):
         )
         return self.build_raw(meta, messages, todos, files, tools, interruption)
 
+    def usage(self, session_id: str) -> dict | None:
+        """Aggregate the store's model_usage table: tokens, cache, latency.
+
+        Row shape is ZCode's own; per-model breakdown falls back to a single
+        "unknown" row only when model_id is null in the data.
+        """
+        if not self.available():
+            return None
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT COALESCE(model_id, 'unknown'), COUNT(*),"
+                    " SUM(input_tokens), SUM(output_tokens), SUM(reasoning_tokens),"
+                    " SUM(cache_creation_input_tokens), SUM(cache_read_input_tokens),"
+                    " AVG(duration_ms), AVG(time_to_first_token_ms),"
+                    " SUM(output_tokens), SUM(duration_ms - time_to_first_token_ms)"
+                    " FROM model_usage"
+                    " WHERE session_id=? GROUP BY 1 ORDER BY 2 DESC",
+                    (session_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return None
+        if not rows:
+            return None
+
+        models = []
+        tot_in = tot_out = tot_calls = 0
+        for (model, calls, tin, tout, reasoning, cw, cr, avg_dur, avg_ttft,
+             sum_out, sum_decode_ms) in rows:
+            models.append(
+                {
+                    "model": model,
+                    "calls": calls or 0,
+                    "tokens_in": tin or 0,
+                    "tokens_out": tout or 0,
+                    "reasoning": reasoning or 0,
+                    "cache_write": cw or 0,
+                    "cache_read": cr or 0,
+                    "avg_ttft_ms": round(avg_ttft) if avg_ttft is not None else None,
+                    "tok_per_s": (
+                        round(sum_out * 1000.0 / sum_decode_ms, 1)
+                        if sum_out and sum_decode_ms
+                        else None
+                    ),
+                    "avg_duration_ms": round(avg_dur) if avg_dur is not None else None,
+                }
+            )
+            tot_in += tin or 0
+            tot_out += tout or 0
+            tot_calls += calls or 0
+        return {
+            "models": models,
+            "totals": {"calls": tot_calls, "tokens_in": tot_in, "tokens_out": tot_out},
+        }
+
     def peek_status(self, session_id: str) -> str | None:
         """One SQL against turn_usage — cheap enough for list views."""
         if not self.available():
