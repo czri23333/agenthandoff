@@ -99,3 +99,73 @@ def test_zh_scaffolding():
                       next_steps=["第一步"])
     brief = render_brief(b, lang="zh")
     assert "不要重做" in brief and "<下一步>" in brief
+
+
+# -- interruption awareness ---------------------------------------------------
+
+from agent_handoff.model import Interruption  # noqa: E402
+
+
+def test_user_pending_detected_and_promoted():
+    raw = make_raw(messages=[
+        Message(role="user", text="first ask", at="2026-08-30T10:00:00+00:00"),
+        Message(role="assistant", text="done that part.", at="2026-08-30T10:05:00+00:00"),
+        Message(role="user", text="然后跑回归测试", at="2026-08-30T10:06:00+00:00"),
+    ])
+    b = summarize(raw)
+    assert b.interruption.kind == "user_pending"
+    assert b.interruption.pending_user_text == "然后跑回归测试"
+    assert b.next_steps[0].startswith("[pending from interrupted session]")
+    assert "然后跑回归测试" in b.next_steps[0]
+
+
+def test_clean_when_assistant_replied_last():
+    raw = make_raw(messages=[
+        Message(role="user", text="ask", at="2026-08-30T10:00:00+00:00"),
+        Message(role="assistant", text="all done, tests green.", at="2026-08-30T10:05:00+00:00"),
+    ])
+    b = summarize(raw)
+    assert b.interruption.kind == "clean"
+
+
+def test_parser_cancelled_survives_and_truncated_note_dropped():
+    raw = make_raw(messages=[
+        Message(role="user", text="ask", at="2026-08-30T10:00:00+00:00"),
+        Message(
+            role="assistant",
+            text="generating a very long report that got cut",
+            at="2026-08-30T10:05:00+00:00",
+        ),
+    ])
+    raw.interruption = Interruption(
+        kind="length_truncated", detail="finish_reason=length"
+    )
+    b = summarize(raw)
+    assert b.interruption.kind == "length_truncated"
+    # the truncated fragment must not appear as a conclusion
+    assert not any("got cut" in n for n in b.context_notes)
+
+
+def test_interruption_roundtrips_through_markdown():
+    b = HandoffBundle(
+        meta=SessionMeta(cli="zcode", session_id="s", title="t", cwd="D:/demo"),
+        interruption=Interruption(kind="user_pending", pending_user_text="跑完测试了吗"),
+        next_steps=["[pending from interrupted session] 跑完测试了吗"],
+    )
+    b2 = parse_bundle_markdown(render_markdown(b))
+    assert b2.interruption.kind == "user_pending"
+    assert b2.interruption.pending_user_text == "跑完测试了吗"
+
+
+def test_brief_warns_and_keeps_warning_under_budget():
+    b = HandoffBundle(
+        meta=SessionMeta(cli="zcode", session_id="s", title="t", cwd="D:/demo"),
+        directives=["R" * 9000],
+        interruption=Interruption(
+            kind="user_pending", detail="d", pending_user_text="finish the run"
+        ),
+    )
+    brief = render_brief(b, max_chars=3000)
+    assert "ended abruptly" in brief
+    assert "finish the run" in brief  # pending instruction survives trimming
+    assert "R" * 9000 not in brief

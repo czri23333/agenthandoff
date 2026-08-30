@@ -38,6 +38,27 @@ source_path: "..."
 
 One paragraph: what this session was trying to achieve.
 
+## Interruption
+
+- status: clean
+- pending user message (NOT executed): ...
+
+`status` is one of `clean`, `user_pending`, `cancelled`, `context_exceeded`,
+`length_truncated`, `error`, `unknown`. This section records how the session
+actually ended: bundles exist precisely for sessions that died mid-flight
+(quota exhaustion, context-window death, Ctrl+C), and the successor must not
+mistake a half-finished state for a settled one.
+
+- `user_pending` — the newest message is the user's, i.e. an instruction was
+  issued and never answered; `pending user message` carries it verbatim and
+  consumers should surface it as the first next step.
+- `cancelled` / `context_exceeded` / `error` — evidence from the CLI's own
+  usage records when available (e.g. ZCode turn stats).
+- `length_truncated` — the last assistant reply was cut off by a token limit;
+  consumers must not treat its tail as a conclusion.
+- `unknown` — abrupt end inferred from a trailing fragment that does not read
+  like a finished statement.
+
 ## State
 
 ### Done

@@ -34,6 +34,11 @@ cwd: {cwd}
 source: {cli} session {session_id} ("{title}"), last active {updated_at}
 </project>
 
+<interruption>  # only rendered when the session ended mid-flight
+WARNING: the previous session ended abruptly — {interruption}.
+Treat state below as possibly incomplete.
+</interruption>
+
 <objective>
 {objective}
 </objective>
@@ -70,7 +75,7 @@ source: {cli} session {session_id} ("{title}"), last active {updated_at}
 
 | Priority | Section | Rationale |
 |---|---|---|
-| 1 (never dropped) | header, `<project>`, `<steps>` | Resuming is meaningless without these |
+| 1 (never dropped) | header, `<project>`, `<interruption>`, `<steps>` | Resuming is meaningless — and dangerous when the session was interrupted — without these |
 | 2 | `<rules>`, `<facts>` | Prevents re-violating user corrections / redoing work |
 | 3 | `<objective>`, `<open>`, `<artifacts>` | Orientation; recoverable from repo state |
 | 4 (dropped first) | `<digest>` | Re-derivable; kept only while budget allows |

@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import re
 
-from agent_handoff.model import HandoffBundle, SessionMeta
+from agent_handoff.model import HandoffBundle, Interruption, SessionMeta
 
 BUNDLE_VERSION = "0.1"
 
@@ -34,6 +34,10 @@ source_path: "{source_path}"
 ## Objective
 
 {objective}
+
+## Interruption
+
+{interruption}
 
 ## State
 
@@ -90,6 +94,12 @@ def render_markdown(b: HandoffBundle) -> str:
         "\n".join(f"- {t}: {n} call(s)" for t, n in b.tool_summary)
         or "- (none recorded)"
     )
+    it = b.interruption
+    it_md = f"- status: {it.kind}"
+    if it.kind == "user_pending" and it.pending_user_text:
+        it_md += f"\n- pending user message (NOT executed): {it.pending_user_text}"
+    elif it.detail:
+        it_md += f"\n- detail: {it.detail}"
     return _MARKDOWN_TEMPLATE.format(
         version=BUNDLE_VERSION,
         cli=b.meta.cli,
@@ -103,6 +113,7 @@ def render_markdown(b: HandoffBundle) -> str:
         tokens_out=b.meta.tokens_out if b.meta.tokens_out is not None else "null",
         source_path=b.meta.source_path,
         objective=b.objective or "(not captured)",
+        interruption=it_md,
         done=_ol(b.done),
         in_progress=_ol(b.in_progress),
         blocked=_ol(b.blocked),
@@ -179,6 +190,21 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
     """Read back a bundle rendered by render_markdown (lossy on tool_summary)."""
     yaml_match = re.search(r"```yaml\n(.*?)```", text, re.S)
     meta_raw = _parse_yaml_block(yaml_match.group(1)) if yaml_match else {}
+
+    # Interruption section: "- status: <kind>" plus optional detail lines.
+    it_kind = "clean"
+    it_detail = ""
+    it_pending = ""
+    for line in _section_items(text, "Interruption"):
+        if line.startswith("status: "):
+            it_kind = line[len("status: "):]
+        elif line.startswith("pending user message (NOT executed): "):
+            it_pending = line[len("pending user message (NOT executed): "):]
+        elif line.startswith("detail: "):
+            it_detail = line[len("detail: "):]
+    interruption = Interruption(
+        kind=it_kind, detail=it_detail, pending_user_text=it_pending
+    )
     meta = SessionMeta(
         cli=str(meta_raw.get("cli") or "unknown"),
         session_id=str(meta_raw.get("session_id") or "unknown"),
@@ -207,6 +233,7 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
     return HandoffBundle(
         meta=meta,
         objective=_section(text, "Objective"),
+        interruption=interruption,
         done=_subsection(text, "Done"),
         in_progress=_subsection(text, "In progress"),
         blocked=_subsection(text, "Blocked / open"),
@@ -239,9 +266,16 @@ def load_bundle(path: str) -> HandoffBundle:
             source_path=m.get("source_path", ""),
         )
         state = d.get("state", {})
+        it_raw = d.get("interruption", {})
+        interruption = Interruption(
+            kind=it_raw.get("kind", "clean"),
+            detail=it_raw.get("detail", ""),
+            pending_user_text=it_raw.get("pending_user_text", ""),
+        )
         return HandoffBundle(
             meta=meta,
             objective=d.get("objective", ""),
+            interruption=interruption,
             done=state.get("done", []),
             in_progress=state.get("in_progress", []),
             blocked=state.get("blocked", []),

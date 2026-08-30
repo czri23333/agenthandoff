@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
 
-from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem
+from agent_handoff.model import Interruption, Message, RawSession, SessionMeta, TodoItem
 
 # Keys whose tool-input values look like file paths.
 _PATH_KEYS = ("file_path", "notebook_path", "path", "filepath", "abs_path")
@@ -73,6 +73,7 @@ class Parser(ABC):
         todos: list[TodoItem] | None = None,
         files: Counter[str] | None = None,
         tools: Counter[str] | None = None,
+        interruption: Interruption | None = None,
     ) -> RawSession:
         return RawSession(
             meta=meta,
@@ -80,6 +81,7 @@ class Parser(ABC):
             todos=todos or [],
             files_touched=files or Counter(),
             tool_counts=tools or Counter(),
+            interruption=interruption or Interruption(),
         )
 
 

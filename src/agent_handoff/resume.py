@@ -15,6 +15,7 @@ _SCAFFOLD_EN = {
         "Do NOT redo work listed under <facts>. Start from <steps> item 1."
     ),
     "project": "project",
+    "interruption": "interruption",
     "objective": "objective",
     "facts": "facts",
     "open": "open",
@@ -30,6 +31,7 @@ _SCAFFOLD_ZH = {
         "不要重做 <facts> 中已完成的工作。从 <steps> 第 1 条开始。"
     ),
     "project": "项目",
+    "interruption": "中断警告",
     "objective": "目标",
     "facts": "已完成事实",
     "open": "进行中/待办",
@@ -42,6 +44,7 @@ _SCAFFOLD_ZH = {
 # (section, drop-priority) — 1 = never dropped, 4 = dropped first.
 _ORDER = [
     ("project", 1),
+    ("interruption", 1),
     ("steps", 1),
     ("rules", 2),
     ("facts", 2),
@@ -78,6 +81,21 @@ def render_brief(b: HandoffBundle, lang: str = "en", max_chars: int = 12000) -> 
         "steps": _numbered(b.next_steps),
         "digest": _bullet(b.context_notes),
     }
+    # Interruption warning: only rendered when the session actually ended
+    # mid-flight; priority 1 so it survives any budget.
+    if b.interruption.detected:
+        warn = (
+            "WARNING: the previous session ended abruptly — "
+            f"{b.interruption.describe()}. "
+            "Treat state below as possibly incomplete."
+        )
+        if b.interruption.kind == "user_pending" and b.interruption.pending_user_text:
+            warn += (
+                "\nThe user's last instruction was never executed: "
+                f'"{b.interruption.pending_user_text}" — it is already '
+                "step 1 in <steps>."
+            )
+        sections["interruption"] = warn
 
     def assemble(active: dict[str, str]) -> str:
         parts = ["# Continuation brief (agenthandoff v0.1)", "", t["intro"], ""]

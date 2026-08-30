@@ -11,7 +11,14 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
-from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
+from agent_handoff.model import (
+    Interruption,
+    Message,
+    RawSession,
+    SessionMeta,
+    TodoItem,
+    ts_to_iso,
+)
 from agent_handoff.parsers.base import Parser
 
 
@@ -131,6 +138,8 @@ class ZcodeParser(Parser):
                 ).fetchall()
             ]
 
+        interruption = self._interruption(con, session_id)
+
         meta = SessionMeta(
             cli=self.cli,
             session_id=sess["id"],
@@ -143,4 +152,39 @@ class ZcodeParser(Parser):
             tokens_out=tokens_out or None,
             source_path=str(self.db_path),
         )
-        return self.build_raw(meta, messages, todos, files, tools)
+        return self.build_raw(meta, messages, todos, files, tools, interruption)
+
+    @staticmethod
+    def _interruption(con: sqlite3.Connection, session_id: str) -> Interruption:
+        """Read how the session actually ended from usage stats.
+
+        The store records cancellations, context-window deaths and model
+        errors explicitly; the newest turn decides. A token-limit cut-off
+        (finish_reason='length') on the newest model call also counts.
+        """
+        try:
+            turn = con.execute(
+                "SELECT status, context_exceeded, cancelled_by_user, error_type "
+                "FROM turn_usage WHERE session_id=? ORDER BY started_at DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if turn is not None:
+                status, exceeded, cancelled, error_type = turn
+                if cancelled:
+                    return Interruption(kind="cancelled", detail=f"last turn status={status}")
+                if exceeded:
+                    return Interruption(kind="context_exceeded")
+                if error_type:
+                    return Interruption(kind="error", detail=f"error_type={error_type}")
+            finish = con.execute(
+                "SELECT finish_reason FROM model_usage WHERE session_id=? "
+                "ORDER BY started_at DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if finish is not None and finish[0] == "length":
+                return Interruption(kind="length_truncated")
+        except sqlite3.Error:
+            # Usage tables may not exist in older stores — absence of evidence
+            # is not evidence of a clean end; summarize adds its own inference.
+            pass
+        return Interruption()

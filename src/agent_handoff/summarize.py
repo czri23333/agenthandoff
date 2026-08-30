@@ -3,13 +3,16 @@
 No LLM, no API keys, no network: every field is reproducible from the raw
 session. The heuristics favor signal-dense content — user corrections, todo
 state, and the final assistant conclusion — over a naive transcript dump.
+Interruption awareness: sessions that ended mid-flight (quota exhausted,
+cancelled, truncated) are detected and surfaced instead of silently
+presenting a half-finished state as if it were a conclusion.
 """
 
 from __future__ import annotations
 
 import re
 
-from agent_handoff.model import HandoffBundle, RawSession
+from agent_handoff.model import HandoffBundle, Interruption, RawSession
 
 # Sentences in user turns that tend to carry durable direction/corrections.
 _DIRECTIVE_CUES = re.compile(
@@ -20,6 +23,14 @@ _DIRECTIVE_CUES = re.compile(
 
 _MAX_ITEM = 220  # per-list-item char budget
 _MAX_NOTE = 600
+
+# A note that doesn't end like a finished statement is treated as a cut-off
+# fragment and dropped rather than presented as a conclusion.
+_ENDING_PUNCT = tuple("。．.!?！？…」』】）)]}\"'”’")
+
+
+def _looks_truncated(text: str) -> bool:
+    return bool(text) and not text.rstrip().endswith(_ENDING_PUNCT)
 
 
 def _clip(text: str, limit: int = _MAX_ITEM) -> str:
@@ -91,6 +102,13 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
     for m in reversed(raw.assistant_messages):
         note = _clip(m.text, _MAX_NOTE)
         if len(note) > 20:
+            if _looks_truncated(note):
+                if bundle.interruption.kind == "clean":
+                    bundle.interruption = Interruption(
+                        kind="unknown",
+                        detail="last assistant message does not end like a finished statement",
+                    )
+                continue  # a cut-off fragment must not pose as a conclusion
             bundle.context_notes.append(note)
         if len(bundle.context_notes) >= max_notes:
             break
@@ -98,4 +116,33 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
 
     if not bundle.next_steps and not bundle.in_progress:
         bundle.next_steps = ["Continue from the last assistant summary in context_notes."]
+
+    _finalize_interruption(raw, bundle)
     return bundle
+
+
+def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:
+    """Cross-CLI inference on top of parser-provided evidence.
+
+    The strongest universal signal: the newest non-empty message is the
+    user's, i.e. an instruction was issued and never answered. That pending
+    instruction becomes next step #1 — quitting mid-turn is the normal case
+    for quota-dead sessions, and the successor must know it is the thing to
+    resume.
+    """
+    if raw.interruption.detected:
+        bundle.interruption = raw.interruption
+        if bundle.interruption.kind == "length_truncated" and bundle.context_notes:
+            bundle.context_notes.pop(0)  # the truncated reply masquerading as oldest note
+    elif raw.user_messages and raw.assistant_messages:
+        last_user_at = raw.user_messages[-1].at or ""
+        last_asst_at = raw.assistant_messages[-1].at or ""
+        if last_user_at >= last_asst_at:
+            pending = _clip(raw.user_messages[-1].text, 300)
+            if not _looks_truncated(pending) or len(pending) > 4:
+                bundle.interruption = Interruption(
+                    kind="user_pending",
+                    detail="newest message is an un-answered user instruction",
+                    pending_user_text=pending,
+                )
+                bundle.next_steps.insert(0, f"[pending from interrupted session] {pending}")

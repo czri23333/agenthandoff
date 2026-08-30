@@ -70,6 +70,40 @@ class TodoItem:
 
 
 @dataclass
+class Interruption:
+    """Evidence about how the session actually ended.
+
+    Sessions rarely end cleanly — quota exhaustion, context-window death,
+    user Ctrl+C, model errors and max-token truncation all leave the next
+    session with a misleading picture unless surfaced explicitly. Parsers
+    fill what their store can prove; summarize adds cross-CLI inference
+    (e.g. a dangling user message with no reply).
+    """
+
+    kind: str = "clean"
+    # clean | user_pending | cancelled | context_exceeded | length_truncated
+    # | error | unknown
+    detail: str = ""
+    pending_user_text: str = ""  # set when kind == user_pending
+
+    @property
+    def detected(self) -> bool:
+        return self.kind != "clean"
+
+    def describe(self) -> str:
+        labels = {
+            "user_pending": "session ended with an un-answered user message",
+            "cancelled": "cancelled by user",
+            "context_exceeded": "context window exceeded",
+            "length_truncated": "last assistant reply cut off by token limit",
+            "error": "model error",
+            "unknown": "abrupt end (no clean-finish evidence)",
+        }
+        base = labels.get(self.kind, self.kind)
+        return f"{base}: {self.detail}" if self.detail else base
+
+
+@dataclass
 class RawSession:
     """Provider-neutral extraction of one session."""
 
@@ -78,6 +112,7 @@ class RawSession:
     todos: list[TodoItem] = field(default_factory=list)
     files_touched: Counter[str] = field(default_factory=Counter)
     tool_counts: Counter[str] = field(default_factory=Counter)
+    interruption: Interruption = field(default_factory=Interruption)
 
     @property
     def user_messages(self) -> list[Message]:
@@ -106,10 +141,16 @@ class HandoffBundle:
     next_steps: list[str] = field(default_factory=list)
     context_notes: list[str] = field(default_factory=list)  # last assistant conclusions
     tool_summary: list[tuple[str, int]] = field(default_factory=list)
+    interruption: Interruption = field(default_factory=Interruption)
 
     def to_dict(self) -> dict:
         return {
             "bundle_version": "0.1",
+            "interruption": {
+                "kind": self.interruption.kind,
+                "detail": self.interruption.detail,
+                "pending_user_text": self.interruption.pending_user_text,
+            },
             "meta": {
                 "cli": self.meta.cli,
                 "session_id": self.meta.session_id,
