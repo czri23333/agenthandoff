@@ -122,6 +122,22 @@ class Interruption:
 
 
 @dataclass
+class CompactionEvent:
+    """A context-window compaction inside a session.
+
+    Long sessions are compacted many times; after each compaction the early
+    messages exist only as a model-written summary. A transcript that hides
+    this is lying about its own completeness — the marker must be visible.
+    """
+
+    at: str | None = None
+    reason: str = ""  # e.g. context_limit
+    pre_tokens: int | None = None
+    post_tokens: int | None = None
+    auto: bool = True
+
+
+@dataclass
 class RawSession:
     """Provider-neutral extraction of one session."""
 
@@ -131,6 +147,7 @@ class RawSession:
     files_touched: Counter[str] = field(default_factory=Counter)
     tool_counts: Counter[str] = field(default_factory=Counter)
     interruption: Interruption = field(default_factory=Interruption)
+    compactions: list[CompactionEvent] = field(default_factory=list)
 
     @property
     def user_messages(self) -> list[Message]:

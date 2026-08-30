@@ -12,6 +12,7 @@ from collections import Counter
 from pathlib import Path
 
 from agent_handoff.model import (
+    CompactionEvent,
     Interruption,
     Message,
     RawSession,
@@ -74,6 +75,7 @@ class ZcodeParser(Parser):
             messages: list[Message] = []
             files: Counter[str] = Counter()
             tools: Counter[str] = Counter()
+            compactions: list[CompactionEvent] = []
             model: str | None = None
             tokens_in = tokens_out = 0
 
@@ -105,6 +107,22 @@ class ZcodeParser(Parser):
                         t = self.clean_text(pdata.get("text") or "")
                         if t and not self.is_noise(t):
                             texts.append(t)
+                    elif ptype == "compaction":
+                        if pdata.get("timelineStatus") not in (None, "completed"):
+                            continue  # failed/aborted attempts are noise
+                        t_raw = pdata.get("time")
+                        if isinstance(t_raw, dict):
+                            t_raw = t_raw.get("start") or t_raw.get("created")
+                        compactions.append(
+                            CompactionEvent(
+                                at=ts_to_iso(t_raw),
+                                reason=pdata.get("compactReason") or "",
+                                pre_tokens=pdata.get("preCompactTokenCount"),
+                                post_tokens=pdata.get("truePostCompactTokenCount")
+                                or pdata.get("postCompactTokenCount"),
+                                auto=bool(pdata.get("auto", True)),
+                            )
+                        )
                     elif ptype == "tool":
                         tool_name = pdata.get("tool") or "tool"
                         tools[tool_name] += 1
@@ -163,7 +181,9 @@ class ZcodeParser(Parser):
             provider=provider_row[0] if provider_row else None,
             parent_session_id=sess["parent_id"],
         )
-        return self.build_raw(meta, messages, todos, files, tools, interruption)
+        raw = self.build_raw(meta, messages, todos, files, tools, interruption)
+        raw.compactions = compactions
+        return raw
 
     def usage(self, session_id: str) -> dict | None:
         """Aggregate the store's model_usage table: tokens, cache, latency.

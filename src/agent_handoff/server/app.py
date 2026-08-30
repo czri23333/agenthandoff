@@ -161,6 +161,26 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
 def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000):
     raw = _raw_or_404(cli, sid)
     bundle = summarize(raw)
+
+    # Transcript with honest compaction markers: long sessions get compacted
+    # many times and everything before a marker exists only as a summary.
+    # Hiding that would present a truncated history as complete.
+    stream: list[dict] = [
+        {"role": m.role, "text": m.text[:2000], "at": m.at} for m in raw.messages
+    ]
+    markers: list[dict] = [
+        {
+            "role": "compaction",
+            "text": f"#{n} · {c.reason or 'unknown'} · "
+            f"{c.pre_tokens if c.pre_tokens is not None else '?'} → "
+            f"{c.post_tokens if c.post_tokens is not None else '?'} tokens",
+            "at": c.at,
+        }
+        for n, c in enumerate(raw.compactions, 1)
+    ]
+    if markers:
+        stream = sorted(stream + markers, key=lambda x: x["at"] or "")[-400:]
+
     return {
         "bundle": bundle.to_dict(),
         "markdown": render_markdown(bundle),
@@ -172,12 +192,8 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         },
         "topics": [{"opener": o, "messages": n} for o, n in bundle.topics],
         "usage": _parser_or_404(cli).usage(sid),
-        # Newest-first; long histories are capped — the store is the archive,
-        # the cockpit is a window onto it.
-        "messages": [
-            {"role": m.role, "text": m.text[:2000], "at": m.at}
-            for m in sorted(raw.messages, key=lambda m: m.at or "")[-200:]
-        ][::-1],
+        "compactions": len(raw.compactions),
+        "messages": stream[::-1],
     }
 
 

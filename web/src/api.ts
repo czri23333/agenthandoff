@@ -75,6 +75,7 @@ export interface SessionDetail {
   interruption: Interruption;
   topics: { opener: string; messages: number }[];
   usage: UsageData | null;
+  compactions: number;
   messages: TranscriptMessage[];
 }
 

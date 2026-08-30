@@ -137,17 +137,42 @@ export default function SessionDetail({ cli, sid, onBack }: { cli: string; sid: 
             </SectionCard>
           </div>
 
-          <SectionCard title={t("transcript")}>
+          <SectionCard
+            title={`${t("transcript")}${data.compactions > 0 ? ` · ${data.compactions} × 压缩` : ""}`}
+            right={
+              data.compactions > 0 ? (
+                <span className="text-[10px] text-amber-400/90">⚠ 早期消息仅存摘要</span>
+              ) : undefined
+            }
+          >
             {data.messages.length === 0 ? (
               <p className="text-[12px] italic text-zinc-600">{t("noMessages")}</p>
             ) : (
               <div className="max-h-96 space-y-2 overflow-y-auto">
-                {data.messages.map((m, i) => (
-                  <div key={i} className={`rounded-lg px-2.5 py-1.5 text-[12px] ${m.role === "user" ? "bg-sky-500/10 text-sky-100" : "bg-zinc-800/50 text-zinc-300"}`}>
-                    <span className="mr-1.5 select-none font-mono text-[9px] uppercase text-zinc-500">{m.role === "user" ? "👤" : "🤖"}</span>
-                    <span className="whitespace-pre-wrap break-words">{m.text.slice(0, 500)}{m.text.length > 500 ? "…" : ""}</span>
-                  </div>
-                ))}
+                {data.messages.map((m, i) =>
+                  m.role === "compaction" ? (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-center font-mono text-[10.5px] text-amber-300"
+                      title="context compaction boundary"
+                    >
+                      ⚠ 上下文压缩 {m.text} —— 此边界之前的消息仅存模型摘要
+                    </div>
+                  ) : (
+                    <div
+                      key={i}
+                      className={`rounded-lg px-2.5 py-1.5 text-[12px] ${m.role === "user" ? "bg-sky-500/10 text-sky-100" : "bg-zinc-800/50 text-zinc-300"}`}
+                    >
+                      <span className="mr-1.5 select-none font-mono text-[9px] uppercase text-zinc-500">
+                        {m.role === "user" ? "👤" : "🤖"}
+                      </span>
+                      <span className="whitespace-pre-wrap break-words">
+                        {m.text.slice(0, 500)}
+                        {m.text.length > 500 ? "…" : ""}
+                      </span>
+                    </div>
+                  ),
+                )}
               </div>
             )}
           </SectionCard>
