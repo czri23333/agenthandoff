@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LangContext, useT, type Lang, type TKey } from "./i18n";
 import Dashboard from "./views/Dashboard";
 import SessionDetail from "./views/SessionDetail";
@@ -44,16 +44,37 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(
     () => (localStorage.getItem("ah-lang") as Lang) || "zh",
   );
+  // How deep we are in in-app history. "← back" pops via history.back() so
+  // the browser's own back button stays consistent; a session opened cold
+  // from a link has nothing to pop, so back pushes the list instead.
+  const navDepth = useRef(0);
 
   const navigate = (v: View) => {
+    navDepth.current += 1;
     setView(v);
     history.pushState(null, "", toHash(v));
   };
 
+  const goBack = () => {
+    if (navDepth.current > 0) {
+      navDepth.current -= 1;
+      history.back(); // popstate syncs the view
+    } else {
+      navigate({ name: "dashboard" });
+    }
+  };
+
   useEffect(() => {
-    const onPop = () => setView(parseHash());
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    const sync = () => {
+      navDepth.current = Math.max(0, navDepth.current - 1);
+      setView(parseHash());
+    };
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync); // address-bar hash edits
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
   }, []);
 
   useEffect(() => {
@@ -114,7 +135,7 @@ export default function App() {
         <main className="min-h-0 flex-1 overflow-hidden" key={view.name + (view.name === "detail" ? view.sid : "")}>
           <div className="view-enter h-full">
             {view.name === "dashboard" && <Dashboard onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })} />}
-            {view.name === "detail" && <SessionDetail cli={view.cli} sid={view.sid} onBack={() => navigate({ name: "dashboard" })} />}
+            {view.name === "detail" && <SessionDetail cli={view.cli} sid={view.sid} onBack={goBack} />}
             {view.name === "threads" && <Threads />}
             {view.name === "inbox" && <Inbox />}
             {view.name === "doctor" && <Doctor />}
