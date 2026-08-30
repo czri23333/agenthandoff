@@ -17,6 +17,22 @@ _PATH_KEYS = ("file_path", "notebook_path", "path", "filepath", "abs_path")
 _PATH_BLOCKLIST = {"dev/null", "dev/stdout", "dev/stderr", "dev/urandom", "tmp"}
 _MIME_PREFIXES = ("application/", "text/", "image/", "audio/", "video/", "multipart/")
 
+# Harness text stored in a user turn that no human typed. Matched at the start
+# of a turn; used for turn identity (who spoke last), never to delete content.
+INJECTED_TURN_PREFIXES = (
+    "<task-notification",
+    "<environment_context",
+    "<codex_internal_context",
+    "<conversation_history_summary",
+    "<user_instructions",
+    "<goal_round",
+    "# AGENTS.md instructions",
+    "<app-context>",
+)
+
+# Pure-environment wrappers, dropped from the text: re-derivable from the machine.
+_ENV_WRAPPERS = ("environment_context", "codex_internal_context", "think")
+
 # Text that carries no handoff value even though it looks like user content.
 # Prefixes without ">" so attribute-bearing variants (<system-reminder
 # data-role=…>) are caught too.
@@ -40,6 +56,16 @@ class Parser(ABC):
 
     @abstractmethod
     def load(self, session_id: str) -> RawSession | None: ...
+
+    def with_root(self, root: Path) -> Parser:
+        """A copy of this parser aimed at another store directory.
+
+        Used by the fixture-backed evidence layer (support matrix, conformance
+        checks, tests): every parser already took an optional root in __init__,
+        but there was no generic way to say "read this tree instead" — which is
+        what makes a support claim reproducible on someone else's clone.
+        """
+        return type(self)(Path(root))
 
     def peek_status(self, session_id: str) -> str | None:
         """Lightweight end-state signal, or None when the store has none.
@@ -94,6 +120,8 @@ class Parser(ABC):
         """Strip common XML wrapper noise from a turn."""
         text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.S)
         text = re.sub(r"<local-command[^>]*>.*?</local-command[^>]*>", "", text, flags=re.S)
+        for tag in _ENV_WRAPPERS:
+            text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", text, flags=re.S)
         return text.strip()
 
     @staticmethod
@@ -113,6 +141,16 @@ class Parser(ABC):
             tool_counts=tools or Counter(),
             interruption=interruption or Interruption(),
         )
+
+
+def is_injected(text: str) -> bool:
+    """True when a turn stored as "user" was emitted by the harness itself.
+
+    Module-level so consumers outside the parser hierarchy (summarize) can use it
+    without instantiating a parser.
+    """
+    head = text.lstrip()[:80]
+    return any(head.startswith(m) for m in INJECTED_TURN_PREFIXES)
 
 
 def read_jsonl(path: Path, limit: int | None = None) -> list[dict]:

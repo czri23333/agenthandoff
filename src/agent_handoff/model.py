@@ -178,10 +178,16 @@ class HandoffBundle:
     tool_summary: list[tuple[str, int]] = field(default_factory=list)
     interruption: Interruption = field(default_factory=Interruption)
     topics: list[tuple[str, int]] = field(default_factory=list)  # (segment opener, msg count)
+    # Verbatim tail, oldest first: (role, text). The brief's most protected
+    # content, because it is what a context death takes with it.
+    recent: list[tuple[str, str]] = field(default_factory=list)
+    # The tail of the last assistant turn when it was cut off mid-sentence, so
+    # the successor continues the sentence instead of inventing a new one.
+    unfinished: str = ""
 
     def to_dict(self) -> dict:
         return {
-            "bundle_version": "0.1",
+            "bundle_version": "0.2",
             "interruption": {
                 "kind": self.interruption.kind,
                 "detail": self.interruption.detail,
@@ -215,4 +221,6 @@ class HandoffBundle:
             "context_notes": self.context_notes,
             "tool_summary": [{"tool": t, "calls": n} for t, n in self.tool_summary],
             "topics": [{"opener": o, "messages": n} for o, n in self.topics],
+            "recent": [{"role": r, "text": t} for r, t in self.recent],
+            "unfinished": self.unfinished,
         }

@@ -14,6 +14,7 @@ import re
 from datetime import datetime
 
 from agent_handoff.model import HandoffBundle, Interruption, Message, RawSession
+from agent_handoff.parsers.base import is_injected
 
 # Sentences in user turns that tend to carry durable direction/corrections.
 _DIRECTIVE_CUES = re.compile(
@@ -25,6 +26,15 @@ _DIRECTIVE_CUES = re.compile(
 _MAX_ITEM = 220  # per-list-item char budget
 _MAX_NOTE = 600
 
+# Verbatim-tail budgets. A session that died mid-flight gets a deeper tail:
+# that is precisely the case where the successor has the least to work with.
+_RECENT_BUDGET = 6000
+_RECENT_BUDGET_DEAD = 10000
+# Turns kept no matter what the budget says (OpenCode protects the last 2 user
+# turns for the same reason).
+_RECENT_MIN_TURNS = 6
+_UNFINISHED_CHARS = 1200
+
 # A note that doesn't end like a finished statement is treated as a cut-off
 # fragment and dropped rather than presented as a conclusion.
 _ENDING_PUNCT = tuple("。．.!?！？…」』】）)]}\"'”’")
@@ -34,8 +44,55 @@ def _looks_truncated(text: str) -> bool:
     return bool(text) and not text.rstrip().endswith(_ENDING_PUNCT)
 
 
+# Markdown structure that must never reach a bundle line: link targets (paths
+# and URLs, which are already captured as file anchors) and code ticks.
+_MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+_MD_CODE = re.compile(r"`+")
+_MD_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
+
+# Pairs whose imbalance means a fragment was cut mid-token.
+_PAIRS = (("(", ")"), ("[", "]"), ("“", "”"), ("「", "」"), ("『", "』"))
+
+
+def _collapse_markdown(text: str) -> str:
+    """Flatten markup that is structure, not content.
+
+    ``[label](target.md)`` becomes ``label``. Splitting a sentence at the "."
+    inside a link target is what produced the shipped garbage directive
+    ``md) — 用户跑的是 …``; the target itself carries no instruction, so keeping
+    the label and dropping the target is both safe and shorter.
+    """
+    text = _MD_IMAGE.sub(lambda m: m.group(1), text)
+    text = _MD_LINK.sub(lambda m: m.group(1) or m.group(2), text)
+    return _MD_CODE.sub("", text)
+
+
+def _balanced(text: str) -> bool:
+    """True when the fragment closes everything it opens.
+
+    A last-resort guard: if a future splitter ever cuts inside markup again,
+    an unbalanced fragment is dropped instead of being published as a directive.
+    """
+    for open_ch, close_ch in _PAIRS:
+        if text.count(open_ch) != text.count(close_ch):
+            return False
+    return text.count('"') % 2 == 0
+
+
+def _sentences(text: str) -> list[str]:
+    """Candidate statements from one message, split after markup is flattened.
+
+    Newlines separate list items and paragraphs, so they end a sentence here —
+    but only after ``_collapse_markdown`` removed the link targets whose dots
+    used to fool the split.
+    """
+    cleaned = _collapse_markdown(text)
+    parts = re.split(r"(?<=[。．!！?？])|(?<=\.)\s+|\n+", cleaned)
+    return [p.strip() for p in parts if p and p.strip()]
+
+
 def _clip(text: str, limit: int = _MAX_ITEM) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", _collapse_markdown(text)).strip()
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -48,11 +105,12 @@ def _pick_directives(messages: list[Message], limit: int = 8) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for m in messages:
-        for sentence in re.split(r"(?<=[。.!?！？\n])", m.text):
-            s = sentence.strip()
+        for s in _sentences(m.text):
             if len(s) < 4 or len(s) > 200:
                 continue
             if s.startswith(("-", "—", "•", '"', "“", "「")):
+                continue
+            if not _balanced(s):
                 continue
             if _DIRECTIVE_CUES.search(s) and s not in seen:
                 seen.add(s)
@@ -158,7 +216,50 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
         bundle.next_steps = ["Continue from the last assistant summary in context_notes."]
 
     _finalize_interruption(raw, bundle)
+
+    # After finalisation: the end-state must be settled before we decide how
+    # deep the verbatim tail needs to be.
+    dead = bundle.interruption.kind not in ("clean", "")
+    bundle.recent = _pick_recent(raw, _RECENT_BUDGET_DEAD if dead else _RECENT_BUDGET)
+    bundle.unfinished = _unfinished(raw, bundle)
     return bundle
+
+
+def _pick_recent(raw: RawSession, budget: int) -> list[tuple[str, str]]:
+    """Verbatim tail of the dialogue, oldest first.
+
+    Trimmed from the *oldest* end: the newest turns are where the work lives, and
+    a handoff that loses them forces the successor to rediscover state that was
+    already established. An oversized final turn keeps its **end**, because that is
+    where the sentence broke off.
+    """
+    turns = [(m.role, m.text.strip()) for m in raw.messages if m.text and m.text.strip()]
+    keep: list[tuple[str, str]] = []
+    used = 0
+    for index, (role, text) in enumerate(reversed(turns)):
+        forced = index < _RECENT_MIN_TURNS
+        if used + len(text) > budget and not forced:
+            break
+        if len(text) > budget:
+            text = "\u2026" + text[-(budget // 2) :]
+        keep.append((role, text))
+        used += len(text)
+    keep.reverse()
+    return keep
+
+
+def _unfinished(raw: RawSession, bundle: HandoffBundle) -> str:
+    """The cut-off tail of the last assistant turn, when there is one."""
+    dead_kinds = ("length_truncated", "context_exceeded", "user_pending", "unknown")
+    if bundle.interruption.kind not in dead_kinds:
+        return ""
+    last = raw.last_message("assistant")
+    if last is None:
+        return ""
+    text = last.text.strip()
+    if bundle.interruption.kind != "length_truncated" and not _looks_truncated(text):
+        return ""
+    return text[-_UNFINISHED_CHARS:]
 
 
 def _topic_segments(raw: RawSession, gap_hours: float = 6.0) -> list[tuple[str, int]]:
@@ -196,6 +297,23 @@ def _parse_iso(iso: str | None):
         return None
 
 
+def last_human_user(raw: RawSession) -> Message | None:
+    """The newest user turn a human actually typed.
+
+    Harnesses inject their own "user" messages (sub-agent notifications,
+    environment dumps, AGENTS.md preludes). Counting those as human instructions
+    produced false "the user asked and nobody answered" verdicts. See
+    docs/context-management-survey.md for what each vendor injects.
+    """
+    for message in reversed(raw.user_messages):
+        if not message.text or not message.text.strip():
+            continue
+        if is_injected(message.text):
+            continue
+        return message
+    return None
+
+
 def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:
     """Cross-CLI inference on top of parser-provided evidence.
 
@@ -209,15 +327,19 @@ def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:
         bundle.interruption = raw.interruption
         if bundle.interruption.kind == "length_truncated" and bundle.context_notes:
             bundle.context_notes.pop(0)  # the truncated reply masquerading as oldest note
-    elif raw.user_messages and raw.assistant_messages:
-        last_user_at = raw.user_messages[-1].at or ""
-        last_asst_at = raw.assistant_messages[-1].at or ""
-        if last_user_at >= last_asst_at:
-            pending = _clip(raw.user_messages[-1].text, 300)
-            if not _looks_truncated(pending) or len(pending) > 4:
-                bundle.interruption = Interruption(
-                    kind="user_pending",
-                    detail="newest message is an un-answered user instruction",
-                    pending_user_text=pending,
-                )
-                bundle.next_steps.insert(0, f"[pending from interrupted session] {pending}")
+    else:
+        human = last_human_user(raw)
+        if human is not None and raw.assistant_messages:
+            last_user_at = human.at or ""
+            last_asst_at = raw.assistant_messages[-1].at or ""
+            if last_user_at >= last_asst_at:
+                pending = _clip(human.text, 300)
+                if not _looks_truncated(pending) or len(pending) > 4:
+                    bundle.interruption = Interruption(
+                        kind="user_pending",
+                        detail="newest message is an un-answered user instruction",
+                        pending_user_text=pending,
+                    )
+                    bundle.next_steps.insert(
+                        0, f"[pending from interrupted session] {pending}"
+                    )

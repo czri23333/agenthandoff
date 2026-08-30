@@ -8,7 +8,7 @@ import re
 
 from agent_handoff.model import HandoffBundle, Interruption, SessionMeta
 
-BUNDLE_VERSION = "0.1"
+BUNDLE_VERSION = "0.2"
 
 _MARKDOWN_TEMPLATE = """\
 # Agent Handoff Bundle
@@ -72,6 +72,14 @@ source_path: "{source_path}"
 
 {notes}
 
+## Recent context (verbatim tail, oldest first)
+
+{recent}
+
+## Unfinished output (continue from here)
+
+{unfinished}
+
 ## Tool usage summary
 
 {tools}
@@ -92,6 +100,22 @@ def _ul_numbers(items: list[str], fallback: str = "1. (none recorded)") -> str:
     if not items:
         return fallback
     return "\n".join(f"{n}. {i}" for n, i in enumerate(items, 1))
+
+
+def _render_recent(recent: list[tuple[str, str]]) -> str:
+    """`**role** — text` blocks, separated by blank lines (see _parse_recent)."""
+    if not recent:
+        return "(none recorded)"
+    return "\n\n".join(f"**{role}** \u2014 {text}" for role, text in recent)
+
+
+def _parse_recent(text: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for block in re.split(r"\n\s*\n", text.strip()):
+        m = re.match(r"^\*\*(\w+)\*\* \u2014 (.*)$", block.strip(), re.S)
+        if m:
+            out.append((m.group(1), m.group(2).strip()))
+    return out
 
 
 def render_markdown(b: HandoffBundle) -> str:
@@ -136,6 +160,8 @@ def render_markdown(b: HandoffBundle) -> str:
         files=files,
         next_steps=_ul_numbers(b.next_steps),
         notes=_ol(b.context_notes),
+        recent=_render_recent(b.recent),
+        unfinished=b.unfinished or "(none)",
         tools=tools,
     )
 
@@ -267,6 +293,8 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
         files=files,
         next_steps=next_steps,
         context_notes=_section_items(text, "Context notes (last assistant conclusions)"),
+        recent=_parse_recent(_section(text, "Recent context (verbatim tail, oldest first)")),
+        unfinished=_section(text, "Unfinished output (continue from here)"),
     )
 
 
