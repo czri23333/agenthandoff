@@ -10,3 +10,8 @@ coverage.xml
 .coverage
 handoff.md
 handoff.json
+
+# Node / frontend
+web/node_modules/
+web/dist/
+node_modules/
