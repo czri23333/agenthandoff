@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/agenthandoff/agenthandoff/main/schema/handoff-bundle-v0.1.schema.json",
+  "title": "Agent Handoff Bundle",
+  "description": "Portable resumable state of one AI coding session (spec v0.1).",
+  "type": "object",
+  "required": ["bundle_version", "meta", "objective", "state", "next_steps"],
+  "additionalProperties": true,
+  "properties": {
+    "bundle_version": { "const": "0.1" },
+    "meta": {
+      "type": "object",
+      "required": ["cli", "session_id", "title"],
+      "additionalProperties": true,
+      "properties": {
+        "cli": { "type": "string" },
+        "session_id": { "type": "string" },
+        "title": { "type": "string" },
+        "cwd": { "type": "string" },
+        "started_at": { "type": ["string", "null"], "format": "date-time" },
+        "updated_at": { "type": ["string", "null"], "format": "date-time" },
+        "model": { "type": ["string", "null"] },
+        "tokens_in": { "type": ["integer", "null"], "minimum": 0 },
+        "tokens_out": { "type": ["integer", "null"], "minimum": 0 },
+        "source_path": { "type": "string" }
+      }
+    },
+    "objective": { "type": "string" },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "done": { "type": "array", "items": { "type": "string" } },
+        "in_progress": { "type": "array", "items": { "type": "string" } },
+        "blocked": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "directives": { "type": "array", "items": { "type": "string" } },
+    "files_touched": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "hits"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "hits": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "next_steps": { "type": "array", "items": { "type": "string" } },
+    "context_notes": { "type": "array", "items": { "type": "string" } },
+    "tool_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool", "calls"],
+        "additionalProperties": false,
+        "properties": {
+          "tool": { "type": "string" },
+          "calls": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

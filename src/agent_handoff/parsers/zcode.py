@@ -1,0 +1,146 @@
+"""ZCode parser — reads the local SQLite session store (~/.zcode/cli/db/db.sqlite).
+
+Opened in read-only URI mode so a running ZCode instance is never disturbed;
+WAL sidecar files are only read, never written.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections import Counter
+from pathlib import Path
+
+from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
+from agent_handoff.parsers.base import Parser
+
+
+class ZcodeParser(Parser):
+    cli = "zcode"
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        self.db_path = db_path or Path.home() / ".zcode" / "cli" / "db" / "db.sqlite"
+
+    def _connect(self) -> sqlite3.Connection:
+        con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=2)
+        con.row_factory = sqlite3.Row
+        return con
+
+    def available(self) -> bool:
+        return self.db_path.exists()
+
+    def list_sessions(self) -> list[SessionMeta]:
+        if not self.available():
+            return []
+        out: list[SessionMeta] = []
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT id, title, directory, time_created, time_updated "
+                "FROM session ORDER BY time_updated DESC"
+            ).fetchall()
+        for r in rows:
+            out.append(
+                SessionMeta(
+                    cli=self.cli,
+                    session_id=r["id"],
+                    title=r["title"] or r["id"],
+                    cwd=r["directory"] or "",
+                    started_at=ts_to_iso(r["time_created"]),
+                    updated_at=ts_to_iso(r["time_updated"]),
+                    source_path=str(self.db_path),
+                )
+            )
+        return out
+
+    def load(self, session_id: str) -> RawSession | None:
+        if not self.available():
+            return None
+        with self._connect() as con:
+            sess = con.execute(
+                "SELECT id, title, directory, time_created, time_updated FROM session WHERE id=?",
+                (session_id,),
+            ).fetchone()
+            if sess is None:
+                return None
+
+            messages: list[Message] = []
+            files: Counter[str] = Counter()
+            tools: Counter[str] = Counter()
+            model: str | None = None
+            tokens_in = tokens_out = 0
+
+            msg_rows = con.execute(
+                "SELECT id, data, time_created FROM message WHERE session_id=? ORDER BY sequence",
+                (session_id,),
+            ).fetchall()
+            for m in msg_rows:
+                try:
+                    mdata = json.loads(m["data"])
+                except (json.JSONDecodeError, TypeError):
+                    mdata = {}
+                role = mdata.get("role", "")
+                if role not in ("user", "assistant"):
+                    continue
+
+                parts = con.execute(
+                    "SELECT data FROM part WHERE message_id=? ORDER BY sequence",
+                    (m["id"],),
+                ).fetchall()
+                texts: list[str] = []
+                for p in parts:
+                    try:
+                        pdata = json.loads(p["data"])
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    ptype = pdata.get("type")
+                    if ptype == "text":
+                        t = self.clean_text(pdata.get("text") or "")
+                        if t and not self.is_noise(t):
+                            texts.append(t)
+                    elif ptype == "tool":
+                        tool_name = pdata.get("tool") or "tool"
+                        tools[tool_name] += 1
+                        state = pdata.get("state") or {}
+                        tool_input = state.get("input") or {}
+                        if isinstance(tool_input, dict):
+                            for path in self.extract_paths(tool_input):
+                                files[path] += 1
+
+                if role == "assistant" and mdata.get("modelID"):
+                    model = mdata["modelID"]
+                tok = mdata.get("tokens")
+                if isinstance(tok, dict):
+                    tokens_in += int(tok.get("input") or tok.get("inputTokens") or 0)
+                    tokens_out += int(tok.get("output") or tok.get("outputTokens") or 0)
+
+                if texts:
+                    messages.append(
+                        Message(role=role, text="\n".join(texts), at=ts_to_iso(m["time_created"]))
+                    )
+
+            todos = [
+                TodoItem(
+                    content=r["content"],
+                    status=r["status"] or "pending",
+                    priority=r["priority"] or "",
+                )
+                for r in con.execute(
+                    "SELECT content, status, priority FROM todo "
+                    "WHERE session_id=? ORDER BY position",
+                    (session_id,),
+                ).fetchall()
+            ]
+
+        meta = SessionMeta(
+            cli=self.cli,
+            session_id=sess["id"],
+            title=sess["title"] or sess["id"],
+            cwd=sess["directory"] or "",
+            started_at=ts_to_iso(sess["time_created"]),
+            updated_at=ts_to_iso(sess["time_updated"]),
+            model=model,
+            tokens_in=tokens_in or None,
+            tokens_out=tokens_out or None,
+            source_path=str(self.db_path),
+        )
+        return self.build_raw(meta, messages, todos, files, tools)
