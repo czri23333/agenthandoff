@@ -87,3 +87,41 @@ fragment) happens once, in summarize, so all parsers stay thin and the
 inference rules live in one reviewable place. A cut-off assistant fragment
 is dropped from conclusions rather than labeled — a wrong conclusion is
 worse than a missing one.
+
+## ADR-006: Product form — WebUI is the primary surface, CLI is the engine API
+
+The primary users live in browsers and GUIs, not terminals. The deterministic
+engine stays a zero-dependency library, but the product surface is a local
+web application: `handoff ui` serves it on 127.0.0.1. The API layer is
+FastAPI behind a `[server]` extra — the zero-dependency guarantee applies to
+the engine, not to the optional server. The frontend is a built (Vite +
+React + TypeScript + Tailwind) single-page app whose dist is shipped inside
+the wheel: end users need no Node toolchain. Polling instead of WebSockets:
+session stores change slowly and honesty about that beats realtime theater.
+
+## ADR-007: Executor — command the fleet, but only through verified doors
+
+A cockpit that only watches is half a product. Two executor duties:
+
+1. **Resume handoff**: a "resume in CLI" action per session. Every CLI has
+   its own native resume/headless flags; the server keeps a launcher
+   registry and only offers the button for CLIs whose invocation is
+   verified on this machine — everything else shows a copyable command
+   with "unverified" marking. No guessing launch syntax.
+2. **Dispatch**: send a continuation brief to a headless-capable CLI
+   (e.g. dsh headless profiles, `codex exec`) as a new supervised run.
+
+The WebUI never fabricates session context — it always delegates to the
+target CLI's own resume mechanism or hands over the brief file.
+
+## ADR-008: Toolsync — shared tooling visibility first, writes behind diff+confirm
+
+Live machines show the same MCP servers and skills configured N times
+across CLIs, drifting apart (one harness has 634 bytes of MCP config, its
+sibling has 22 bytes; identical skill sets installed per-harness). The
+Tools view aggregates mcp.json / skills / agents declarations across all
+discovered stores into one matrix. Read-only aggregation is always safe.
+Writing (syncing a config or skill set into another harness) requires:
+explicit user action, a diff preview, and a `.bak` backup of the target —
+these are configuration stores, not session stores, so the read-only rule
+from the engine deliberately does not extend here.

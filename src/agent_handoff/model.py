@@ -12,15 +12,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 
-def ts_to_iso(value: float | int | str | None) -> str | None:
-    """Normalize epoch milliseconds/seconds or an ISO string to ISO-8601 UTC.
+def ts_to_iso(value: float | int | str | datetime | None) -> str | None:
+    """Normalize epoch ms/seconds, an ISO string, or a datetime to ISO-8601 UTC.
 
     Numeric values below 1e12 are treated as seconds, anything larger as
-    milliseconds. Strings are parsed as ISO-8601. Returns None for
-    missing/zero/unparseable input so callers can omit the field.
+    milliseconds. Returns None for missing/zero/unparseable input so callers
+    can omit the field.
     """
-    if not value:
+    if value is None or value == 0 or value == "":
         return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
     if isinstance(value, str):
         try:
             dt = datetime.fromisoformat(value.replace("Z", "+00:00"))

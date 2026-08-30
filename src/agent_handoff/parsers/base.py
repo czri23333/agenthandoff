@@ -18,11 +18,13 @@ _PATH_BLOCKLIST = {"dev/null", "dev/stdout", "dev/stderr", "dev/urandom", "tmp"}
 _MIME_PREFIXES = ("application/", "text/", "image/", "audio/", "video/", "multipart/")
 
 # Text that carries no handoff value even though it looks like user content.
+# Prefixes without ">" so attribute-bearing variants (<system-reminder
+# data-role=…>) are caught too.
 _NOISE_MARKERS = (
-    "<system-reminder>",
+    "<system-reminder",
     "<local-command",
-    "<loaded_context>",
-    "<project_context>",
+    "<loaded_context",
+    "<project_context",
     "Caveat:",
     "[Request interrupted",
 )
@@ -38,6 +40,14 @@ class Parser(ABC):
 
     @abstractmethod
     def load(self, session_id: str) -> RawSession | None: ...
+
+    def peek_status(self, session_id: str) -> str | None:
+        """Lightweight end-state signal, or None when the store has none.
+
+        Only CLIs with a cheap proven signal (e.g. a usage table) implement
+        this; callers must treat None as "unknown", never as "clean".
+        """
+        return None
 
     # -- shared helpers -----------------------------------------------------
 

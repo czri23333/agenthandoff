@@ -182,6 +182,23 @@ def _cmd_threads(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    """Serve the local cockpit WebUI (requires agenthandoff[server])."""
+    try:
+        from agent_handoff.server.app import run_server
+    except ImportError:
+        print("error: server extras missing — pip install 'agenthandoff[server]'", file=sys.stderr)
+        return 1
+    import webbrowser
+
+    url = f"http://{args.host}:{args.port}"
+    print(f"cockpit: {url}  (Ctrl+C to stop)")
+    if args.open:
+        webbrowser.open(url)
+    run_server(host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="handoff",
@@ -255,6 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_thr.add_argument("-n", type=int, default=10, help="max threads shown (default 10)")
 
+    p_ui = sub.add_parser("ui", help="serve the local cockpit WebUI (needs [server] extra)")
+    p_ui.add_argument("--host", default="127.0.0.1")
+    p_ui.add_argument("--port", type=int, default=8620)
+    p_ui.add_argument("--open", action="store_true", help="open the browser automatically")
+
     p_res = sub.add_parser("resume", help="generate a continuation brief from a bundle")
     p_res.add_argument("bundle", help="path to a bundle .md or .json file")
     p_res.add_argument("--max-chars", type=int, default=12000, help="brief budget (default 12000)")
@@ -273,6 +295,7 @@ _HANDLERS = {
     "inbox": _cmd_inbox,
     "claim": _cmd_claim,
     "threads": _cmd_threads,
+    "ui": _cmd_ui,
 }
 
 

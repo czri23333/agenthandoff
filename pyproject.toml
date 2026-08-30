@@ -41,6 +41,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
 zstd = ["zstandard>=0.22"]
+server = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 
 [project.scripts]
 handoff = "agent_handoff.cli:main"
@@ -52,6 +53,9 @@ Issues = "https://github.com/agenthandoff/agenthandoff/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_handoff"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"web/dist" = "agent_handoff/server/static"
 
 [tool.ruff]
 line-length = 100

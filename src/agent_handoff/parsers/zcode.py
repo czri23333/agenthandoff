@@ -165,6 +165,30 @@ class ZcodeParser(Parser):
         )
         return self.build_raw(meta, messages, todos, files, tools, interruption)
 
+    def peek_status(self, session_id: str) -> str | None:
+        """One SQL against turn_usage — cheap enough for list views."""
+        if not self.available():
+            return None
+        try:
+            with self._connect() as con:
+                row = con.execute(
+                    "SELECT context_exceeded, cancelled_by_user, error_type "
+                    "FROM turn_usage WHERE session_id=? ORDER BY started_at DESC LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            exceeded, cancelled, error_type = row
+            if cancelled:
+                return "cancelled"
+            if exceeded:
+                return "context_exceeded"
+            if error_type:
+                return "error"
+            return "clean"
+        except sqlite3.Error:
+            return None
+
     @staticmethod
     def _interruption(con: sqlite3.Connection, session_id: str) -> Interruption:
         """Read how the session actually ended from usage stats.

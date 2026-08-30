@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* CLI identity colors — quick visual ownership per badge. */
+:root {
+  --cli-zcode: #7dd3fc;
+  --cli-claude: #fca5a5;
+  --cli-codebuddy: #86efac;
+  --cli-codebuddy-cn: #4ade80;
+  --cli-qoderwork: #fdba74;
+  --cli-qoderwork-cn: #fb923c;
+  --cli-qodercn-ide: #f59e0b;
+  --cli-qwenwork: #c4b5fd;
+  --cli-dsh: #67e8f9;
+  --cli-kimi: #d8b4fe;
+  --cli-codex: #a5b4fc;
+}
+
+html, body { height: 100%; }

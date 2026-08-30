@@ -60,21 +60,24 @@ class DshParser(Parser):
         return metas
 
     def _peek(self, path: Path) -> SessionMeta | None:
+        # Config lines (full system prompts) can occupy the head of a roll;
+        # 256 KiB is usually enough to also reach the first real user turn.
         try:
-            head = _decompress(path, limit_bytes=65536).decode("utf-8", errors="replace")
+            head = _decompress(path, limit_bytes=262144).decode("utf-8", errors="replace")
         except Exception:
             return None
         sid = path.parent.name
         title = ""
+        first_user = ""
         cwd = ""
         created = updated = None
         parent = None
+        import json
+
         for line in head.splitlines():
             line = line.strip()
             if not line:
                 continue
-            import json
-
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
@@ -88,10 +91,30 @@ class DshParser(Parser):
                 parent = row.get("parentSession") or parent
             elif t == "session/title" and not title:
                 title = (row.get("data") or {}).get("title") or ""
+            elif t == "user/message" and not first_user:
+                blocks = (row.get("data") or {}).get("content") or []
+                text = self.clean_text(
+                    " ".join(
+                        b.get("text") or ""
+                        for b in blocks
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                )
+                if text and not self.is_noise(text):
+                    first_user = text[:80]
+        if updated is None:
+            try:
+                from datetime import datetime, timezone
+
+                updated = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(
+                    timespec="seconds"
+                )
+            except OSError:
+                pass
         return SessionMeta(
             cli=self.cli,
             session_id=sid,
-            title=title or sid,
+            title=title or first_user or sid,
             cwd=cwd,
             started_at=created,
             updated_at=updated,
