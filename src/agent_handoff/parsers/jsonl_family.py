@@ -145,6 +145,7 @@ class JsonlSessionParser(Parser):
         todos: list[TodoItem] = []
         cwd = ""
         session_id = path.stem
+        title = ""
         started = None
 
         for row in read_jsonl(path):
@@ -176,12 +177,14 @@ class JsonlSessionParser(Parser):
                                 )
                             )
             if text and not self.is_noise(text):
+                if role == "user" and not title:
+                    title = text[:80]
                 messages.append(Message(role=role, text=text, at=at))
 
         meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,
-            title=session_id,
+            title=title or session_id,
             cwd=cwd,
             started_at=started,
             updated_at=_iso(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)),
@@ -233,3 +236,16 @@ class QwenworkParser(JsonlSessionParser):
 
     cli = "qwenwork"
     projects_dirname = ".qwenworkcn"
+
+
+class QodercnIdeParser(JsonlSessionParser):
+    """Qoder CN IDE — shared session store at ~/.qoder-cn/projects.
+
+    One root serves the whole qoder-cn product family: the IDE itself, the
+    qoderworkcn CLI, and qoderwake workspaces all land their sessions here
+    (project dirs are munged cwd names, so the origin is visible per
+    session). Line format is the Claude-Code dialect.
+    """
+
+    cli = "qodercn-ide"
+    projects_dirname = ".qoder-cn"

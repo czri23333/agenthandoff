@@ -30,12 +30,19 @@ output, so bundles are diffable and trustworthy.
 | ZCode | SQLite (`~/.zcode/cli/db/db.sqlite`) | ✅ stable |
 | Claude Code | JSONL (`~/.claude/projects/…`) | ✅ stable |
 | CodeBuddy / CodeBuddy CN | JSONL (`~/.codebuddy[cn]/projects/…`) | ✅ stable |
-| Qoderwork | JSONL (`~/.qoderwork/projects/…`) | ✅ stable |
+| Qoderwork (+CN, dual-account) | JSONL (`~/.qoderwork[cn]/projects/…`) | ✅ stable |
+| Qoder CN IDE | JSONL (`~/.qoder-cn/projects/…`, shared by the qoder-cn family) | ✅ stable |
 | Qwen Work CN | JSONL (`~/.qwenworkcn/projects/…`) | ✅ stable |
 | dsh (DeepSeekHarness) | zstd-JSONL (`~/.dsh/sessions/…`) | ✅ stable (`[zstd]` extra) |
 | Kimi CLI | `state.json` + `wire.jsonl` | 🧪 experimental |
-| Codex CLI | `~/.codex/sessions` | 🔜 roadmap |
+| Codex CLI | `~/.codex/sessions` | ✅ stable |
 | opencode | `~/.local/share/opencode/storage` | 🔜 roadmap |
+| Qoder IDE (intl.) | Electron leveldb, no session files | 🔜 roadmap |
+
+Multi-account harnesses are reported as evidence: `handoff doctor` shows
+`N account config(s)` (one encrypted model catalog per login); per-session
+attribution stays with the user via `capture --note account:work`, because
+no store records which account produced a session.
 
 Sessions stored inside **WSL** distros are discovered and read from the
 Windows side automatically (`handoff doctor` shows them tagged `[wsl]`).

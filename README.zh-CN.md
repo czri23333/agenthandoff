@@ -27,11 +27,12 @@
 | ZCode | SQLite（`~/.zcode/cli/db/db.sqlite`） | ✅ 稳定 |
 | Claude Code | JSONL（`~/.claude/projects/…`） | ✅ 稳定 |
 | CodeBuddy / CodeBuddy CN | JSONL（`~/.codebuddy[cn]/projects/…`） | ✅ 稳定 |
-| Qoderwork | JSONL（`~/.qoderwork/projects/…`） | ✅ 稳定 |
+| Qoderwork（含 CN，双账号） | JSONL（`~/.qoderwork[cn]/projects/…`） | ✅ 稳定 |
+| Qoder CN IDE | JSONL（`~/.qoder-cn/projects/…`，qoder-cn 家族共享） | ✅ 稳定 |
 | Qwen Work CN | JSONL（`~/.qwenworkcn/projects/…`） | ✅ 稳定 |
 | dsh (DeepSeekHarness) | zstd-JSONL（`~/.dsh/sessions/…`） | ✅ 稳定（`[zstd]` 扩展） |
 | Kimi CLI | `state.json` + `wire.jsonl` | 🧪 实验性 |
-| Codex CLI | `~/.codex/sessions` | 🔜 路线图 |
+| Codex CLI | `~/.codex/sessions` | ✅ 稳定 |
 | opencode | `~/.local/share/opencode/storage` | 🔜 路线图 |
 
 WSL 发行版内的会话存储会从 Windows 侧自动发现并读取（`handoff doctor`
