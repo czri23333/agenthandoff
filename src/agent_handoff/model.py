@@ -155,6 +155,7 @@ class HandoffBundle:
     context_notes: list[str] = field(default_factory=list)  # last assistant conclusions
     tool_summary: list[tuple[str, int]] = field(default_factory=list)
     interruption: Interruption = field(default_factory=Interruption)
+    topics: list[tuple[str, int]] = field(default_factory=list)  # (segment opener, msg count)
 
     def to_dict(self) -> dict:
         return {
@@ -191,4 +192,5 @@ class HandoffBundle:
             "next_steps": self.next_steps,
             "context_notes": self.context_notes,
             "tool_summary": [{"tool": t, "calls": n} for t, n in self.tool_summary],
+            "topics": [{"opener": o, "messages": n} for o, n in self.topics],
         }

@@ -141,6 +141,47 @@ def _cmd_claim(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_threads(args: argparse.Namespace) -> int:
+    """Cluster sessions across CLIs into task threads (one job, many sessions)."""
+    from agent_handoff.threads import (
+        SessionNode,
+        build_threads,
+        describe_thread,
+        normalize_path,
+        title_tokens,
+    )
+
+    parsers = available_parsers()
+    if args.cli:
+        parsers = [p for p in parsers if p.cli == args.cli]
+    nodes: list[SessionNode] = []
+    for p in parsers:
+        for m in p.list_sessions():
+            if args.cwd and args.cwd.lower() not in m.cwd.lower():
+                continue
+            raw = p.load(m.session_id)
+            files = {normalize_path(f) for f in raw.files_touched} if raw else set()
+            nodes.append(
+                SessionNode(meta=m, files=files, tokens=title_tokens(m.title))
+            )
+    if not nodes:
+        print("no sessions found.")
+        return 0
+    threads = build_threads(nodes, min_jaccard=args.min_overlap, window_days=args.window_days)
+    multi = [t for t in threads if len(t.sessions) > 1]
+    multi.sort(key=lambda t: t.last_active or "", reverse=True)
+    if not multi:
+        print("no multi-session threads detected (all sessions look standalone).")
+        return 0
+    print(f"{len(multi)} task thread(s) spanning multiple sessions:\n")
+    for idx, t in enumerate(multi[: args.n], 1):
+        print(f"Thread {idx}: {describe_thread(t)[0]}")
+        for line in describe_thread(t)[1:]:
+            print(line)
+        print()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="handoff",
@@ -197,6 +238,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_clm.add_argument("bundle", help="path to the published bundle")
     p_clm.add_argument("--by", help="who is claiming (default: hostname)")
 
+    p_thr = sub.add_parser(
+        "threads",
+        help="cluster sessions across CLIs into task threads (one job, many sessions)",
+    )
+    p_thr.add_argument("--cli", help="restrict to one cli")
+    p_thr.add_argument("--cwd", help="filter sessions whose cwd contains this substring")
+    p_thr.add_argument(
+        "--min-overlap",
+        type=float,
+        default=0.15,
+        help="file-set Jaccard threshold for linking (default 0.15)",
+    )
+    p_thr.add_argument(
+        "--window-days", type=int, default=21, help="link time window in days (default 21)"
+    )
+    p_thr.add_argument("-n", type=int, default=10, help="max threads shown (default 10)")
+
     p_res = sub.add_parser("resume", help="generate a continuation brief from a bundle")
     p_res.add_argument("bundle", help="path to a bundle .md or .json file")
     p_res.add_argument("--max-chars", type=int, default=12000, help="brief budget (default 12000)")
@@ -214,6 +272,7 @@ _HANDLERS = {
     "publish": _cmd_publish,
     "inbox": _cmd_inbox,
     "claim": _cmd_claim,
+    "threads": _cmd_threads,
 }
 
 

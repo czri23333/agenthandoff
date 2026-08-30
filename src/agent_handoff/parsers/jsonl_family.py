@@ -64,6 +64,11 @@ class JsonlSessionParser(Parser):
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         return metas
 
+    def _origin(self) -> str | None:
+        """Store directory (e.g. .qoderwork vs .qoderworkcn) = account scope."""
+        name = self.root.parent.name
+        return name if name.startswith(".") else None
+
     def _peek(self, path: Path) -> SessionMeta | None:
         """Cheap scan of the first/last lines to build a list entry."""
         rows = read_jsonl(path, limit=50)
@@ -95,6 +100,7 @@ class JsonlSessionParser(Parser):
             started_at=started,
             updated_at=updated,
             source_path=str(path),
+            origin=self._origin(),
         )
 
     def load(self, session_id: str) -> RawSession | None:
@@ -180,6 +186,7 @@ class JsonlSessionParser(Parser):
             started_at=started,
             updated_at=_iso(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)),
             source_path=str(path),
+            origin=self._origin(),
         )
         return self.build_raw(meta, messages, todos, files, tools)
 
@@ -206,6 +213,19 @@ class QoderworkParser(JsonlSessionParser):
 
     cli = "qoderwork"
     projects_dirname = ".qoderwork"
+
+
+class QoderworkCnParser(JsonlSessionParser):
+    """Qoderwork CN — a separate login (second account) under ~/.qoderworkcn.
+
+    Variant directories of the same product are distinct account scopes:
+    the user may run one account per variant (verified live: each carries
+    its own .auth/machine_id). ``origin`` records which store a session
+    came from so multi-account usage stays distinguishable.
+    """
+
+    cli = "qoderwork-cn"
+    projects_dirname = ".qoderworkcn"
 
 
 class QwenworkParser(JsonlSessionParser):

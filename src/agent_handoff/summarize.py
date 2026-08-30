@@ -11,8 +11,9 @@ presenting a half-finished state as if it were a conclusion.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
-from agent_handoff.model import HandoffBundle, Interruption, RawSession
+from agent_handoff.model import HandoffBundle, Interruption, Message, RawSession
 
 # Sentences in user turns that tend to carry durable direction/corrections.
 _DIRECTIVE_CUES = re.compile(
@@ -82,6 +83,10 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
         first_user = raw.user_messages[0] if raw.user_messages else None
         bundle.objective = _clip(first_user.text, 300) if first_user else raw.meta.title
 
+    bundle.topics = _topic_segments(raw)
+    if bundle.topics:
+        bundle.objective += f" (multi-topic session: {len(bundle.topics)} segments)"
+
     done, doing, blocked = _split_todo_state(raw)
     bundle.done, bundle.in_progress, bundle.blocked = done, doing, blocked
 
@@ -119,6 +124,41 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
 
     _finalize_interruption(raw, bundle)
     return bundle
+
+
+def _topic_segments(raw: RawSession, gap_hours: float = 6.0) -> list[tuple[str, int]]:
+    """Split a session into topic segments by gaps between user messages.
+
+    A long silence followed by a new user request usually means the session
+    drifted onto different work (the "mixed session"). Segments are reported
+    so bundles don't smuggle unrelated context into the next session.
+    """
+    users = raw.user_messages
+    if len(users) < 2:
+        return []
+    segments: list[list[Message]] = [[users[0]]]
+    for prev, cur in zip(users, users[1:], strict=False):
+        t_prev = _parse_iso(prev.at)
+        t_cur = _parse_iso(cur.at)
+        if t_prev and t_cur and (t_cur - t_prev).total_seconds() >= gap_hours * 3600:
+            segments.append([])
+        segments[-1].append(cur)
+    if len(segments) < 2:
+        return []
+    out: list[tuple[str, int]] = []
+    for seg in segments:
+        opener = _clip(seg[0].text, 120)
+        out.append((opener, len(seg)))
+    return out
+
+
+def _parse_iso(iso: str | None):
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:

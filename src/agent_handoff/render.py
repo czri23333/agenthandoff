@@ -39,6 +39,8 @@ source_path: "{source_path}"
 
 {objective}
 
+{topics_block}
+
 ## Interruption
 
 {interruption}
@@ -104,6 +106,10 @@ def render_markdown(b: HandoffBundle) -> str:
         it_md += f"\n- pending user message (NOT executed): {it.pending_user_text}"
     elif it.detail:
         it_md += f"\n- detail: {it.detail}"
+    topics_block = ""
+    if b.topics:
+        t_items = "\n".join(f'- "{o}" ({n} user message(s))' for o, n in b.topics)
+        topics_block = f"## Topic segments (mixed session)\n\n{t_items}\n"
     return _MARKDOWN_TEMPLATE.format(
         version=BUNDLE_VERSION,
         cli=b.meta.cli,
@@ -121,6 +127,7 @@ def render_markdown(b: HandoffBundle) -> str:
         tokens_out=b.meta.tokens_out if b.meta.tokens_out is not None else "null",
         source_path=b.meta.source_path,
         objective=b.objective or "(not captured)",
+        topics_block=topics_block,
         interruption=it_md,
         done=_ol(b.done),
         in_progress=_ol(b.in_progress),
@@ -242,10 +249,17 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
         if m and m.group(1) != "(none recorded)":
             next_steps.append(m.group(1))
 
+    topics: list[tuple[str, int]] = []
+    for line in _section_items(text, "Topic segments (mixed session)"):
+        m = re.match(r'^"(.+?)"\s*\((\d+) user message', line)
+        if m:
+            topics.append((m.group(1), int(m.group(2))))
+
     return HandoffBundle(
         meta=meta,
         objective=_section(text, "Objective"),
         interruption=interruption,
+        topics=topics,
         done=_subsection(text, "Done"),
         in_progress=_subsection(text, "In progress"),
         blocked=_subsection(text, "Blocked / open"),

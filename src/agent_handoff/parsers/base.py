@@ -18,7 +18,14 @@ _PATH_BLOCKLIST = {"dev/null", "dev/stdout", "dev/stderr", "dev/urandom", "tmp"}
 _MIME_PREFIXES = ("application/", "text/", "image/", "audio/", "video/", "multipart/")
 
 # Text that carries no handoff value even though it looks like user content.
-_NOISE_MARKERS = ("<system-reminder>", "<local-command", "Caveat:", "[Request interrupted")
+_NOISE_MARKERS = (
+    "<system-reminder>",
+    "<local-command",
+    "<loaded_context>",
+    "<project_context>",
+    "Caveat:",
+    "[Request interrupted",
+)
 
 
 class Parser(ABC):

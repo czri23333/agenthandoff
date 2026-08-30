@@ -72,6 +72,10 @@ def qoderwork_store() -> StoreInfo | None:
     return _projects_store("qoderwork", ".qoderwork")
 
 
+def qoderwork_cn_store() -> StoreInfo | None:
+    return _projects_store("qoderwork-cn", ".qoderworkcn")
+
+
 def qwenwork_store() -> StoreInfo | None:
     return _projects_store("qwenwork", ".qwenworkcn")
 
@@ -190,6 +194,7 @@ def discover() -> list[StoreInfo]:
         codebuddy_store,
         codebuddy_cn_store,
         qoderwork_store,
+        qoderwork_cn_store,
         qwenwork_store,
         dsh_store,
         kimi_store,
