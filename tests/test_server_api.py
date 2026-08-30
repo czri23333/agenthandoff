@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import pytest
 
-from agent_handoff.server.app import app
+# Guard before import: without the [server] extra this module must skip, not fail
+# at collection time. (Importing the app first is exactly what broke CI.)
+pytest.importorskip("fastapi", reason="agenthandoff[server] extra not installed")
+pytest.importorskip("httpx", reason="fastapi TestClient needs httpx")
 
-fastapi_testclient = pytest.importorskip("fastapi.testclient", reason="agenthandoff[server]")
-Client = fastapi_testclient.TestClient
+from agent_handoff.server.app import app  # noqa: E402
+
+Client = pytest.importorskip("fastapi.testclient", reason="agenthandoff[server]").TestClient
 
 
 @pytest.fixture

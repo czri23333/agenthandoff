@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install
-        run: pip install -e ".[dev,zstd]"
+        run: pip install -e ".[dev,zstd,server]"
       - name: Test
         run: pytest
       - name: Lint
