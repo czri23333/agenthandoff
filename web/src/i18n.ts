@@ -1,7 +1,11 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 
-// Bilingual dictionary; zh is the default because the primary user works in
-// Chinese. Every UI string goes through t() — no literals in components.
+/**
+ * Bilingual dictionary; zh is the default because the primary user works in
+ * Chinese. Every UI string goes through t() — no literals in components. The
+ * interruption labels live here too (they used to be hardcoded Chinese inside
+ * components.tsx, which quietly broke EN mode).
+ */
 const dict = {
   zh: {
     sessions: "会话",
@@ -9,9 +13,11 @@ const dict = {
     inbox: "交接箱",
     doctor: "体检",
     localOnly: "仅本机 · 不联网",
-    searchTitles: "搜索标题…",
-    filterCwd: "按目录过滤…",
     allClis: "全部 CLI",
+    allDomains: "全部项目域",
+    domainsHint: "项目域来自 cwd，可用 ~/.agenthandoff/domains.toml 自定义规则（ADR-009）",
+    subSession: "子会话",
+    parentOf: "子任务 · 父会话",
     unreadable: "个存储不可读",
     refresh: "刷新",
     updating: "更新中…",
@@ -19,11 +25,23 @@ const dict = {
     autoRefresh: "每 30 秒自动更新",
     loading: "加载中…",
     noSessions: "没有匹配的会话。先跑一些 AI CLI，然后刷新。",
+    guideTitle: "三步开始：看清存储 → 抽出交接包 → 生成接力提示词",
+    guideStep1: "看清这台机器上有哪些 agent 会话存储、能不能读",
+    guideStep2: "把最近一个会话导出成人可读的交接包",
+    guideStep3: "把交接包编译成可直接粘贴的接力提示词",
+    record: "记录",
+    noRecord: "（无记录）",
     unknownEnd: "结束状态未知",
     back: "返回",
+    copy: "复制",
+    copied: "已复制到剪贴板",
+    copiedShort: "✓ 已复制",
+    copyFailed: "复制失败：浏览器拒绝了剪贴板访问",
     copyBundle: "复制交接包",
+    copyBrief: "复制提示词",
     publish: "发布",
     published: "已发布",
+    publishFailed: "发布失败",
     briefEn: "提示词: EN",
     briefZh: "提示词: 中文",
     objective: "任务目标",
@@ -38,7 +56,6 @@ const dict = {
     filesTouched: "涉及的文件",
     contextNotes: "上下文结论",
     continuationBrief: "接力提示词",
-    copyBrief: "复制提示词",
     resumeInCli: "在 CLI 中恢复",
     noVerifiedLauncher: "此 CLI 暂无可验证的启动方式。",
     noLauncher: "无启动方式",
@@ -46,11 +63,13 @@ const dict = {
     unverified: "未验证",
     unverifiedHint: "本机未验证此命令语法，运行前请先确认。",
     headless: "无头派发",
-    session: "会话信息",
+    sessionInfo: "会话与 agent",
     interrupted: "会话曾中断",
+    pendingDirective: "未执行的指令",
     usage: "用量与速度",
     noUsage: "此 CLI 的存储不含用量数据。",
     model: "模型",
+    provider: "额度路由",
     calls: "调用",
     tokensIn: "输入",
     tokensOut: "输出",
@@ -61,6 +80,12 @@ const dict = {
     tokSpeed: "输出速度",
     transcript: "消息历史",
     noMessages: "无可显示的消息。",
+    user: "用户",
+    assistant: "助手",
+    expand: "展开全文",
+    collapse: "收起",
+    compactionNote: "上下文压缩",
+    compactionHint: "长会话被多次压缩，边界之前的消息仅存模型摘要",
     threadsDesc: "实为同一件事的多个会话 —— 谱系 + 文件重叠 + 标题词，限时间窗内",
     minOverlap: "最小重叠",
     recluster: "重新聚类",
@@ -70,6 +95,7 @@ const dict = {
     inboxDesc: "等待领取的交接包 —— 文件即接口，git 即总线",
     inboxEmpty: "交接箱为空。在会话详情页发布，或执行",
     global: "全局 ~/.agenthandoff",
+    globalHint: "跨项目交接箱：~/.agenthandoff",
     claim: "领取",
     claimed: "已领取",
     doctorDesc: "本机存在哪些 CLI 会话存储，是否可读",
@@ -79,6 +105,43 @@ const dict = {
     roll: "个归档",
     sessionsN: "个会话",
     lang: "EN",
+    /* search --------------------------------------------------------------- */
+    searchTitles: "搜索标题…",
+    searchFull: "全文检索…",
+    searchModeTitle: "标题",
+    searchModeFull: "全文",
+    searchHint: "按 / 聚焦搜索，Esc 清空；全文模式含消息正文与文件路径",
+    searchTooShort: "至少 2 个字符",
+    indexing: "索引中 {done}/{total}",
+    indexReady: "索引就绪 · {n} 个会话",
+    indexIdle: "索引未启动 · 首次全文检索约 15 秒",
+    indexFailed: "索引失败：{err}",
+    rebuildIndex: "重建索引",
+    buildIndex: "建立全文索引",
+    hits: "{n} 条结果",
+    noFullHits: "全文没有匹配。试试更短的词，或切回标题模式。",
+    searchedIn: "{ms} ms · 覆盖 {scanned}/{total}",
+    matchTitle: "标题",
+    matchBody: "正文",
+    matchFile: "文件",
+    matchCwd: "目录",
+    matchModel: "模型",
+    matchProvider: "路由",
+    matchOrigin: "来源",
+    /* theme ---------------------------------------------------------------- */
+    theme: "主题",
+    themeAuto: "跟随系统",
+    themeDark: "夜间",
+    themeLight: "日间",
+    themeToggleHint: "切换主题（T）· 配色已按 WCAG AA 校验",
+    /* interruption states -------------------------------------------------- */
+    it_clean: "正常结束",
+    it_user_pending: "有未执行的指令",
+    it_cancelled: "用户取消",
+    it_context_exceeded: "上下文超限",
+    it_length_truncated: "回复被截断",
+    it_error: "模型错误",
+    it_unknown: "异常结束",
   },
   en: {
     sessions: "Sessions",
@@ -86,9 +149,11 @@ const dict = {
     inbox: "Inbox",
     doctor: "Doctor",
     localOnly: "127.0.0.1 · local only",
-    searchTitles: "search titles…",
-    filterCwd: "filter by cwd…",
     allClis: "all CLIs",
+    allDomains: "all projects",
+    domainsHint: "domains come from cwd; customise rules in ~/.agenthandoff/domains.toml (ADR-009)",
+    subSession: "sub-session",
+    parentOf: "child session · parent",
     unreadable: "store(s) unreadable",
     refresh: "refresh",
     updating: "updating…",
@@ -96,11 +161,23 @@ const dict = {
     autoRefresh: "auto-refreshes every 30s",
     loading: "loading…",
     noSessions: "no sessions match. Run some AI CLIs, then refresh.",
+    guideTitle: "Three steps: inspect the stores → capture a bundle → compile a brief",
+    guideStep1: "see which agent stores exist on this machine and whether they read",
+    guideStep2: "extract the newest session into a human-readable handoff bundle",
+    guideStep3: "compile that bundle into a brief you can paste into the next session",
+    record: "record",
+    noRecord: "(none recorded)",
     unknownEnd: "unknown end-state",
     back: "back",
+    copy: "copy",
+    copied: "copied to clipboard",
+    copiedShort: "✓ copied",
+    copyFailed: "copy failed: the browser denied clipboard access",
     copyBundle: "copy bundle",
+    copyBrief: "copy brief",
     publish: "publish",
     published: "published",
+    publishFailed: "publish failed",
     briefEn: "brief: EN",
     briefZh: "brief: 中文",
     objective: "objective",
@@ -115,7 +192,6 @@ const dict = {
     filesTouched: "files touched",
     contextNotes: "context notes",
     continuationBrief: "continuation brief",
-    copyBrief: "copy brief",
     resumeInCli: "resume in cli",
     noVerifiedLauncher: "no verified launcher for this cli.",
     noLauncher: "no launcher",
@@ -123,11 +199,13 @@ const dict = {
     unverified: "unverified",
     unverifiedHint: "unverified on this machine — check the syntax before running.",
     headless: "headless",
-    session: "session",
+    sessionInfo: "session & agent",
     interrupted: "Interrupted session",
+    pendingDirective: "directive never executed",
     usage: "usage & speed",
     noUsage: "this cli's store records no usage data.",
     model: "model",
+    provider: "provider",
     calls: "calls",
     tokensIn: "in",
     tokensOut: "out",
@@ -138,6 +216,12 @@ const dict = {
     tokSpeed: "tok/s",
     transcript: "transcript",
     noMessages: "no messages to show.",
+    user: "user",
+    assistant: "assistant",
+    expand: "expand full text",
+    collapse: "collapse",
+    compactionNote: "context compaction",
+    compactionHint: "long sessions are compacted repeatedly; before each boundary only a model summary survives",
     threadsDesc: "sessions that are actually one job — lineage + file overlap + title tokens, within a time window",
     minOverlap: "min overlap",
     recluster: "recluster",
@@ -147,6 +231,7 @@ const dict = {
     inboxDesc: "published handoffs waiting for pickup — files are the API, git is the bus",
     inboxEmpty: "inbox empty. Publish from a session detail page, or",
     global: "~/.agenthandoff (global)",
+    globalHint: "cross-project exchange: ~/.agenthandoff",
     claim: "claim",
     claimed: "claimed",
     doctorDesc: "which CLI session stores exist on this machine, and are they readable",
@@ -156,6 +241,43 @@ const dict = {
     roll: "roll(s)",
     sessionsN: "session file(s)",
     lang: "中",
+    /* search --------------------------------------------------------------- */
+    searchTitles: "search titles…",
+    searchFull: "full-text search…",
+    searchModeTitle: "titles",
+    searchModeFull: "full text",
+    searchHint: "/ focuses search, Esc clears; full text covers message bodies and file paths",
+    searchTooShort: "at least 2 characters",
+    indexing: "indexing {done}/{total}",
+    indexReady: "index ready · {n} sessions",
+    indexIdle: "index not built · first full-text search takes ~15s",
+    indexFailed: "index failed: {err}",
+    rebuildIndex: "rebuild index",
+    buildIndex: "build full-text index",
+    hits: "{n} result(s)",
+    noFullHits: "no full-text matches. Try a shorter term, or switch back to titles.",
+    searchedIn: "{ms} ms · covered {scanned}/{total}",
+    matchTitle: "title",
+    matchBody: "body",
+    matchFile: "file",
+    matchCwd: "cwd",
+    matchModel: "model",
+    matchProvider: "provider",
+    matchOrigin: "origin",
+    /* theme ---------------------------------------------------------------- */
+    theme: "theme",
+    themeAuto: "system",
+    themeDark: "dark",
+    themeLight: "light",
+    themeToggleHint: "cycle theme (T) · every pair is WCAG-AA verified",
+    /* interruption states -------------------------------------------------- */
+    it_clean: "clean end",
+    it_user_pending: "un-executed directive",
+    it_cancelled: "cancelled by user",
+    it_context_exceeded: "context exceeded",
+    it_length_truncated: "reply truncated",
+    it_error: "model error",
+    it_unknown: "abrupt end",
   },
 } as const;
 
@@ -164,14 +286,41 @@ export type TKey = keyof (typeof dict)["zh"];
 
 export const LangContext = createContext<Lang>("zh");
 
+const LANG_KEY = "ah-lang";
+
+export function getLang(): Lang {
+  if (typeof localStorage === "undefined") return "zh";
+  return localStorage.getItem(LANG_KEY) === "en" ? "en" : "zh";
+}
+
 export function setAppLang(lang: Lang) {
-  localStorage.setItem("ah-lang", lang);
+  localStorage.setItem(LANG_KEY, lang);
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   window.dispatchEvent(new Event("ah-lang-change"));
+}
+
+function subscribeLang(cb: () => void): () => void {
+  window.addEventListener("ah-lang-change", cb);
+  return () => window.removeEventListener("ah-lang-change", cb);
+}
+
+/** React view of the stored language. The old code only re-rendered antd's
+ *  locale, so `useT()` kept reading the context default and EN mode silently
+ *  did nothing — this store is what makes the switch real. */
+export function useLang(): Lang {
+  return useSyncExternalStore(subscribeLang, getLang, () => "zh" as Lang);
 }
 
 export function useT(): (key: TKey) => string {
   const lang = useContext(LangContext);
-  return (key: TKey) => dict[lang][key] ?? key;
+  return (key: TKey) => (dict[lang][key] ?? key) as string;
+}
+
+/** t() with {placeholder} substitution — keeps sentences translatable as one unit. */
+export function useFmt(): (key: TKey, vars: Record<string, string | number>) => string {
+  const t = useT();
+  return (key, vars) =>
+    Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), t(key));
 }
 
 export function formatNum(n: number | null | undefined): string {

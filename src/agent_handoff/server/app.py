@@ -8,6 +8,7 @@ shipped inside the wheel). See docs/decisions.md ADR-006/007/008.
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 from importlib import resources
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from agent_handoff import search as ah_search
 from agent_handoff.exchange import claim as exchange_claim
 from agent_handoff.exchange import inbox as exchange_inbox
 from agent_handoff.exchange import publish as exchange_publish
@@ -296,6 +298,60 @@ _LAUNCHERS = {
     "codex": {"kind": "verified", "resume": "codex resume {session_id}", "headless": "codex exec"},
     "claude": {"kind": "unverified", "resume": "claude --resume {session_id}"},
 }
+
+
+@app.get("/api/search")
+def search_api(
+    q: str,
+    cli: str | None = None,
+    mode: str = "full",
+    limit: int = 50,
+):
+    """Ranked hits plus honest coverage stats.
+
+    ``mode=fast`` matches metadata only (no session loads, works on a cold
+    index); ``mode=full`` matches message bodies out of the warm index and
+    never blocks on I/O — while the index is still building, ``stats`` says so
+    and the UI shows progress instead of a silently partial list.
+    """
+    if len(q.strip()) < 2:
+        raise HTTPException(400, "query too short (>= 2 chars)")
+    if mode not in ("fast", "full"):
+        raise HTTPException(400, "mode must be fast|full")
+    if mode == "full" and ah_search.index_status()["state"] == "idle":
+        ah_search.warm_async()  # first full query starts the background index
+    hits, stats = ah_search.search_cached(q, cli=cli, limit=min(limit, 200), mode=mode)
+    return {"hits": [h.to_dict() for h in hits], "stats": asdict(stats)}
+
+
+@app.get("/api/search/status")
+def search_status():
+    """Index build state: {state, done, total, indexed, error}."""
+    return ah_search.index_status()
+
+
+@app.post("/api/search/warm")
+def search_warm():
+    """Kick (or join) the background index build. Returns immediately."""
+    return ah_search.warm_async()
+
+
+@app.get("/api/heartbeat")
+def heartbeat():
+    """Cheap liveness + session count used by the toolbar tile."""
+    n = 0
+    for p in all_parsers():
+        n += len(p.list_sessions())
+    return {"sessions": n}
+
+
+@app.post("/api/backup")
+def backup_api():
+    """Snapshot every store to disk. POST, not GET: this writes."""
+    from agent_handoff.backup import backup
+
+    dest = backup()
+    return {"path": str(dest)}
 
 
 @app.get("/api/launcher/{cli}/{sid}")

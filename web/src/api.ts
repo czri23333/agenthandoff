@@ -13,6 +13,9 @@ export interface SessionMeta {
   parent_session_id: string | null;
   status: string | null; // proven end-state, null = unknown
   domain: string; // config-driven project grouping (ADR-009)
+  /** Only the bundle meta carries totals; the listing omits them. */
+  tokens_in?: number | null;
+  tokens_out?: number | null;
 }
 
 export interface UsageModel {
@@ -103,6 +106,46 @@ export interface Launcher {
   headless?: string;
 }
 
+/** One ranked search hit. `matched` lists the surfaces that hit ("title+body"). */
+export interface SearchHit {
+  cli: string;
+  session_id: string;
+  title: string;
+  cwd: string;
+  updated_at: string | null;
+  score: number;
+  excerpt: string;
+  matched: string;
+}
+
+/** Coverage of a search: the UI must never present a partial scan as complete. */
+export interface SearchStats {
+  mode: string;
+  scanned: number;
+  total: number;
+  indexed: number;
+  took_ms: number;
+  index_state: "idle" | "building" | "ready" | "failed";
+  truncated: boolean;
+  refreshed: boolean;
+}
+
+export interface SearchResponse {
+  hits: SearchHit[];
+  stats: SearchStats;
+}
+
+export interface IndexStatus {
+  state: "idle" | "building" | "ready" | "failed";
+  done: number;
+  total: number;
+  indexed: number;
+  error: string;
+  persisted?: boolean;
+  path?: string;
+  rows?: number;
+}
+
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -136,13 +179,22 @@ export const api = {
   publish: (cli: string, sid: string, note?: string, globalScope = false) =>
     post<{ published: string }>("/api/publish", { cli, session_id: sid, note, global_scope: globalScope }),
   claim: (path: string, by?: string) => post<{ claimed: string }>("/api/claim", { path, by }),
+  /** mode=fast: titles/paths only (instant). mode=full: message bodies via the warm index. */
+  search: (q: string, opts: { cli?: string; mode?: "fast" | "full"; limit?: number } = {}) => {
+    const p = new URLSearchParams({ q, mode: opts.mode ?? "full", limit: String(opts.limit ?? 50) });
+    if (opts.cli) p.set("cli", opts.cli);
+    return get<SearchResponse>(`/api/search?${p}`);
+  },
+  searchStatus: () => get<IndexStatus>("/api/search/status"),
+  searchWarm: () => post<IndexStatus>("/api/search/warm", {}),
+  heartbeat: () => get<{ sessions: number }>("/api/heartbeat"),
 };
 
-export function relTime(iso: string | null): string {
+export function relTime(iso: string | null, now = Date.now()): string {
   if (!iso) return "?";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso.slice(0, 10);
-  const mins = Math.round((Date.now() - then) / 60000);
+  const mins = Math.round((now - then) / 60000);
   if (mins < 1) return "now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.round(mins / 60);

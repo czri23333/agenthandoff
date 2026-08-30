@@ -53,9 +53,9 @@ Issues = "https://github.com/czri23333/agenthandoff/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_handoff"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"web/dist" = "agent_handoff/server/static"
+# The cockpit build output is committed under
+# src/agent_handoff/server/static, so a clean clone installs without node.
+# Rebuild it with `npm run build` in web/ (vite emits straight into that dir).
 
 [tool.ruff]
 line-length = 100

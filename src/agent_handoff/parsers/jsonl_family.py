@@ -20,6 +20,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
 from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
 
@@ -46,7 +47,7 @@ class JsonlSessionParser(Parser):
     projects_dirname: str = ""  # ".claude" / ".codebuddy"
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or (Path.home() / self.projects_dirname / "projects")
+        self.root = root or (home() / self.projects_dirname / "projects")
 
     def available(self) -> bool:
         return self.root.is_dir()

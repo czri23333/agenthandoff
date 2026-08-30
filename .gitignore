@@ -15,3 +15,11 @@ handoff.json
 web/node_modules/
 web/dist/
 node_modules/
+# Local session dumps / generated bundles: real transcripts, never publish
+transfers/
+handover*.md
+AGENT_HANDOFF_GUIDE.md
+*-handoff-ui.bat
+
+# build artifact (tsc incremental)
+web/tsconfig.tsbuildinfo

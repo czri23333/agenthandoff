@@ -8,5 +8,11 @@ export default defineConfig({
   server: {
     proxy: { "/api": "http://127.0.0.1:8620" },
   },
-  build: { outDir: "dist", sourcemap: false },
+  build: {
+    // Emit straight into the package so the wheel/serve path reads the
+    // same tree that is committed (see CONTRIBUTING "Cockpit frontend").
+    outDir: "../src/agent_handoff/server/static",
+    emptyOutDir: true,
+    sourcemap: false,
+  },
 });

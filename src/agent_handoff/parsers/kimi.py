@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, ts_to_iso
 from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
 
@@ -24,7 +25,7 @@ class KimiParser(Parser):
     cli = "kimi"
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or Path.home() / ".kimi-code" / "sessions"
+        self.root = root or home() / ".kimi-code" / "sessions"
 
     def available(self) -> bool:
         return self.root.is_dir()

@@ -91,7 +91,7 @@ def test_budget_keeps_header_when_all_else_dropped():
     )
     tiny = render_brief(b, max_chars=2000)
     assert "<project>" in tiny and "RULE" not in tiny
-    assert "agenthandoff v0.1" in tiny
+    assert "agenthandoff v0.2" in tiny
 
 
 def test_zh_scaffolding():

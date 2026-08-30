@@ -36,7 +36,19 @@ class StoreInfo:
     distro: str = field(default="")
 
 
+ENV_HOME = "AGENTHANDOFF_HOME"
+
+
 def home() -> Path:
+    """The user home whose toolchain we inspect.
+
+    Override with AGENTHANDOFF_HOME to point the whole tool at another
+    profile — a mounted disk image, a colleague's copy handed over for
+    debugging, or a fixture tree. Default is the running user's home.
+    """
+    override = os.environ.get(ENV_HOME, "").strip()
+    if override:
+        return Path(override).expanduser()
     return Path.home()
 
 
@@ -133,13 +145,24 @@ def kimi_store() -> StoreInfo | None:
 
 
 def codex_store() -> StoreInfo | None:
-    p = home() / ".codex" / "sessions"
+    """Codex resolves its own root from $CODEX_HOME; so do we.
+
+    Only file presence is reported here. Whether those files can actually be
+    parsed is measured by the parser — `handoff doctor` asks it directly instead
+    of repeating a hardcoded verdict.
+    """
+    override = os.environ.get("CODEX_HOME", "").strip()
+    base = Path(override).expanduser() if override else home() / ".codex"
+    p = base / "sessions"
     if not p.is_dir():
         return None
     n = sum(1 for _ in p.rglob("*.jsonl"))
-    return StoreInfo(
-        "codex", "jsonl-dir", p, False, f"{n} rollout file(s); parser on roadmap"
-    )
+    archived = base / "archived_sessions"
+    extra = sum(1 for _ in archived.rglob("*.jsonl")) if archived.is_dir() else 0
+    detail = f"{n} rollout file(s)" + (f"; {extra} archived" if extra else "")
+    if override:
+        detail += "; $CODEX_HOME"
+    return StoreInfo("codex", "jsonl-dir", p, n > 0, detail)
 
 
 def _can_open_sqlite(p: Path) -> bool:

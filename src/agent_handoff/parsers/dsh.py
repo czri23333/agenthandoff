@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, ts_to_iso
 from agent_handoff.parsers.base import Parser
 
@@ -37,7 +38,7 @@ class DshParser(Parser):
     cli = "dsh"
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or Path.home() / ".dsh" / "sessions"
+        self.root = root or home() / ".dsh" / "sessions"
 
     def available(self) -> bool:
         return self.root.is_dir()

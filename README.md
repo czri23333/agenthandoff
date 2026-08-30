@@ -3,7 +3,6 @@
 **Hand off any AI coding CLI session to the next one — deterministic, fully local, zero dependencies.**
 
 ![CI](https://github.com/czri23333/agenthandoff/actions/workflows/ci.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/agenthandoff)
 ![Python](https://img.shields.io/pypi/pyversions/agenthandoff)
 ![License](https://img.shields.io/pypi/l/agenthandoff)
 
@@ -25,19 +24,28 @@ output, so bundles are diffable and trustworthy.
 
 ## Supported CLIs
 
-| CLI | Storage read | Status |
+Evidence levels: **read** = parsed a real store on the maintainer's machine
+(2026-08-31, one Windows host); **never verified** = code exists, nobody has fed
+it data; **proven** = a sanitized fixture in this repo is parsed in CI (nobody is
+at this level yet — see [docs/limitations.md](docs/limitations.md)). Run
+`handoff doctor` to see what is real on *your* machine; it, not this table, is the
+source of truth.
+
+| CLI | Storage read | Evidence |
 |---|---|---|
-| ZCode | SQLite (`~/.zcode/cli/db/db.sqlite`) | ✅ stable |
-| Claude Code | JSONL (`~/.claude/projects/…`) | ✅ stable |
-| CodeBuddy / CodeBuddy CN | JSONL (`~/.codebuddy[cn]/projects/…`) | ✅ stable |
-| Qoderwork (+CN, dual-account) | JSONL (`~/.qoderwork[cn]/projects/…`) | ✅ stable |
-| Qoder CN IDE | JSONL (`~/.qoder-cn/projects/…`, shared by the qoder-cn family) | ✅ stable |
-| Qwen Work CN | JSONL (`~/.qwenworkcn/projects/…`) | ✅ stable |
-| dsh (DeepSeekHarness) | zstd-JSONL (`~/.dsh/sessions/…`) | ✅ stable (`[zstd]` extra) |
-| Kimi CLI | `state.json` + `wire.jsonl` | 🧪 experimental |
-| Codex CLI | `~/.codex/sessions` | ✅ stable |
+| ZCode | SQLite (`~/.zcode/cli/db/db.sqlite`) | ✅ read — 453 sessions |
+| Qoder CN IDE | JSONL (`~/.qoder-cn/projects/…`) | ✅ read — 118 files |
+| CodeBuddy | JSONL (`~/.codebuddy/projects/…`) | ✅ read — 32 files |
+| Qoderwork (+CN, dual-account) | JSONL (`~/.qoderwork[cn]/projects/…`) | ✅ read — 13 files, 3 account configs |
+| Qwen Work CN | JSONL (`~/.qwenworkcn/projects/…`) | ✅ read — 1 file |
+| dsh (DeepSeekHarness) | zstd-JSONL (`~/.dsh/sessions/…`) | ✅ read — 46 rolls, incl. a WSL-side store |
+| Kimi CLI | `state.json` + `wire.jsonl` | 🧪 read once — experimental |
+| Codex CLI | `~/.codex/sessions` | ❌ detected, not readable — rollout layout moved |
+| Claude Code | JSONL (`~/.claude/projects/…`) | ⚠️ never verified (no store seen, no fixture) |
+| CodeBuddy CN | JSONL (`~/.codebuddy-cn/projects/…`) | ⚠️ never verified |
 | opencode | `~/.local/share/opencode/storage` | 🔜 roadmap |
 | Qoder IDE (intl.) | Electron leveldb, no session files | 🔜 roadmap |
+| Trae / IDE-family (SQLite state) | per-vendor app data | 🔜 roadmap, read-only only |
 
 Multi-account harnesses are reported as evidence: `handoff doctor` shows
 `N account config(s)` (one encrypted model catalog per login); per-session
@@ -51,6 +59,7 @@ Windows side automatically (`handoff doctor` shows them tagged `[wsl]`).
 
 ```bash
 pip install "agenthandoff[zstd]"     # or: pipx install / uv tool install
+# (unreleased on PyPI — from source: git clone + pip install -e ".[dev,zstd]")
 handoff doctor                       # which CLI stores exist and are readable?
 handoff list                         # recent sessions across every CLI
 handoff list --cwd myproject -n 5
@@ -58,9 +67,23 @@ handoff capture                      # latest session → bundle to stdout
 handoff capture sess_c66487e -o handoff.md
 handoff resume handoff.md            # → continuation brief (paste into next session)
 handoff resume handoff.md --lang zh --max-chars 8000
+handoff search "cockpit"               # full-text search across every session
+handoff ui --open                   # cockpit WebUI on 127.0.0.1:8620 (needs [server])
+handoff publish handoff.md          # drop a bundle into the exchange dir
+handoff inbox                       # bundles other agents left for you
+handoff threads                     # one job spread across many CLI sessions
+handoff backup                      # snapshot every session store (sources stay read-only)
 ```
 
 Everything is read-only. `agenthandoff` never writes into a CLI's store.
+
+## What is *not* working
+
+The honest inventory lives in
+[docs/limitations.md](docs/limitations.md): which support claims rest on real
+data, which are unverified, and the 15 known gaps — including the one that
+matters most, that a brief assembled after a quota death currently drops recent
+context first. If a sentence below sounds like marketing, go read that file.
 
 ## Why not just ask the agent to write a handoff file?
 
@@ -102,7 +125,10 @@ Details in [docs/architecture.md](docs/architecture.md).
 ## Privacy
 
 - Session content never leaves your machine; the tool makes zero network calls.
-- Test fixtures in this repo are **synthetic** — no real transcripts are committed.
+- No session data of any kind is committed — the repo ships no fixtures yet, and
+  when it does they will be structure-preserving, content-replaced files.
+- Nothing leaves your machine: the tool makes zero network calls, and the cockpit
+  binds to 127.0.0.1 only.
 - Bundles are written only where you point `--out`.
 
 ## Development

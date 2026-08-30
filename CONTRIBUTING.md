@@ -26,6 +26,21 @@ rules keep it reviewable.
    corrupted-line case.
 5. Update the support matrix in both READMEs and `docs/architecture.md`.
 
+## Cockpit frontend
+
+The cockpit (FastAPI + React) ships its built UI inside the package at
+`src/agent_handoff/server/static/`, which is **tracked on purpose**: a
+clean clone must `pip install` and serve the UI without node. After
+changing `web/src`:
+
+```bash
+cd web && npm ci && npm run build   # vite emits into ../src/agent_handoff/server/static
+git add -A src/agent_handoff/server/static   # commit the rebuilt bundle in the same PR
+```
+
+`handoff ui --open` serves it at `http://127.0.0.1:8620` (loopback only).
+During development, `npm run dev` proxies `/api` to that port.
+
 ## Style
 
 - `ruff check .` must pass (E, F, I, UP, B, SIM; line length 100).

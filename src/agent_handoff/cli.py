@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
-from agent_handoff import __version__
+from agent_handoff import __version__, vault
+from agent_handoff import search as ah_search
 from agent_handoff.exchange import claim as exchange_claim
 from agent_handoff.exchange import inbox as exchange_inbox
 from agent_handoff.exchange import publish as exchange_publish
@@ -17,19 +19,83 @@ from agent_handoff.resume import render_brief
 from agent_handoff.summarize import summarize
 
 
-def _cmd_doctor(_args: argparse.Namespace) -> int:
+def _cmd_doctor(args: argparse.Namespace) -> int:
     stores = discover()
-    if not stores:
-        print("No known CLI session stores found on this machine.")
-        return 1
-    print(f"{'cli':<14} {'kind':<10} {'readable':<9} {'via':<4} detail")
+    parsed = _doctor_rows(stores)
+    if args.markdown:
+        print(render_doctor_markdown(parsed))
+        return 0
+    width = max((len(s.cli) for s in stores), default=6) + 2
+    print(f"{'cli':<{width}} {'kind':<10} {'readable':<9} {'parses':<8} {'via':<6} detail")
     print("-" * 88)
-    for s in stores:
-        via = "wsl" if s.via_wsl else "native"
-        mark = "yes" if s.readable else "no"
-        print(f"{s.cli:<14} {s.kind:<10} {mark:<9} {via:<4} {s.detail}")
-        print(f"{'':<14} path: {s.path}")
+    for info, sessions, note in parsed:
+        via = "wsl" if info.via_wsl else "native"
+        extra = f"; {note}" if note else ""
+        parses = f"yes ({sessions})" if sessions >= 0 else "n/a"
+        readable = "yes" if info.readable else "no"
+        print(
+            f"{info.cli:<{width}} {info.kind:<10} {readable:<9} {parses:<8} "
+            f"{via:<6} {info.detail}{extra}"
+        )
+        print(f"{'':<{width}} path: {info.path}")
+    if not stores:
+        print("no known CLI stores found on this machine.")
     return 0
+
+
+def _doctor_rows(stores):
+    """Ask each registered parser what it actually sees in this store."""
+    from agent_handoff.parsers import all_parsers
+
+    by_cli: dict[str, list] = {}
+    for parser in all_parsers():
+        by_cli.setdefault(parser.cli, []).append(parser)
+    out = []
+    for info in stores:
+        sessions = -1
+        note = ""
+        for parser in by_cli.get(info.cli, []):
+            try:
+                # StoreInfo.path is exactly what each parser's constructor wants:
+                # the SQLite file for sqlite stores, the session directory otherwise.
+                scoped = parser.with_root(Path(info.path))
+                metas = scoped.list_sessions()
+                sessions = len(metas)
+                if sessions:
+                    break
+            except (OSError, ValueError) as exc:  # evidence, not an assumption
+                note = f"parser error: {type(exc).__name__}"
+        out.append((info, sessions, note))
+    return out
+
+
+def _parses_cell(sessions: int) -> str:
+    """Markdown cell: did a registered parser actually read this store?
+
+    -1 means no parser is registered for the cli id at all - a different
+    statement from "registered, but it returned zero sessions".
+    """
+    if sessions < 0:
+        return "—"
+    if sessions:
+        return f"✅ {sessions} sessions"
+    return "❌ 0 sessions"
+
+
+def render_doctor_markdown(rows) -> str:
+    """The same evidence as a table — the raw material of the README matrix."""
+    lines = [
+        "| CLI | store | readable | parses on this machine | detail |",
+        "|---|---|---|---|---|",
+    ]
+    for info, sessions, note in rows:
+        parses = _parses_cell(sessions)
+        detail = info.detail + (f"; {note}" if note else "")
+        lines.append(
+            f"| `{info.cli}` | {info.kind}{' (WSL)' if info.via_wsl else ''} "
+            f"| {'✅' if info.readable else '❌'} | {parses} | {detail} |"
+        )
+    return "\n".join(lines)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -76,11 +142,19 @@ def _cmd_capture(args: argparse.Namespace) -> int:
     bundle = summarize(raw)
     if args.note:
         bundle.meta.notes = list(args.note)
+
+    archived = None
+    if not args.no_vault:
+        try:
+            archived = vault.save(raw)
+        except OSError as exc:  # a failed archive must not cost the bundle
+            print(f"warning: vault archive failed: {exc}", file=sys.stderr)
     out = render_json(bundle) if args.json else render_markdown(bundle)
     if args.out:
         dest = Path(args.out)
         dest.write_text(out, encoding="utf-8")
         print(f"bundle written: {dest} ({len(out)} chars)")
+        _vault_footer(bundle, raw, archived, out, dest)
     else:
         print(out)
     return 0
@@ -92,7 +166,15 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as e:
         print(f"error: cannot read bundle: {e}", file=sys.stderr)
         return 1
-    brief = render_brief(bundle, lang=args.lang, max_chars=args.max_chars)
+    budget = args.max_chars
+    if args.depth == "full":
+        budget = 10**9  # explicit opt-in: no paste window to fit into
+    brief = render_brief(
+        bundle,
+        lang=args.lang,
+        max_chars=budget,
+        with_pack=args.depth != "brief",
+    )
     if args.out:
         Path(args.out).write_text(brief, encoding="utf-8")
         print(f"brief written: {args.out} ({len(brief)} chars)")
@@ -211,7 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--version", action="version", version=f"agenthandoff {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("doctor", help="probe which CLI stores exist and are readable")
+    p_doc = sub.add_parser(
+        "doctor", help="probe which CLI stores exist, are readable, and actually parse"
+    )
+    p_doc.add_argument(
+        "--markdown", action="store_true", help="emit this machine's support table as markdown"
+    )
 
     p_list = sub.add_parser("list", help="list recent sessions across CLIs")
     p_list.add_argument("--cli", help="filter by cli id (zcode, claude, codebuddy, dsh, ...)")
@@ -224,6 +311,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_cap.add_argument("--cli", help="restrict the search to one cli")
     p_cap.add_argument("--out", help="write bundle to file (default: stdout)")
     p_cap.add_argument("--json", action="store_true", help="emit JSON instead of markdown")
+    p_cap.add_argument(
+        "--no-vault",
+        action="store_true",
+        help="skip the lossless archive (capture normally stores the full extraction)",
+    )
     p_cap.add_argument(
         "--note",
         action="append",
@@ -272,6 +364,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_thr.add_argument("-n", type=int, default=10, help="max threads shown (default 10)")
 
+    p_srch = sub.add_parser(
+        "search",
+        help="search every session: titles/paths are instant, --body adds message text",
+    )
+    p_srch.add_argument("query", help="search string (at least 2 characters)")
+    p_srch.add_argument("--cli", help="restrict to one cli")
+    p_srch.add_argument(
+        "--body",
+        action="store_true",
+        help="also match message bodies (first run indexes every session once, ~15s)",
+    )
+    p_srch.add_argument("-n", "--limit", type=int, default=50, help="max hits (default 50)")
+    p_srch.add_argument("--json", action="store_true", help="emit hits as JSON")
+    p_srch.add_argument("--reindex", action="store_true", help="drop the cached index and rebuild")
+
+    p_bu = sub.add_parser("backup", help="archive all session stores to a timestamped directory")
+    p_bu.add_argument(
+        "--dest", help="destination directory (default: ~/.agenthandoff/backups/backup-<ts>)"
+    )
+
+    p_vault = sub.add_parser(
+        "vault",
+        help="the lossless archive: what capture kept, and how to get it back",
+    )
+    p_vault.add_argument(
+        "action",
+        nargs="?",
+        choices=["list", "show", "check", "restore"],
+        help="list (default) | show | check | restore",
+    )
+    p_vault.add_argument("cli", nargs="?", help="cli id, for show/check/restore")
+    p_vault.add_argument("session", nargs="?", help="session id, for show/check/restore")
+    p_vault.add_argument("--out", help="restore: destination .json path (default: stdout)")
+    p_vault.add_argument("-n", type=int, default=20, help="list: max rows (default 20)")
+
     p_ui = sub.add_parser("ui", help="serve the local cockpit WebUI (needs [server] extra)")
     p_ui.add_argument("--host", default="127.0.0.1")
     p_ui.add_argument("--port", type=int, default=8620)
@@ -282,8 +409,152 @@ def build_parser() -> argparse.ArgumentParser:
     p_res.add_argument("--max-chars", type=int, default=12000, help="brief budget (default 12000)")
     p_res.add_argument("--lang", choices=["en", "zh"], default="en", help="scaffolding language")
     p_res.add_argument("--out", help="write brief to file (default: stdout)")
+    p_res.add_argument(
+        "--depth",
+        choices=["brief", "resume", "full"],
+        default="resume",
+        help="brief: no verbatim tail; resume: protected tail (default); full: ignore the budget",
+    )
 
     return ap
+
+
+def _cmd_search(args: argparse.Namespace) -> int:
+    query = args.query.strip()
+    if len(query) < 2:
+        print("error: query needs at least 2 characters", file=sys.stderr)
+        return 2
+
+    def progress(done: int, total: int) -> None:
+        if not sys.stderr.isatty():
+            return
+        sys.stderr.write(f"\rindexing {done}/{total} sessions…      ")
+        sys.stderr.flush()
+
+    hits, stats = ah_search.search_with_stats(
+        query,
+        cli=args.cli,
+        limit=args.limit,
+        mode="full" if args.body else "fast",
+        on_progress=progress if args.body else None,
+        reindex=args.reindex,
+    )
+    if args.body and sys.stderr.isatty():
+        sys.stderr.write("\r" + " " * 44 + "\r")
+
+    if args.json:
+        print(json.dumps([h.to_dict() for h in hits], ensure_ascii=False, indent=2))
+        return 0
+    if not hits:
+        print("no hits. Try a shorter term, or --body to search message text.")
+        return 1
+    for h in hits:
+        cwd = h.cwd or "?"
+        print(f'{h.cli:<14} {h.session_id[:24]} "{h.title[:52]}" ({cwd})')
+        tag = f"[{h.matched}] " if h.matched else ""
+        print(f"  {tag}{h.excerpt[:160]}")
+    print(
+        f"{len(hits)} hit(s) \u00b7 scanned {stats.scanned} session(s) in {stats.took_ms} ms"
+        f" \u00b7 index {stats.index_state} ({stats.indexed}/{stats.total})"
+    )
+    return 0
+
+
+def _cmd_backup(args: argparse.Namespace) -> int:
+    from agent_handoff.backup import backup
+
+    dest = Path(args.dest) if args.dest else None
+    out = backup(dest)
+    print(f"backup written: {out}")
+    return 0
+
+
+def _vault_footer(bundle, raw, archived, out: str, dest) -> None:
+    """One stderr line: where the lossless copy is, and how lossy this view is."""
+    if dest is None:
+        return
+    print(vault.fidelity_note(bundle, raw, len(out)), file=sys.stderr)
+    where = f"archived: {archived}" if archived else "archive already current"
+    print(where, file=sys.stderr)
+
+
+def _cmd_vault(args: argparse.Namespace) -> int:
+    """list | show | check | restore - the copy that outlives a store's own cleanup."""
+    action = args.action or "list"
+
+    if action == "list":
+        rows = vault.entries()
+        if not rows:
+            print("vault is empty - `handoff capture` archives every session it reads")
+            return 0
+        for row in rows[: args.n]:
+            cli = row["cli"]
+            sid = row["session_id"][:24]
+            turns = row["message_count"]
+            saved = row["saved_at"]
+            title = row["title"][:38]
+            print(f"{cli:<14} {sid:<26} {turns:>5} turns  {saved:<25} {title}")
+        total = sum(r["bytes"] for r in rows) / 1e6
+        print(f"{len(rows)} archived session(s), {total:.1f} MB under {vault.vault_root()}")
+        return 0
+
+    if args.session is None:
+        print(f"error: `vault {action}` needs <cli> <session-id>", file=sys.stderr)
+        return 2
+
+    doc = vault.read_doc(args.cli, args.session)
+    if doc is None:
+        print(f"error: nothing archived for {args.cli}/{args.session}", file=sys.stderr)
+        return 1
+
+    if action == "show":
+        return _vault_show(doc, args)
+
+    if action == "check":
+        return _vault_check(args)
+
+    payload = json.dumps(doc.get("session"), ensure_ascii=False, indent=2)
+    if args.out:
+        dest = Path(args.out)
+        dest.write_text(payload, encoding="utf-8")
+        print(f"restored {len(payload)} chars -> {dest}")
+    else:
+        print(payload)
+    return 0
+
+
+def _vault_show(doc: dict, args: argparse.Namespace) -> int:
+    session = doc.get("session") or {}
+    meta = session.get("meta") or {}
+    digest = str(doc.get("content_sha256"))[:16]
+    print(f"saved_at: {doc.get('saved_at')}  sha256: {digest}...")
+    print(f"title:    {meta.get('title')}")
+    turns = len(session.get("messages") or [])
+    files = len(session.get("files_touched") or {})
+    print(f"turns:    {turns}  files: {files}")
+    print(f"path:     {vault.path_for(args.cli, args.session)}")
+    return 0
+
+
+def _vault_check(args: argparse.Namespace) -> int:
+    """Has the vendor's store shrunk under us? Then the vault is the only copy."""
+    try:
+        _parser, live = resolve_session(args.session, cli=args.cli)
+    except FileNotFoundError as exc:
+        print(f"error: cannot read the live store: {exc}", file=sys.stderr)
+        return 1
+    report = vault.check(args.cli, args.session, live)
+    for key, value in report.items():
+        print(f"{key}: {value}")
+    if report["state"] == "store-shrank":
+        missing = report.get("turns_only_in_vault", 0)
+        print(
+            f"\nALARM: the store dropped {missing} turn(s) the vault still holds. "
+            "This archive may be the only copy - restore it with `handoff vault restore`.",
+            file=sys.stderr,
+        )
+        return 3
+    return 0
 
 
 _HANDLERS = {
@@ -296,6 +567,9 @@ _HANDLERS = {
     "claim": _cmd_claim,
     "threads": _cmd_threads,
     "ui": _cmd_ui,
+    "search": _cmd_search,
+    "backup": _cmd_backup,
+    "vault": _cmd_vault,
 }
 
 

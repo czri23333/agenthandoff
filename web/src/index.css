@@ -1,54 +1,345 @@
 @import "tailwindcss";
 
-/* CLI identity colors — quick visual ownership per badge. */
+/* ── Cockpit style system ─────────────────────────────────────────────────────
+   Colours come only from CSS custom properties injected by theme.ts out of
+   tokens.json (WCAG-AA verified in tests/test_tokens_contrast.py). Tailwind is
+   used for layout and spacing, never for palette. That split is deliberate:
+   the previous build mixed antd preset tags with zinc-* utilities and shipped
+   unreadable text (agent badges at 1.1:1), and no test could have caught it.
+
+   Type scale: 13.5px primary / 12px meta / 11px mono-only. Nothing smaller,
+   because 10-11px CJK is illegible at typical monitor distances.            */
+
 :root {
-  --cli-zcode: #7dd3fc;
-  --cli-claude: #fca5a5;
-  --cli-codebuddy: #86efac;
-  --cli-codebuddy-cn: #4ade80;
-  --cli-qoderwork: #fdba74;
-  --cli-qoderwork-cn: #fb923c;
-  --cli-qodercn-ide: #f59e0b;
-  --cli-qwenwork: #c4b5fd;
-  --cli-dsh: #67e8f9;
-  --cli-kimi: #d8b4fe;
-  --cli-codex: #a5b4fc;
+  --ah-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --ah-radius: 8px;
 }
 
-html, body { height: 100%; }
-
-/* ── Tactile interaction spec ──────────────────────────────────────────────
-   Every pressable element answers within ~100ms: press = shrink + dim,
-   release = spring back. Hover lifts brightness slightly. This is the
-   whole-app feel, not per-button styling. */
-button, [role="button"], select, input[type="range"] {
-  transition: transform 120ms ease, filter 120ms ease, background-color 150ms ease,
-    color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+html,
+body,
+#root {
+  height: 100%;
 }
-button:active:not(:disabled), [role="button"]:active:not(:disabled) {
+
+body {
+  margin: 0;
+  background: var(--ah-surface-0);
+  color: var(--ah-text-1);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Surfaces --------------------------------------------------------------- */
+.ah-bar {
+  background: var(--ah-surface-1);
+  border-bottom: 1px solid var(--ah-line);
+}
+
+.ah-card {
+  background: var(--ah-surface-1);
+  border: 1px solid var(--ah-line);
+  border-radius: var(--ah-radius);
+}
+
+.ah-inset {
+  background: var(--ah-surface-2);
+  border: 1px solid var(--ah-line);
+  border-radius: 6px;
+}
+
+/* Text tiers ------------------------------------------------------------- */
+.ah-title {
+  color: var(--ah-text-1);
+  font-size: 13.5px;
+}
+
+.ah-label {
+  color: var(--ah-text-2);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ah-meta {
+  color: var(--ah-text-2);
+  font-size: 12px;
+}
+
+.ah-faint {
+  color: var(--ah-text-3);
+  font-size: 12px;
+}
+
+.ah-num {
+  font-family: var(--ah-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ah-text-2);
+  font-size: 12px;
+}
+
+.ah-accent {
+  color: var(--ah-accent);
+}
+.ah-ok {
+  color: var(--ah-ok);
+}
+.ah-warn {
+  color: var(--ah-warn);
+}
+.ah-err {
+  color: var(--ah-err);
+}
+
+/* CLI identity chip ------------------------------------------------------ */
+.ah-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--ah-cli-border, var(--ah-line-strong));
+  background: var(--ah-cli-bg, var(--ah-surface-2));
+  color: var(--ah-cli-fg, var(--ah-text-1));
+  font-family: var(--ah-font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.ah-chip-dim {
+  /* The ·origin suffix is secondary but still AA: lighter weight, same ink. */
+  font-weight: 400;
+  opacity: 1;
+}
+
+/* Code / brief panels ---------------------------------------------------- */
+.ah-code {
+  background: var(--ah-code-bg);
+  border: 1px solid var(--ah-line);
+  color: var(--ah-text-1);
+  font-family: var(--ah-font-mono);
+  border-radius: 6px;
+}
+
+.ah-mark {
+  background: color-mix(in srgb, var(--ah-accent) 30%, transparent);
+  color: var(--ah-text-1);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* Rows ------------------------------------------------------------------- */
+.ah-row {
+  background: var(--ah-surface-1);
+  border: 1px solid var(--ah-line);
+  border-radius: var(--ah-radius);
+}
+
+.ah-row:hover {
+  background: var(--ah-surface-2);
+  border-color: var(--ah-line-strong);
+}
+
+.ah-skeleton {
+  background: var(--ah-surface-2);
+  border: 1px solid var(--ah-line);
+  border-radius: var(--ah-radius);
+}
+
+/* Tactile interaction spec: every pressable answers within ~100ms --------- */
+button,
+[role="button"],
+select,
+input[type="range"] {
+  transition:
+    transform 120ms ease,
+    filter 120ms ease,
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.82);
+  filter: brightness(0.9);
 }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* View switch: content slides up softly instead of hard-swapping. */
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Keyboard focus must be visible on both themes. */
+:focus-visible {
+  outline: 2px solid var(--ah-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* View switch + list stagger. */
 @keyframes view-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-.view-enter { animation: view-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
 
-/* Rows/cards appear staggered on first paint of a list. */
+.view-enter {
+  animation: view-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
 @keyframes row-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-.row-enter { animation: row-in 160ms ease-out both; }
 
-/* Live freshness dot: deliberately NOT animated. A permanently moving
-   element keeps the page visually unsettled and makes every screenshot-based
-   automation (and some humans) unable to get a stable frame. */
-.freshness-pulse { opacity: 0.9; }
+.row-enter {
+  animation: row-in 160ms ease-out both;
+}
 
-html { scroll-behavior: smooth; }
+@keyframes shimmer {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
 
+.ah-skeleton {
+  animation: shimmer 1.1s ease-in-out infinite;
+}
+
+/* Live freshness dot: deliberately NOT animated. A permanently moving element
+   keeps the page visually unsettled and breaks screenshot-based automation
+   (and some humans). */
+.freshness-dot {
+  background: var(--ah-ok);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Reduced motion: respect the OS setting, no exceptions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Progress bar for the search index build. */
+.ah-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ah-surface-2);
+  overflow: hidden;
+}
+
+.ah-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--ah-accent);
+  transition: width 250ms ease;
+}
+
+/* ── Responsive rules ───────────────────────────────────────────────────────
+   The cockpit is used at laptop width and on ultrawide monitors, in a browser,
+   not a fixed canvas. Layout adapts; type size does not (12px is already the
+   floor for CJK legibility). */
+
+.ah-shell {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 12px;
+}
+
+@media (min-width: 1200px) {
+  .ah-shell {
+    grid-template-columns: minmax(0, 1fr) 400px;
+    padding: 16px;
+    gap: 16px;
+  }
+}
+
+@media (min-width: 1700px) {
+  .ah-shell {
+    grid-template-columns: minmax(0, 1fr) 460px;
+  }
+}
+
+/* Stacks below 1200px: the side column becomes a second row, scrollable. */
+.ah-side {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ah-main {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* Toolbar: wrap rather than push controls off-screen. */
+.ah-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Wide tables/code scroll inside their own box, never breaking the page. */
+.ah-scroll-x {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* Reading measure: long briefs stay readable on ultrawide. */
+.ah-prose {
+  max-width: 78ch;
+}
+
+/* Hide tertiary chrome on narrow windows instead of truncating it. */
+@media (max-width: 1100px) {
+  .ah-narrow-hide {
+    display: none !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .ah-md-hide {
+    display: none !important;
+  }
+}
+
+.ah-search-input {
+  width: clamp(180px, 28vw, 340px);
+}
+
+.ah-search-panel {
+  max-height: min(46vh, 620px);
+  overflow-y: auto;
+}

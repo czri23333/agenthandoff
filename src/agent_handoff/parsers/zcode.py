@@ -11,6 +11,7 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
+from agent_handoff.locations import home
 from agent_handoff.model import (
     CompactionEvent,
     Interruption,
@@ -27,7 +28,7 @@ class ZcodeParser(Parser):
     cli = "zcode"
 
     def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = db_path or Path.home() / ".zcode" / "cli" / "db" / "db.sqlite"
+        self.db_path = db_path or home() / ".zcode" / "cli" / "db" / "db.sqlite"
 
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=2)
