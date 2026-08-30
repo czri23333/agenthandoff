@@ -83,6 +83,20 @@ class ZcodeParser(Parser):
                 "SELECT id, data, time_created FROM message WHERE session_id=? ORDER BY sequence",
                 (session_id,),
             ).fetchall()
+            # Batch-load all parts in one query — a per-message query here is
+            # N+1 and turns 30k-message sessions into minutes.
+            parts_rows = con.execute(
+                "SELECT message_id, data FROM part WHERE session_id=? ORDER BY sequence",
+                (session_id,),
+            ).fetchall()
+            parts_by_msg: dict[str, list[dict]] = {}
+            for pr in parts_rows:
+                try:
+                    pdata = json.loads(pr["data"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                parts_by_msg.setdefault(pr["message_id"], []).append(pdata)
+
             for m in msg_rows:
                 try:
                     mdata = json.loads(m["data"])
@@ -92,16 +106,8 @@ class ZcodeParser(Parser):
                 if role not in ("user", "assistant"):
                     continue
 
-                parts = con.execute(
-                    "SELECT data FROM part WHERE message_id=? ORDER BY sequence",
-                    (m["id"],),
-                ).fetchall()
                 texts: list[str] = []
-                for p in parts:
-                    try:
-                        pdata = json.loads(p["data"])
-                    except (json.JSONDecodeError, TypeError):
-                        continue
+                for pdata in parts_by_msg.get(m["id"], []):
                     ptype = pdata.get("type")
                     if ptype == "text":
                         t = self.clean_text(pdata.get("text") or "")

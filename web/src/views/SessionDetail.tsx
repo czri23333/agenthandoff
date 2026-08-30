@@ -1,7 +1,33 @@
 import { useEffect, useState } from "react";
-import { api, relTime, type Launcher, type SessionDetail as Detail } from "../api";
+import { api, relTime, type Launcher, type SessionDetail as Detail, type TranscriptMessage } from "../api";
 import { Bullets, CliBadge, CopyButton, InterruptionBanner, SectionCard } from "../components";
 import { formatNum, useT } from "../i18n";
+
+// One transcript turn. Long turns collapse to a preview; click to expand —
+// a truncated history the user can't open is just a prettier lie.
+function TranscriptRow({ m }: { m: TranscriptMessage }) {
+  const [open, setOpen] = useState(false);
+  const long = m.text.length > 500;
+  return (
+    <div
+      className={`cursor-pointer rounded-lg px-2.5 py-1.5 text-[12px] ${m.role === "user" ? "bg-sky-500/10 text-sky-100" : "bg-zinc-800/50 text-zinc-300"}`}
+      onClick={() => long && setOpen(!open)}
+      title={long ? (open ? "点击收起" : "点击展开全文") : undefined}
+    >
+      <span className="mr-1.5 select-none font-mono text-[9px] uppercase text-zinc-500">
+        {m.role === "user" ? "👤" : "🤖"}
+      </span>
+      <span className="whitespace-pre-wrap break-words">
+        {open || !long ? m.text : `${m.text.slice(0, 500)}…`}
+      </span>
+      {long && (
+        <span className="ml-1.5 select-none text-[10px] text-cyan-400/80">
+          {open ? "收起" : `展开全文（${m.text.length} 字）`}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function SessionDetail({ cli, sid, onBack }: { cli: string; sid: string; onBack: () => void }) {
   const t = useT();
@@ -159,18 +185,7 @@ export default function SessionDetail({ cli, sid, onBack }: { cli: string; sid: 
                       ⚠ 上下文压缩 {m.text} —— 此边界之前的消息仅存模型摘要
                     </div>
                   ) : (
-                    <div
-                      key={i}
-                      className={`rounded-lg px-2.5 py-1.5 text-[12px] ${m.role === "user" ? "bg-sky-500/10 text-sky-100" : "bg-zinc-800/50 text-zinc-300"}`}
-                    >
-                      <span className="mr-1.5 select-none font-mono text-[9px] uppercase text-zinc-500">
-                        {m.role === "user" ? "👤" : "🤖"}
-                      </span>
-                      <span className="whitespace-pre-wrap break-words">
-                        {m.text.slice(0, 500)}
-                        {m.text.length > 500 ? "…" : ""}
-                      </span>
-                    </div>
+                    <TranscriptRow key={i} m={m} />
                   ),
                 )}
               </div>

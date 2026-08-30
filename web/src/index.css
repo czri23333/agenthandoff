@@ -45,12 +45,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .row-enter { animation: row-in 160ms ease-out both; }
 
-/* Live pulse for the freshness dot while a background poll is running. */
-@keyframes breathe {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-.freshness-pulse { animation: breathe 2s ease-in-out infinite; }
+/* Live freshness dot: deliberately NOT animated. A permanently moving
+   element keeps the page visually unsettled and makes every screenshot-based
+   automation (and some humans) unable to get a stable frame. */
+.freshness-pulse { opacity: 0.9; }
 
 html { scroll-behavior: smooth; }
 

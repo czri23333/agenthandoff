@@ -12,6 +12,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [, tick] = useState(0); // re-render the freshness counter every second
 
   const load = async (manual = false) => {
@@ -116,12 +117,29 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
         {sessions === null && <p className="text-[13px] text-zinc-600">{t("loading")}</p>}
         {sessions?.length === 0 && <p className="text-[13px] text-zinc-600">{t("noSessions")}</p>}
-        {grouped.map(([domain, rows]) => (
+        {grouped.map(([domain, rows]) => {
+          const isCollapsed = collapsed.has(domain);
+          return (
           <div key={domain} className="mb-5">
-            <div className="mb-1.5 flex items-baseline gap-2">
-              <h2 className="font-mono text-[12px] font-medium text-zinc-300">{domain.split(/[\\/]/).filter(Boolean).slice(-1)[0] || domain}</h2>
+            <button
+              onClick={() =>
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(domain)) next.delete(domain);
+                  else next.add(domain);
+                  return next;
+                })
+              }
+              className="mb-1.5 flex w-full items-baseline gap-2 text-left"
+              title={isCollapsed ? "点击展开" : "点击折叠"}
+            >
+              <span className="w-3 text-[10px] text-zinc-600">{isCollapsed ? "▸" : "▾"}</span>
+              <h2 className="font-mono text-[12px] font-medium text-zinc-300 hover:text-zinc-100">
+                {domain.split(/[\\/]/).filter(Boolean).slice(-1)[0] || domain}
+              </h2>
               <span className="font-mono text-[10px] text-zinc-600" title={domain}>{rows.length} {t("sessionsN")}</span>
-            </div>
+            </button>
+            {!isCollapsed && (
             <ul className="space-y-1.5">
               {rows.map((s) => (
                 <li key={`${s.cli}:${s.session_id}`} className="row-enter">
@@ -142,8 +160,10 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
                 </li>
               ))}
             </ul>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -39,14 +39,20 @@ def _clip(text: str, limit: int = _MAX_ITEM) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _pick_directives(raw: RawSession, limit: int = 8) -> list[str]:
-    """User turns that look like durable direction, deduplicated."""
+def _pick_directives(messages: list[Message], limit: int = 8) -> list[str]:
+    """User turns that look like durable direction, deduplicated.
+
+    Lines quoted back from compaction summaries ("- …" / “…” bullet echoes)
+    are skipped: they are a summary's paraphrase, not the user speaking.
+    """
     seen: set[str] = set()
     out: list[str] = []
-    for m in raw.user_messages:
+    for m in messages:
         for sentence in re.split(r"(?<=[。.!?！？\n])", m.text):
             s = sentence.strip()
             if len(s) < 4 or len(s) > 200:
+                continue
+            if s.startswith(("-", "—", "•", '"', "“", "「")):
                 continue
             if _DIRECTIVE_CUES.search(s) and s not in seen:
                 seen.add(s)
@@ -54,6 +60,24 @@ def _pick_directives(raw: RawSession, limit: int = 8) -> list[str]:
                 if len(out) >= limit:
                     return out
     return out
+
+
+def _last_segment_start(raw: RawSession, gap_hours: float = 6.0) -> str:
+    """Timestamp of the first user message in the active (last) topic segment.
+
+    Directives from earlier segments belong to finished topics and would
+    mislead a successor who is taking over the *current* thread.
+    """
+    users = raw.user_messages
+    if not users:
+        return ""
+    start = users[0].at or ""
+    for prev, cur in zip(users, users[1:], strict=False):
+        t_prev = _parse_iso(prev.at)
+        t_cur = _parse_iso(cur.at)
+        if t_prev and t_cur and (t_cur - t_prev).total_seconds() >= gap_hours * 3600:
+            start = cur.at or start
+    return start
 
 
 def _split_todo_state(raw: RawSession) -> tuple[list[str], list[str], list[str]]:
@@ -90,13 +114,24 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
     done, doing, blocked = _split_todo_state(raw)
     bundle.done, bundle.in_progress, bundle.blocked = done, doing, blocked
 
+    # With todos: unfinished items ARE the next steps. Without: fall back to
+    # the last user asks. (Previously next_steps stayed empty whenever todos
+    # existed — a dead path that produced "(none recorded)" briefs.)
+    bundle.next_steps = doing + blocked
     if not raw.todos:
-        # Without todo data, fall back to "what was asked" -> next_steps.
         bundle.next_steps = [
             _clip(m.text, 160) for m in raw.user_messages[-3:] if not _DIRECTIVE_CUES.search(m.text)
         ] or ["Review the captured transcript and define next steps."]
 
-    bundle.directives = _pick_directives(raw)
+    # Directives from a *previous topic segment* mislead the successor — they
+    # belong to finished topics, not the thread being handed over. Mixed
+    # sessions take directives from the active (last) segment only.
+    if bundle.topics:
+        last_start = _last_segment_start(raw)
+        scope = [m for m in raw.user_messages if (m.at or "") >= last_start]
+    else:
+        scope = raw.user_messages
+    bundle.directives = _pick_directives(scope)
 
     bundle.files = [
         (p, n) for p, n in raw.files_touched.most_common(15) if len(p) < 240
