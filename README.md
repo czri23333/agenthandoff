@@ -2,7 +2,7 @@
 
 **Hand off any AI coding CLI session to the next one — deterministic, fully local, zero dependencies.**
 
-![CI](https://github.com/agenthandoff/agenthandoff/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/czri23333/agenthandoff/actions/workflows/ci.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/agenthandoff)
 ![Python](https://img.shields.io/pypi/pyversions/agenthandoff)
 ![License](https://img.shields.io/pypi/l/agenthandoff)
@@ -108,7 +108,7 @@ Details in [docs/architecture.md](docs/architecture.md).
 ## Development
 
 ```bash
-git clone https://github.com/agenthandoff/agenthandoff
+git clone https://github.com/czri23333/agenthandoff
 cd agenthandoff
 pip install -e ".[dev]"
 pytest

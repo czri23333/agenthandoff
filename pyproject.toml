@@ -47,9 +47,9 @@ server = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 handoff = "agent_handoff.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/agenthandoff/agenthandoff"
-Repository = "https://github.com/agenthandoff/agenthandoff"
-Issues = "https://github.com/agenthandoff/agenthandoff/issues"
+Homepage = "https://github.com/czri23333/agenthandoff"
+Repository = "https://github.com/czri23333/agenthandoff"
+Issues = "https://github.com/czri23333/agenthandoff/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_handoff"]
