@@ -92,6 +92,21 @@ class CodexParser(Parser):
             return self.root.parent
         return self.root
 
+    def _usage_for(self, session_id: str) -> dict:
+        """Cached usage, parsing the rollout once if nothing is cached yet.
+
+        These numbers are produced while reading the session, so an accessor that
+        refuses to read the session answers "no data" to any caller that asks
+        before loading it - including the cockpit and `handoff list`.
+        """
+        if session_id not in self._usage_cache:
+            self.load(session_id)
+        return self._usage_cache.get(session_id) or {}
+
+    def last_request_tokens(self, session_id: str) -> dict:
+        """The most recent `token_count` record for this session, if there was one."""
+        return dict(self._usage_for(session_id).get("last_tokens") or {})
+
     def _files(self) -> list[Path]:
         if not self.available():
             return []
@@ -211,7 +226,9 @@ class CodexParser(Parser):
         files: Counter[str] = Counter()
         tools: Counter[str] = Counter()
         context_window: int | None = None
-        last_tokens: dict[str, int] = {}
+        last_tokens: dict[str, int] = {}  # the most recent request
+        total_tokens: dict[str, int] = {}  # the session sum
+        requests = 0
         saw_completion = False
         model: str | None = None
 
@@ -248,9 +265,22 @@ class CodexParser(Parser):
                     push("assistant", self._flatten(body), when)
                 elif ptype == "token_count":
                     info = payload.get("info") or {}
-                    used = info.get("total_token_usage") or info.get("last_token_usage") or {}
-                    if isinstance(used, dict):
-                        last_tokens.update({k: v for k, v in used.items() if isinstance(v, int)})
+                    # Two different quantities live in one record.
+                    # `last_token_usage` is the size of that one request (its
+                    # input grows with the context: 16688 -> 79997 -> 138122 in a
+                    # real rollout), which is what pressure and `context_exceeded`
+                    # must be measured against. `total_token_usage` is the session
+                    # sum - the right number for a usage table and the wrong one
+                    # for either, which is what this branch used to do.
+                    recent = info.get("last_token_usage")
+                    if isinstance(recent, dict):
+                        last_tokens.update({k: v for k, v in recent.items() if isinstance(v, int)})
+                    cumulative = info.get("total_token_usage")
+                    if isinstance(cumulative, dict):
+                        total_tokens.update(
+                            {k: v for k, v in cumulative.items() if isinstance(v, int)}
+                        )
+                    requests += 1
                 continue
 
             if rtype == "turn_context":
@@ -303,6 +333,8 @@ class CodexParser(Parser):
         interruption = self._end_state(meta, messages, saw_completion, context_window, last_tokens)
         self._usage_cache[meta.session_id] = {
             "last_tokens": last_tokens,
+            "total_tokens": total_tokens,
+            "requests": requests,
             "context_window": context_window,
             "model": meta.model,
         }
@@ -344,15 +376,16 @@ class CodexParser(Parser):
         )
 
     def usage(self, session_id: str) -> dict | None:
-        cache = getattr(self, "_usage_cache", {}) or {}
-        got = cache.get(session_id)
-        if not got or not got.get("last_tokens"):
+        """Cumulative accounting for a session: the whole run, not the last call."""
+        got = self._usage_for(session_id)
+        if not got.get("total_tokens"):
             return None
-        tokens = got["last_tokens"]
+        tokens = got["total_tokens"]
+        calls = got.get("requests") or 1
         rows = [
             {
                 "model": got.get("model") or "unknown",
-                "calls": 1,
+                "calls": calls,
                 "tokens_in": tokens.get("input_tokens") or tokens.get("prompt_tokens"),
                 "tokens_out": tokens.get("output_tokens") or tokens.get("completion_tokens"),
                 "reasoning": tokens.get("reasoning_output_tokens"),
@@ -364,7 +397,7 @@ class CodexParser(Parser):
         ]
         total_in = rows[0]["tokens_in"] or 0
         total_out = rows[0]["tokens_out"] or 0
-        totals = {"calls": 1, "tokens_in": total_in, "tokens_out": total_out}
+        totals = {"calls": calls, "tokens_in": total_in, "tokens_out": total_out}
         return {"models": rows, "totals": totals}
 
     def peek_status(self, session_id: str) -> str | None:
