@@ -171,6 +171,7 @@ def _cmd_capture(args: argparse.Namespace) -> int:
         dest.write_text(out, encoding="utf-8")
         print(f"bundle written: {dest} ({len(out)} chars)")
         _vault_footer(bundle, raw, archived, out, dest)
+        _next_step(f"handoff resume {dest.name} --lang zh   # paste into the next session")
     else:
         print(out)
     return 0
@@ -213,6 +214,7 @@ def _cmd_publish(args: argparse.Namespace) -> int:
         return 1
     scope = "global" if args.to_global else "project"
     print(f"published ({scope}): {dest}")
+    _next_step("handoff inbox   # the other agent runs this, then claim/release")
     held = exchange_lease_of(dest)
     if held:
         print(f"  leased by {held.get('leased_by')} until {held.get('until')}")
@@ -253,6 +255,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         print(f"not available: {e}", file=sys.stderr)
         return 3
     print(f"claimed: {sidecar}")
+    _next_step(f"handoff capture {Path(args.bundle).name} --cli ...   # or open the session")
     return 0
 
 
@@ -337,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     ap.add_argument("--version", action="version", version=f"agenthandoff {__version__}")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")
 
     p_doc = sub.add_parser(
         "doctor", help="probe which CLI stores exist, are readable, and actually parse"
@@ -469,6 +472,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ui.add_argument("--host", default="127.0.0.1")
     p_ui.add_argument("--port", type=int, default=8620)
     p_ui.add_argument("--open", action="store_true", help="open the browser automatically")
+
+    sub.add_parser("guide", help="print the whole loop, with this machine's state")
 
     p_mtx = sub.add_parser(
         "matrix",
@@ -682,7 +687,85 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         f"{result['looks']} look(s), {len(result['fired'])} snapshot(s) this run; "
         f"basis={last.get('basis', 'unknown')}; pending: {pending}"
     )
+    if last.get("status") == "gone":
+        _next_step("handoff watch --status   # the last snapshot is still on disk")
+    elif pending:
+        _next_step(f"handoff watch --cli {parser.cli} --every {int(args.every)}   # keep watching")
     return 0
+
+
+GUIDE_STEPS = [
+    (
+        "看看本机有什么",
+        "handoff doctor",
+        "which stores exist, are readable, and actually parse - on THIS machine",
+    ),
+    (
+        "找到要接手的会话",
+        "handoff list --cli codex -n 10",
+        "or `handoff search <关键词> --body` once you know what you were doing",
+    ),
+    (
+        "生成交接包",
+        "handoff capture -o handoff.md",
+        "the newest session by default; archives a lossless copy to the vault",
+    ),
+    (
+        "喂给下一个 agent",
+        "handoff resume handoff.md --lang zh",
+        "prints the brief to paste; --depth full ignores the budget",
+    ),
+    (
+        "别等它断了再动手",
+        "handoff watch --cli codex --every 60",
+        "snapshots at 20/45/70/90% of the context budget, before a quota death",
+    ),
+    (
+        "两个 agent 交替干活",
+        "handoff publish handoff.md --lease-minutes 45",
+        "then `handoff inbox` / `claim` / `release` - a held handoff refuses others",
+    ),
+]
+
+
+def guide_text() -> str:
+    """The loop, with this machine's state substituted where it changes the answer."""
+    lines = ["agenthandoff - the whole loop, in order", ""]
+    for index, (title, command, note) in enumerate(GUIDE_STEPS, 1):
+        lines.append(f"{index}. {title}")
+        lines.append(f"   $ {command}")
+        lines.append(f"   {note}")
+        lines.append("")
+    try:
+        stores = [info for info in discover() if info.readable]
+    except OSError:  # a probe must never break the guide
+        stores = []
+    if stores:
+        named = [
+            # zcode reports no detail line (a SQLite file is either readable or
+            # not), and an empty pair of parentheses reads like a bug.
+            f"{info.cli}({info.detail.split(';')[0].strip() or 'readable'})" for info in stores[:8]
+        ]
+        found = ", ".join(named)
+        lines.append(f"本机可读: {found}")
+    else:
+        lines.append(
+            "本机未读到任何会话存储 - 先确认 CLI 至少跑过一次，"
+            "或用 --home 指向别的用户目录"
+        )
+    lines.append("")
+    lines.append("每一步都会告诉你下一步做什么；`handoff matrix` 看哪些 CLI 有夹具证据。")
+    return "\n".join(lines)
+
+
+def _cmd_guide(args: argparse.Namespace) -> int:
+    print(guide_text())
+    return 0
+
+
+def _next_step(hint: str) -> None:
+    """One line on stderr: what to run next. Keeps stdout machine-readable."""
+    print(f"next: {hint}", file=sys.stderr)
 
 
 def _cmd_backup(args: argparse.Namespace) -> int:
@@ -795,6 +878,7 @@ _HANDLERS = {
     "ui": _cmd_ui,
     "search": _cmd_search,
     "matrix": _cmd_matrix,
+    "guide": _cmd_guide,
     "watch": _cmd_watch,
     "evidence": _cmd_evidence,
     "backup": _cmd_backup,
@@ -822,6 +906,11 @@ def _survive_console_codepage() -> None:
 def main(argv: list[str] | None = None) -> int:
     _survive_console_codepage()
     args = build_parser().parse_args(argv)
+    if getattr(args, "cmd", None) is None:
+        # Bare `handoff` used to be a usage error. Someone typing the tool's name
+        # is asking "what do I do", so answer that instead of scolding them.
+        print(guide_text())
+        return 0
     return _HANDLERS[args.cmd](args)
 
 

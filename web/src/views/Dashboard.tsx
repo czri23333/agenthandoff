@@ -448,8 +448,11 @@ function FirstRun() {
   const t = useT();
   const steps: [string, string][] = [
     [t("guideStep1"), "handoff doctor"],
+    [t("guideStepFind"), "handoff list --cli codex -n 10"],
     [t("guideStep2"), "handoff capture -o handoff.md"],
     [t("guideStep3"), "handoff resume handoff.md --lang zh"],
+    [t("guideStep4"), "handoff watch --cli codex --every 60"],
+    [t("guideStep5"), "handoff publish handoff.md --lease-minutes 45"],
   ];
   return (
     <div className="ah-card mx-auto mt-4 max-w-[620px] p-4 text-left">
