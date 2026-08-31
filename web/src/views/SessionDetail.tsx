@@ -9,6 +9,7 @@ import {
   type TranscriptMessage,
 } from "../api";
 import { Bullets, CliBadge, CopyButton, InterruptionBanner, SectionCard, StatusTag } from "../components";
+import { BudgetGauge, TokenBars, TurnTimeline, type ChartLabels } from "../charts";
 import { formatNum, useT } from "../i18n";
 
 /**
@@ -54,6 +55,22 @@ export default function SessionDetail({
   onBack: () => void;
 }) {
   const t = useT();
+  const charts: ChartLabels = {
+    tokensIn: t("tokensIn"),
+    tokensOut: t("tokensOut"),
+    model: t("model"),
+    calls: t("calls"),
+    turns: t("turns"),
+    user: t("user"),
+    assistant: t("assistant"),
+    compaction: t("compactionNote"),
+    budget: t("budget"),
+    fired: t("snapFired"),
+    pending: t("snapPending"),
+    peak: t("chartPeak"),
+    perBucket: t("chartPerBucket"),
+    noData: t("noChart"),
+  };
   const [data, setData] = useState<Detail | null>(null);
   const [launcher, setLauncher] = useState<Launcher | null>(null);
   const [lang, setLang] = useState<"en" | "zh">("zh");
@@ -143,6 +160,23 @@ export default function SessionDetail({
         <div className="ah-main space-y-3 pr-1">
           <InterruptionBanner it={data.interruption} />
 
+          <SectionCard
+            title={t("budget")}
+            extra={
+              <span className="ah-faint font-mono text-[12px]">
+                {data.budget?.turns ?? 0} {t("turns")}
+              </span>
+            }
+          >
+            <BudgetGauge
+              fill={data.budget?.fill ?? null}
+              basis={data.budget?.basis}
+              fired={data.budget?.fired}
+              pending={data.budget?.pending}
+              t={charts}
+            />
+          </SectionCard>
+
           <SectionCard title={t("objective")}>
             <Typography.Paragraph className="mb-0! text-[14px] leading-[1.7]">
               {b.objective || "—"}
@@ -193,6 +227,9 @@ export default function SessionDetail({
                 </span>
               }
             >
+              <div className="pb-3">
+                <TokenBars models={data.usage.models} t={charts} />
+              </div>
               <Table
                 size="small"
                 pagination={false}
@@ -241,6 +278,13 @@ export default function SessionDetail({
               ) : undefined
             }
           >
+            <div className="pb-2">
+              <TurnTimeline
+                messages={data.messages.filter((m) => m.role !== "compaction")}
+                compactions={data.compactions}
+                t={charts}
+              />
+            </div>
             {data.messages.length === 0 ? (
               <Typography.Text className="ah-meta italic">{t("noMessages")}</Typography.Text>
             ) : (

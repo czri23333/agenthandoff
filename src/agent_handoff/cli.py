@@ -10,9 +10,24 @@ from pathlib import Path
 
 from agent_handoff import __version__, vault
 from agent_handoff import search as ah_search
-from agent_handoff.exchange import claim as exchange_claim
-from agent_handoff.exchange import inbox as exchange_inbox
-from agent_handoff.exchange import publish as exchange_publish
+from agent_handoff.exchange import (
+    AlreadyClaimed,
+)
+from agent_handoff.exchange import (
+    claim as exchange_claim,
+)
+from agent_handoff.exchange import (
+    inbox as exchange_inbox,
+)
+from agent_handoff.exchange import (
+    lease_of as exchange_lease_of,
+)
+from agent_handoff.exchange import (
+    publish as exchange_publish,
+)
+from agent_handoff.exchange import (
+    release as exchange_release,
+)
 from agent_handoff.locations import discover
 from agent_handoff.parsers import available_parsers, resolve_session
 from agent_handoff.render import load_bundle, render_json, render_markdown
@@ -190,12 +205,17 @@ def _cmd_publish(args: argparse.Namespace) -> int:
             Path(args.bundle),
             global_scope=args.to_global,
             note=args.note,
+            lease_minutes=args.lease_minutes,
+            owner=args.owner,
         )
     except FileNotFoundError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     scope = "global" if args.to_global else "project"
     print(f"published ({scope}): {dest}")
+    held = exchange_lease_of(dest)
+    if held:
+        print(f"  leased by {held.get('leased_by')} until {held.get('until')}")
     return 0
 
 
@@ -205,22 +225,47 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         scope = "global" if args.to_global else "project"
         print(f"inbox empty ({scope}).")
         return 0
-    print(f"{'published':<18} {'cli':<12} {'status':<9} title")
-    print("-" * 84)
+    print(f"{'published':<18} {'cli':<12} {'status':<26} title")
+    print("-" * 100)
     for it in items:
-        status = f"claimed({it.claimed_by[:12]})" if it.claimed else "open"
-        print(f"{it.published_at:<18} {it.cli:<12} {status:<9} {it.title[:44]}")
+        # A lease has to be visible here: this is where an agent decides whether
+        # to take the work, and "open" while somebody holds it is a lie.
+        if it.leased:
+            status = f"leased({it.lease_by[:10]}→{it.lease_until[11:16]})"
+        elif it.claimed:
+            status = f"claimed({it.claimed_by[:12]})"
+        else:
+            status = "open"
+        print(f"{it.published_at:<18} {it.cli:<12} {status:<26} {it.title[:44]}")
         print(f"{'':<18} file: {it.path}")
     return 0
 
 
 def _cmd_claim(args: argparse.Namespace) -> int:
     try:
-        sidecar = exchange_claim(Path(args.bundle), claimed_by=args.by)
+        sidecar = exchange_claim(Path(args.bundle), claimed_by=args.by, force=args.force)
     except FileNotFoundError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    except AlreadyClaimed as e:
+        # Exit 3: somebody else has this one. The message names the holder and the
+        # deadline instead of a bare "failed", so a script can branch on it.
+        print(f"not available: {e}", file=sys.stderr)
+        return 3
     print(f"claimed: {sidecar}")
+    return 0
+
+
+def _cmd_release(args: argparse.Namespace) -> int:
+    try:
+        dropped = exchange_release(Path(args.path), owner=args.by, force=args.force)
+    except AlreadyClaimed as e:
+        print(f"not available: {e}", file=sys.stderr)
+        return 3
+    if not dropped:
+        print("nothing to release (no lease on that bundle)")
+        return 0
+    print(f"released: {args.path}")
     return 0
 
 
@@ -344,9 +389,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="read ~/.agenthandoff instead of <cwd>/.handoff",
     )
 
+    p_pub.add_argument(
+        "--lease-minutes",
+        type=float,
+        help="hold the published handoff for N minutes so no other agent claims it",
+    )
+    p_pub.add_argument(
+        "--owner",
+        help="who the lease belongs to (default: hostname; match it in claim --by)",
+    )
+
+    p_rel = sub.add_parser("release", help="drop a lease you placed on a handoff")
+    p_rel.add_argument("path", help="the published bundle path")
+    p_rel.add_argument("--by", help="lease holder to verify (default: do not verify)")
+    p_rel.add_argument("--force", action="store_true", help="drop it whoever holds it")
+
     p_clm = sub.add_parser("claim", help="mark a published handoff as taken")
     p_clm.add_argument("bundle", help="path to the published bundle")
     p_clm.add_argument("--by", help="who is claiming (default: hostname)")
+    p_clm.add_argument(
+        "--force",
+        action="store_true",
+        help="claim it even while another agent holds a lease",
+    )
 
     p_thr = sub.add_parser(
         "threads",
@@ -725,6 +790,7 @@ _HANDLERS = {
     "publish": _cmd_publish,
     "inbox": _cmd_inbox,
     "claim": _cmd_claim,
+    "release": _cmd_release,
     "threads": _cmd_threads,
     "ui": _cmd_ui,
     "search": _cmd_search,

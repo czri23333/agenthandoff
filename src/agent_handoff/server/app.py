@@ -18,9 +18,24 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agent_handoff import search as ah_search
-from agent_handoff.exchange import claim as exchange_claim
-from agent_handoff.exchange import inbox as exchange_inbox
-from agent_handoff.exchange import publish as exchange_publish
+from agent_handoff.exchange import (
+    AlreadyClaimed,
+)
+from agent_handoff.exchange import (
+    claim as exchange_claim,
+)
+from agent_handoff.exchange import (
+    inbox as exchange_inbox,
+)
+from agent_handoff.exchange import (
+    lease_of as exchange_lease_of,
+)
+from agent_handoff.exchange import (
+    publish as exchange_publish,
+)
+from agent_handoff.exchange import (
+    release as exchange_release,
+)
 from agent_handoff.locations import discover
 from agent_handoff.parsers import all_parsers
 from agent_handoff.render import render_markdown
@@ -250,6 +265,9 @@ def inbox(global_scope: bool = False):
             "published_at": i.published_at,
             "claimed": i.claimed,
             "claimed_by": i.claimed_by,
+            "leased": i.leased,
+            "lease_by": i.lease_by,
+            "lease_until": i.lease_until,
         }
         for i in exchange_inbox(global_scope=global_scope)
     ]
@@ -262,6 +280,7 @@ class PublishBody(BaseModel):
     session_id: str
     note: str | None = None
     global_scope: bool = False
+    lease_minutes: float | None = None
 
 
 @app.post("/api/publish")
@@ -270,20 +289,45 @@ def publish(body: PublishBody):
     bundle = summarize(raw)
     dest = Path.cwd() / "handoff-export.md"
     dest.write_text(render_markdown(bundle), encoding="utf-8")
-    published = exchange_publish(dest, global_scope=body.global_scope, note=body.note)
+    published = exchange_publish(
+        dest,
+        global_scope=body.global_scope,
+        note=body.note,
+        lease_minutes=body.lease_minutes,
+    )
     dest.unlink(missing_ok=True)
-    return {"published": str(published)}
+    return {"published": str(published), "lease": exchange_lease_of(published)}
 
 
 class ClaimBody(BaseModel):
     path: str
     by: str | None = None
+    force: bool = False
 
 
 @app.post("/api/claim")
 def claim(body: ClaimBody):
-    sidecar = exchange_claim(Path(body.path), claimed_by=body.by)
+    """A held lease is a conflict the caller must see, not a silent success."""
+    try:
+        sidecar = exchange_claim(Path(body.path), claimed_by=body.by, force=body.force)
+    except AlreadyClaimed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"claimed": str(sidecar)}
+
+
+class ReleaseBody(BaseModel):
+    path: str
+    by: str | None = None
+    force: bool = False
+
+
+@app.post("/api/release")
+def release(body: ReleaseBody):
+    try:
+        dropped = exchange_release(Path(body.path), owner=body.by, force=body.force)
+    except AlreadyClaimed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"released": dropped}
 
 
 # -- launcher registry (ADR-007: verified doors only) --------------------------

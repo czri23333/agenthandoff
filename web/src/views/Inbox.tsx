@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Alert, Button, Empty, List, Switch, Tooltip, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { api, type InboxItem } from "../api";
+import { api, relTime, type InboxItem } from "../api";
 import { CliBadge, CopyButton } from "../components";
 import { useT } from "../i18n";
 
-/** Published handoffs waiting to be claimed by another agent session. */
+/**
+ * Published handoffs waiting to be claimed.
+ *
+ * A row can be in three states, and the difference matters to the agent reading
+ * it: free (claim it), claimed (somebody took it), or leased (somebody is
+ * working on it right now, and claiming will be refused until the lease expires).
+ * The third one is only useful if it is visible, which is the point of this file.
+ */
 export default function Inbox() {
   const t = useT();
   const [items, setItems] = useState<InboxItem[] | null>(null);
@@ -22,8 +29,54 @@ export default function Inbox() {
       await api.claim(path);
       await load();
     } catch (e) {
+      // A held lease answers 409 with who holds it and until when. That text is
+      // the useful message; "fetch failed" would hide the reason to wait.
       setMsg(String(e));
     }
+  };
+
+  const doRelease = async (path: string) => {
+    try {
+      await api.release(path, undefined, true);
+      await load();
+    } catch (e) {
+      setMsg(String(e));
+    }
+  };
+
+  const actionsFor = (it: InboxItem): ReactNode[] => {
+    const actions: ReactNode[] = [];
+    if (it.leased) {
+      actions.push(
+        <Tooltip key="l" title={t("leaseHint")}>
+          <span className="ah-inset ah-warn px-2 py-0.5 font-mono text-[12px]">
+            🔒 {t("leased")} · {it.lease_by} · {relTime(it.lease_until || null)}
+          </span>
+        </Tooltip>,
+        <Button key="r" size="small" onClick={() => void doRelease(it.path)}>
+          {t("release")}
+        </Button>,
+      );
+    }
+    actions.push(
+      it.claimed ? (
+        <span key="c" className="ah-inset px-2 py-0.5 font-mono text-[12px]">
+          {t("claimed")} · {it.claimed_by}
+        </span>
+      ) : (
+        <Button
+          key="c"
+          size="small"
+          color="green"
+          variant="outlined"
+          onClick={() => void doClaim(it.path)}
+        >
+          {t("claim")}
+        </Button>
+      ),
+      <CopyButton key="p" text={it.path} label="path" />,
+    );
+    return actions;
   };
 
   return (
@@ -64,18 +117,7 @@ export default function Inbox() {
           renderItem={(it) => (
             <List.Item
               className="ah-row mb-1.5! flex! items-center gap-3 px-3! py-2.5!"
-              actions={[
-                it.claimed ? (
-                  <span key="c" className="ah-inset px-2 py-0.5 font-mono text-[12px]">
-                    {t("claimed")} · {it.claimed_by}
-                  </span>
-                ) : (
-                  <Button key="c" size="small" color="green" variant="outlined" onClick={() => void doClaim(it.path)}>
-                    {t("claim")}
-                  </Button>
-                ),
-                <CopyButton key="p" text={it.path} label="path" />,
-              ]}
+              actions={actionsFor(it)}
             >
               <List.Item.Meta
                 avatar={<CliBadge cli={it.cli} />}

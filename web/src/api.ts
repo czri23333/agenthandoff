@@ -71,6 +71,16 @@ export interface BundleData {
   topics: { opener: string; messages: number }[];
 }
 
+/** Context-budget reading, from the same code `handoff watch` steps. */
+export interface Budget {
+  fill: number | null;
+  basis: string;
+  turns: number;
+  fired: string[];
+  pending: string[];
+  last_snapshot: string;
+}
+
 export interface SessionDetail {
   bundle: BundleData;
   markdown: string;
@@ -78,6 +88,7 @@ export interface SessionDetail {
   interruption: Interruption;
   topics: { opener: string; messages: number }[];
   usage: UsageData | null;
+  budget?: Budget | null;
   compactions: number;
   messages: TranscriptMessage[];
 }
@@ -97,6 +108,10 @@ export interface InboxItem {
   published_at: string;
   claimed: boolean;
   claimed_by: string;
+  /** A live lease: another agent is working on this right now. */
+  leased?: boolean;
+  lease_by?: string;
+  lease_until?: string;
 }
 
 export interface Launcher {
@@ -176,9 +191,18 @@ export const api = {
   inbox: (globalScope = false) => get<InboxItem[]>(`/api/inbox?global_scope=${globalScope}`),
   launcher: (cli: string, sid: string) =>
     get<Launcher>(`/api/launcher/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}`).catch(() => null),
-  publish: (cli: string, sid: string, note?: string, globalScope = false) =>
-    post<{ published: string }>("/api/publish", { cli, session_id: sid, note, global_scope: globalScope }),
-  claim: (path: string, by?: string) => post<{ claimed: string }>("/api/claim", { path, by }),
+  publish: (cli: string, sid: string, note?: string, globalScope = false, leaseMinutes?: number) =>
+    post<{ published: string; lease?: Record<string, unknown> }>("/api/publish", {
+      cli,
+      session_id: sid,
+      note,
+      global_scope: globalScope,
+      lease_minutes: leaseMinutes,
+    }),
+  claim: (path: string, by?: string, force = false) =>
+    post<{ claimed: string }>("/api/claim", { path, by, force }),
+  release: (path: string, by?: string, force = false) =>
+    post<{ released: boolean }>("/api/release", { path, by, force }),
   /** mode=fast: titles/paths only (instant). mode=full: message bodies via the warm index. */
   search: (q: string, opts: { cli?: string; mode?: "fast" | "full"; limit?: number } = {}) => {
     const p = new URLSearchParams({ q, mode: opts.mode ?? "full", limit: String(opts.limit ?? 50) });

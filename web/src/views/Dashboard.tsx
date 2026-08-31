@@ -11,6 +11,7 @@ import {
   type StoreInfo,
 } from "../api";
 import { CliBadge, CopyButton, Highlight, StatusTag } from "../components";
+import { ActivityGrid } from "../charts";
 import { useFmt, useT, type TKey } from "../i18n";
 
 /**
@@ -135,6 +136,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     return () => clearInterval(poll);
   }, [mode, q, cliFilter, building]);
 
+  const [showActivity, setShowActivity] = useState(false);
   const cliOptions = useMemo(() => [...new Set(stores.map((s) => s.cli))], [stores]);
 
   const titleFiltered = useMemo(() => {
@@ -259,6 +261,9 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
                 ? fmt("updatedAgo", { n: freshSecs })
                 : t("autoRefresh")}
           </span>
+          <Button size="small" type="text" onClick={() => setShowActivity((v) => !v)}>
+            {t("activity")}
+          </Button>
           <Button icon={<ReloadOutlined spin={refreshing} />} onClick={() => void load(true)} size="small">
             {t("refresh")}
           </Button>
@@ -266,6 +271,12 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+        {showActivity && !showHits && sessions && sessions.length > 0 && (
+          <div className="ah-card mb-3 p-3">
+            <div className="ah-label mb-2">{t("activity")}</div>
+            <ActivityGrid sessions={sessions} label={t("activity")} />
+          </div>
+        )}
         {showHits ? (
           <HitList hits={hits} stats={stats} query={q} onOpen={onOpen} building={!!building} />
         ) : sessions === null ? (
