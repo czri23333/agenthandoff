@@ -59,6 +59,12 @@ def codex_root() -> Path:
 
 
 def _codex_home() -> Path:
+    """Deprecated module-level helper; prefer CodexParser._home().
+
+    Kept only for callers that want the live machine's home. A parser aimed at a
+    fixture tree must NOT use it: reading a fixture's titles from the real
+    ~/.codex would make the fixture self-referential and unreproducible.
+    """
     override = os.environ.get("CODEX_HOME", "").strip()
     return Path(override).expanduser() if override else home() / ".codex"
 
@@ -75,13 +81,24 @@ class CodexParser(Parser):
         return self.root.is_dir()
 
     # -- helpers --------------------------------------------------------------
+    def _home(self) -> Path:
+        """The CLI's data directory, derived from our own root.
+
+        Fixture-ability depends on this: `with_root(tests/fixtures/...)` must read
+        the session index and archived copies from inside the fixture, never from
+        the live ~/.codex.
+        """
+        if self.root.name in ("sessions", "archived_sessions"):
+            return self.root.parent
+        return self.root
+
     def _files(self) -> list[Path]:
         if not self.available():
             return []
         out = list(self.root.rglob("rollout-*.jsonl"))
         if not out:  # older/other builds dropped the rollout- prefix
             out = [p for p in self.root.rglob("*.jsonl") if p.name != "session_index.jsonl"]
-        archived = _codex_home() / "archived_sessions"
+        archived = self._home() / "archived_sessions"
         if archived.is_dir():
             out.extend(archived.rglob("*.jsonl"))
         return sorted(set(out), key=lambda p: p.name)
@@ -91,7 +108,7 @@ class CodexParser(Parser):
         if self._titles is not None:
             return self._titles
         titles: dict[str, str] = {}
-        index = _codex_home() / "session_index.jsonl"
+        index = self._home() / "session_index.jsonl"
         if index.is_file():
             for row in read_jsonl(index):
                 tid = str(row.get("id") or "")

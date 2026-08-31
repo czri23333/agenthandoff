@@ -48,22 +48,69 @@ class JsonlSessionParser(Parser):
 
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or (home() / self.projects_dirname / "projects")
+        # sid -> every file that reports it, filled by list_sessions().
+        self._index: dict[str, list[Path]] = {}
 
     def available(self) -> bool:
         return self.root.is_dir()
 
     # -- discovery ----------------------------------------------------------
 
-    def list_sessions(self) -> list[SessionMeta]:
+    def _iter_jsonl(self) -> list[Path]:
         if not self.available():
             return []
+        return sorted(p for p in self.root.rglob("*.jsonl") if p.is_file())
+
+    def _group_files(self, paths: list[Path], sid: str) -> list[Path]:
+        """Rank a session's files: canonical transcript first, companions after."""
+
+        def rank(path: Path) -> tuple[int, int]:
+            score = 0
+            if path.stem == sid:
+                score = 3
+            elif path.parent.name == sid or path.name == "session.jsonl":
+                score = 2
+            elif path.name.startswith("agent-"):
+                score = 1  # sub-agent transcript, part of the session but not its head
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+            return (score, size)
+
+        return sorted(paths, key=rank, reverse=True)
+
+    def list_sessions(self) -> list[SessionMeta]:
+        """One entry per session, even when the store splits it over many files.
+
+        Reading the id out of each record and then emitting per-file entries made
+        a session with sub-agent transcripts appear several times, and left
+        `load()` looking for a file name that does not exist. Grouping first fixes
+        both, and keeps `source_path` pointing at the canonical transcript.
+        """
+        groups: dict[str, list[Path]] = {}
+        for path in self._iter_jsonl():
+            sid = self._peek_id(path)
+            if sid:
+                groups.setdefault(sid, []).append(path)
+        self._index = groups
+
         metas: list[SessionMeta] = []
-        for f in self.root.rglob("*.jsonl"):
-            meta = self._peek(f)
-            if meta:
+        for sid, paths in groups.items():
+            meta = self._peek(self._group_files(paths, sid)[0])
+            if meta is not None:
+                meta.session_id = sid
                 metas.append(meta)
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         return metas
+
+    def _peek_id(self, path: Path) -> str:
+        """Session id as the store reports it, falling back to the file stem."""
+        for row in read_jsonl(path, limit=10):
+            sid = row.get("sessionId") or row.get("session_id")
+            if sid:
+                return str(sid)
+        return path.stem
 
     def _origin(self) -> str | None:
         """Store directory (e.g. .qoderwork vs .qoderworkcn) = account scope."""
@@ -71,7 +118,7 @@ class JsonlSessionParser(Parser):
         return name if name.startswith(".") else None
 
     def _peek(self, path: Path) -> SessionMeta | None:
-        """Cheap scan of the first/last lines to build a list entry."""
+        """Cheap scan of the first lines to build a list entry."""
         rows = read_jsonl(path, limit=50)
         if not rows:
             return None
@@ -105,18 +152,27 @@ class JsonlSessionParser(Parser):
         )
 
     def load(self, session_id: str) -> RawSession | None:
-        path = self._resolve(session_id)
-        if path is None:
+        paths = self._resolve_group(session_id)
+        if not paths:
             return None
-        return self._load_file(path)
+        return self._load_paths(paths, session_id)
 
-    def _resolve(self, session_id: str) -> Path | None:
-        """Accept a bare session id or a path; rglob keeps it storage-agnostic."""
-        if session_id.endswith(".jsonl"):
-            p = Path(session_id)
-            return p if p.exists() else None
-        hits = list(self.root.rglob(f"{session_id}.jsonl"))
-        return hits[0] if hits else None
+    def _resolve_group(self, session_id: str) -> list[Path]:
+        """All files that make up one session; cheap and storage-layout agnostic."""
+        if session_id.endswith(".jsonl"):  # a caller passed a path
+            one = Path(session_id)
+            return [one] if one.exists() else []
+        cached = self._index.get(session_id)
+        if cached:
+            return self._group_files(cached, session_id)
+        found = [
+            p
+            for p in self._iter_jsonl()
+            if p.stem == session_id or p.parent.name == session_id
+        ]
+        if found:
+            return self._group_files(found, session_id)
+        return []
 
     # -- extraction ---------------------------------------------------------
 
@@ -139,48 +195,61 @@ class JsonlSessionParser(Parser):
             tool_input = inner.get("input") if isinstance(inner, dict) else {}
         return str(name), (tool_input if isinstance(tool_input, dict) else {})
 
-    def _load_file(self, path: Path) -> RawSession:
+    def _load_paths(self, paths: list[Path], session_id: str) -> RawSession:
+        """Merge a session's files: main transcript first, companions after."""
         messages: list[Message] = []
         files: Counter[str] = Counter()
         tools: Counter[str] = Counter()
         todos: list[TodoItem] = []
         cwd = ""
-        session_id = path.stem
         title = ""
         started = None
+        newest = 0.0
+        seen_ids: set[tuple[str, str]] = set()
 
-        for row in read_jsonl(path):
-            if row.get("type") == "summary":
+        for path in paths:
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
                 continue
-            cwd = cwd or (row.get("cwd") or "")
-            session_id = row.get("sessionId") or session_id
-            at = _iso(row.get("timestamp"))
-            started = started or at
+            for row in read_jsonl(path):
+                if row.get("type") == "summary":
+                    continue
+                cwd = cwd or (row.get("cwd") or "")
+                at = _iso(row.get("timestamp"))
+                started = started or at
 
-            role, text, tool_blocks = self._row_content(row)
-            if not role:
-                continue
-            for tb in tool_blocks:
-                name, tool_input = self._tool_name_input(tb)
-                tools[name] += 1
-                for p in self.extract_paths(tool_input):
-                    files[p] += 1
-                if name in ("TodoWrite", "todo_write", "TaskCreate") and isinstance(
-                    tool_input.get("todos"), list
-                ):
-                    for t in tool_input["todos"]:
-                        if isinstance(t, dict) and t.get("content"):
-                            todos.append(
-                                TodoItem(
-                                    content=str(t["content"]),
-                                    status=str(t.get("status") or "pending"),
-                                    priority=str(t.get("priority") or ""),
+                role, text, tool_blocks = self._row_content(row)
+                if not role:
+                    continue
+                for tb in tool_blocks:
+                    name, tool_input = self._tool_name_input(tb)
+                    tools[name] += 1
+                    for p in self.extract_paths(tool_input):
+                        files[p] += 1
+                    if name in ("TodoWrite", "todo_write", "TaskCreate") and isinstance(
+                        tool_input.get("todos"), list
+                    ):
+                        for t in tool_input["todos"]:
+                            if isinstance(t, dict) and t.get("content"):
+                                todos.append(
+                                    TodoItem(
+                                        content=str(t["content"]),
+                                        status=str(t.get("status") or "pending"),
+                                        priority=str(t.get("priority") or ""),
+                                    )
                                 )
-                            )
-            if text and not self.is_noise(text):
-                if role == "user" and not title:
-                    title = text[:80]
-                messages.append(Message(role=role, text=text, at=at))
+                if text and not self.is_noise(text):
+                    key = (role, text)
+                    if key in seen_ids:
+                        continue  # the same turn mirrored into a companion file
+                    seen_ids.add(key)
+                    if role == "user" and not title:
+                        title = text[:80]
+                    messages.append(Message(role=role, text=text, at=at))
+
+        if len({m.at for m in messages if m.at}) > 1 and all(m.at for m in messages):
+            messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
 
         meta = SessionMeta(
             cli=self.cli,
@@ -188,8 +257,8 @@ class JsonlSessionParser(Parser):
             title=title or session_id,
             cwd=cwd,
             started_at=started,
-            updated_at=_iso(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)),
-            source_path=str(path),
+            updated_at=_iso(datetime.fromtimestamp(newest, tz=timezone.utc)) if newest else None,
+            source_path=str(paths[0]),
             origin=self._origin(),
         )
         return self.build_raw(meta, messages, todos, files, tools)
