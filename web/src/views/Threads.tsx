@@ -64,7 +64,7 @@ export default function Threads() {
           {multi?.map((th, i) => (
             <div key={i} className="ah-card p-3">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="ah-inset px-1.5 py-0.5 font-mono text-[11px]">
+                <span className="ah-inset px-1.5 py-0.5 font-mono text-[12px]">
                   {th.session_ids.length} {t("sessionsN")}
                 </span>
                 <span className="ah-meta font-mono">{th.clis.join(" + ")}</span>

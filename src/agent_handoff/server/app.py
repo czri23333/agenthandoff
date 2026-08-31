@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agent_handoff import search as ah_search
+from agent_handoff import watch as ah_watch
 from agent_handoff.exchange import (
     AlreadyClaimed,
 )
@@ -198,8 +199,28 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
     if markers:
         stream = sorted(stream + markers, key=lambda x: x["at"] or "")[-400:]
 
+    # The same measurement `handoff watch` ladder-steps, read-only: the UI must
+    # not show a fuller or emptier session than the snapshots claim.
+    parser = _parser_or_404(cli)
+    fill, basis = ah_watch.context_fill(parser, raw)
+    state = ah_watch.load_state(cli, sid)
+    rungs = (
+        [f"{int(r * 100)}%" for r in ah_watch.LADDER]
+        if fill is not None
+        else [f"t{n}" for n in ah_watch.TURN_LADDER]
+    )
+    budget = {
+        "fill": fill,
+        "basis": basis,
+        "turns": len(raw.messages),
+        "fired": sorted(state.fired),
+        "pending": [label for label in rungs if label not in state.fired_labels],
+        "last_snapshot": state.snapshots[-1] if state.snapshots else "",
+    }
+
     return {
         "bundle": bundle.to_dict(),
+        "budget": budget,
         "markdown": render_markdown(bundle),
         "brief": render_brief(bundle, lang=lang, max_chars=max_chars),
         "interruption": {

@@ -65,31 +65,37 @@ sampled away.
    cross-process behaviour with two cockpit instances have no coverage.
 7. **Cockpit performance is measured in one place only.** Search went 15.3 s →
    7 ms (warm, in-process) / 0.39 s (fresh process, warm disk cache) on the
-   maintainer's machine. Cold session-list, `detail` generation and first paint
-   have not been profiled; the dashboard re-renders every second and re-fetches
-   every 30 s.
-8. **Light mode is machine-audited, not human-approved.** All 2,039 text nodes pass
-   WCAG AA in both themes by DOM measurement and the token table is gated by
-   `tests/test_tokens_contrast.py` — but no human has signed off the light theme.
-9. **No multi-agent collaboration.** `publish/inbox/claim` is one-shot file
-   exchange: no lease, no conflict detection, no live channel. "Alternating
-   agents on one task" is unimplemented.
-10. **No charts/visualisation.** Usage is a table; task threads are text.
-11. **No editor-side integration.** No VS Code/Cursor extension, no skill/slash
+   maintainer's machine. The 450-row session list takes several seconds to paint
+   (observed while measuring layout at six widths), and that wait has not been
+   profiled into stages: cold listing, `detail` generation, first paint.
+8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
+   fixed a header whose controls overlapped below ~700px (you could not change
+   page without hitting the theme switch), a session title column squeezed to
+   zero width at 430px, an 8-column usage table that leaked past the viewport,
+   and six 11px text nodes. Those are gone; what remains is that below ~500px the
+   usage table scrolls inside its card, the timeline's 72 bins fall to ~4px each,
+   and the sweep ran in a Chromium webview with same-origin iframes — not on a
+   real phone or a touch browser.
+9. **Collaboration is file-based, not live.** `publish / claim / release` now
+   carry a lease (holder, deadline, exclusive claim write, 409 on conflict) so two
+   agents cannot work the same handoff unknowingly. There is no push channel: the
+   cockpit polls every 30 s, and two agents cannot exchange messages - only
+   bundles. "Alternating on one task" works; "watching each other work" does not.
+10. **No editor-side integration.** No VS Code/Cursor extension, no skill/slash
     command; `handoff` is CLI-plus-local-web.
-12. **Write-back is deliberately absent.** We never inject into another CLI's
+11. **Write-back is deliberately absent.** We never inject into another CLI's
     store (Constitution: read-only). That rules out "resume inside the target
     agent natively", which some competing tools do offer. A trade, not an
     oversight — but a functional limit from a user's point of view.
-13. **The bundle schema is documented, not enforced.** No test validates a
+12. **The bundle schema is documented, not enforced.** No test validates a
     rendered bundle against `schema/handoff-bundle-v0.1.schema.json`; the field
     contract is held by the renderers and their unit tests only.
-14. **Everything rests on one user, one OS family, one toolchain.** CI covers
+13. **Everything rests on one user, one OS family, one toolchain.** CI covers
     3 OSes × 3 Pythons for code paths that are unit-testable, and the fixtures
     make that part reproducible — but the store *shapes* were sampled from a
     single machine, and a locale, filesystem or permission model unlike this one
     is still untested ground.
-15. **Not published on PyPI** (the badge was removed for that reason); install
+14. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
 
 ## How to check any of this yourself
@@ -97,6 +103,8 @@ sampled away.
 ```bash
 handoff doctor                         # what is real on YOUR machine
 handoff matrix                         # the support table, derived from the fixtures
+handoff watch --cli codex --once       # one budget-ladder check on a live session
+handoff ui                             # the cockpit at http://127.0.0.1:8620
 pip install -e ".[dev,zstd,server]"
 pytest                                 # parses every fixture, asserts its shape
 python -m agent_handoff.evidence --check      # README/JSON vs the fixtures

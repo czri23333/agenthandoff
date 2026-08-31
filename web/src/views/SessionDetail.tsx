@@ -186,7 +186,7 @@ export default function SessionDetail({
                 <span className="ah-label">{t("topicSegments")}</span>
                 {b.topics.map((tp, i) => (
                   <div key={i} className="flex items-start gap-2 text-[12.5px]">
-                    <span className="ah-inset min-w-[20px] px-1 text-center font-mono text-[11px]">{i + 1}</span>
+                    <span className="ah-inset min-w-[20px] px-1 text-center font-mono text-[12px]">{i + 1}</span>
                     <span className="min-w-0 flex-1 text-[var(--ah-text-1)]">{tp.opener}</span>
                     <span className="ah-faint shrink-0 font-mono">
                       {tp.messages} {t("msg")}
@@ -230,9 +230,12 @@ export default function SessionDetail({
               <div className="pb-3">
                 <TokenBars models={data.usage.models} t={charts} />
               </div>
+              {/* antd scrolls the table inside its own frame; leaving it out of
+              the box pushed three columns past the viewport on a narrow window. */}
               <Table
                 size="small"
                 pagination={false}
+                scroll={{ x: 620 }}
                 rowKey="model"
                 dataSource={data.usage.models}
                 columns={[

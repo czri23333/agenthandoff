@@ -122,7 +122,10 @@ export default function App() {
 
   return (
     <Layout className="mx-auto h-screen max-w-[1500px]">
-      <Layout.Header className="!flex !items-center gap-4 !px-5" style={{ borderBottom: "1px solid var(--ah-line)" }}>
+      <Layout.Header
+        className="!flex !h-auto !flex-wrap !items-center gap-x-4 gap-y-1.5 !px-5 !py-2.5"
+        style={{ borderBottom: "1px solid var(--ah-line)" }}
+      >
         <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
           agenthandoff{" "}
           <span className="ah-label" style={{ textTransform: "none", letterSpacing: 0 }}>
@@ -132,8 +135,11 @@ export default function App() {
         {/* A Segmented control instead of antd's horizontal Menu: the Menu's
             selected item paints its own container colour and measured 3.66:1 on
             our header surface, while Segmented inherits the token palette. */}
+        {/* Below md the nav drops to a row of its own: it needs ~276px and was
+            being overlapped by the theme switcher, which made the wrong control
+            win the hit test on a phone. */}
         <Segmented
-          className="min-w-0 flex-1"
+          className="min-w-0 flex-1 max-md:order-last max-md:basis-full"
           value={view.name === "detail" ? "dashboard" : view.name}
           onChange={(v) => goTo(String(v))}
           options={TABS.map((tb) => ({ label: `${t(tb.labelKey)} ${tb.key}`, value: tb.id }))}
@@ -141,6 +147,7 @@ export default function App() {
         <Tooltip title={t("themeToggleHint")}>
           <Segmented
             size="small"
+            className="shrink-0"
             value={mode}
             onChange={(v) => setThemeMode(v as ThemeMode)}
             options={[
@@ -152,6 +159,7 @@ export default function App() {
         </Tooltip>
         <Segmented
           size="small"
+          className="shrink-0"
           value={lang}
           onChange={(v) => setLang(v as Lang)}
           options={[

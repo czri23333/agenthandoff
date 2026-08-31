@@ -288,7 +288,8 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
         ) : (
           grouped.map(([domain, rows]) => {
             const isCollapsed = collapsed.has(domain);
-            const short = domain.split(/[\\/]/).filter(Boolean).pop() || domain;
+            const short =
+              domain.split(/[\\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
             return (
               <div key={domain} className="mb-4">
                 <button
@@ -332,10 +333,13 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
                               </span>
                             </Tooltip>
                           )}
-                          <span className="ah-faint w-16 shrink-0 text-right font-mono">
+                          {/* Below sm these two fixed columns starved the title to
+                          zero width; the title is the only thing that identifies a
+                          row, so the columns give way first. */}
+                          <span className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden">
                             {relTime(s.updated_at)}
                           </span>
-                          <span className="w-24 shrink-0 text-right">
+                          <span className="w-24 shrink-0 text-right max-sm:hidden">
                             <StatusTag kind={s.status} />
                           </span>
                         </button>
@@ -402,7 +406,7 @@ function HitList({
               </span>
               <span className="flex w-full items-center gap-2">
                 {h.matched && (
-                  <span className="ah-inset px-1.5 py-0.5 font-mono text-[11px]">
+                  <span className="ah-inset px-1.5 py-0.5 font-mono text-[12px]">
                     {h.matched
                       .split("+")
                       .map((m) => t(MATCH_TK[m] ?? "matchBody"))
@@ -453,7 +457,7 @@ function FirstRun() {
       <ol className="m-0 list-none space-y-2 p-0">
         {steps.map(([label, cmd], i) => (
           <li key={cmd} className="flex flex-wrap items-center gap-2">
-            <span className="ah-inset min-w-[22px] px-1.5 text-center font-mono text-[11px]">{i + 1}</span>
+            <span className="ah-inset min-w-[22px] px-1.5 text-center font-mono text-[12px]">{i + 1}</span>
             <span className="ah-meta min-w-0 flex-1">{label}</span>
             <code className="ah-code px-2 py-1 text-[12px]">{cmd}</code>
             <CopyButton text={cmd} label="copy" />

@@ -144,3 +144,45 @@ def test_inbox_is_empty_by_default(client, monkeypatch, tmp_path):
 
     monkeypatch.setattr(ex.Path, "home", classmethod(lambda cls: tmp_path))
     assert client.get("/api/inbox", params={"global_scope": True}).json() == []
+def test_detail_carries_the_budget_block(client, monkeypatch):
+    """The cockpit gauge is only as honest as this payload's contract.
+
+    A previous edit dropped the field silently - a file restored from an older
+    revision - and nothing failed: the UI simply stopped showing a budget. So the
+    shape is asserted here, with a stub parser instead of this machine's stores.
+    """
+    from agent_handoff import server
+    from agent_handoff.model import Message, RawSession, SessionMeta
+
+    raw = RawSession(
+        meta=SessionMeta(
+            cli="zcode",
+            session_id="sess_budget",
+            title="budgeted",
+            cwd="D:/demo",
+            notes=["context_window:1000"],
+        ),
+        messages=[Message(role="user", text="go", at="2026-08-31T00:00:00+00:00")],
+    )
+
+    class StubParser:
+        cli = "zcode"
+
+        def last_request_tokens(self, session_id):
+            return {"input_tokens": 640}
+
+        def usage(self, session_id):
+            return {"models": [], "totals": {"calls": 2, "tokens_in": 900, "tokens_out": 40}}
+
+    monkeypatch.setattr(server.app, "_raw_or_404", lambda cli, sid: raw)
+    monkeypatch.setattr(server.app, "_parser_or_404", lambda cli: StubParser())
+    detail = client.get("/api/sessions/zcode/sess_budget/detail").json()
+
+    assert "budget" in detail, "the detail payload lost its budget block"
+    budget = detail["budget"]
+    assert set(budget) >= {"fill", "basis", "turns", "fired", "pending"}
+    assert budget["turns"] == 1
+    assert budget["fill"] == pytest.approx(0.64)
+    assert "1000" in budget["basis"]
+    assert budget["fired"] == [] and "45%" in budget["pending"]
+

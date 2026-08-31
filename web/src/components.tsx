@@ -131,7 +131,7 @@ export function Bullets({
       {items.map((s, i) => (
         <li key={i} className="flex items-start gap-2 text-[13px] leading-[1.6] text-[var(--ah-text-1)]">
           {numbered ? (
-            <span className="ah-inset mt-0.5 min-w-[20px] px-1 text-center font-mono text-[11px] leading-5">
+            <span className="ah-inset mt-0.5 min-w-[20px] px-1 text-center font-mono text-[12px] leading-5">
               {i + 1}
             </span>
           ) : (
