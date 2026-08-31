@@ -1,0 +1,70 @@
+{
+  "cli": "codex",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 7,
+    "files": 21,
+    "messages": 426,
+    "nonempty_messages": 426,
+    "proven": true,
+    "sampled": true,
+    "sessions": 19,
+    "shape_only": false,
+    "source_messages": 2933,
+    "tool_calls": 77,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".jsonl": 19
+    },
+    "keys_by_type": {
+      "event_msg": [
+        "payload",
+        "timestamp",
+        "type"
+      ],
+      "inter_agent_communication_metadata": [
+        "payload",
+        "timestamp",
+        "type"
+      ],
+      "response_item": [
+        "payload",
+        "timestamp",
+        "type"
+      ],
+      "session_meta": [
+        "payload",
+        "timestamp",
+        "type"
+      ],
+      "turn_context": [
+        "payload",
+        "timestamp",
+        "type"
+      ],
+      "world_state": [
+        "payload",
+        "timestamp",
+        "type"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 1,
+      "event_msg": 1944,
+      "inter_agent_communication_metadata": 38,
+      "response_item": 789,
+      "session_meta": 66,
+      "turn_context": 70,
+      "world_state": 39
+    },
+    "tables": {},
+    "top_key_sets": {
+      "payload,timestamp,type": 2946
+    }
+  },
+  "version": "1"
+}

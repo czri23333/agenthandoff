@@ -1,0 +1,212 @@
+{
+  "version": "1",
+  "generated": "2026-09-01",
+  "rows": [
+    {
+      "cli": "zcode",
+      "store": "SQLite (read-only URI)",
+      "reader": true,
+      "fixtures": 2,
+      "fixture_sessions": 3,
+      "fixture_messages": 46,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": []
+    },
+    {
+      "cli": "claude",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "unverified",
+      "notes": []
+    },
+    {
+      "cli": "codebuddy",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 25,
+      "fixture_sessions": 24,
+      "fixture_messages": 44,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
+    },
+    {
+      "cli": "codebuddy-cn",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "unverified",
+      "notes": []
+    },
+    {
+      "cli": "qoderwork",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 4,
+      "fixture_sessions": 2,
+      "fixture_messages": 3,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": []
+    },
+    {
+      "cli": "qoderwork-cn",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 25,
+      "fixture_sessions": 2,
+      "fixture_messages": 34,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
+    },
+    {
+      "cli": "qodercn-ide",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 25,
+      "fixture_sessions": 5,
+      "fixture_messages": 31,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
+    },
+    {
+      "cli": "qwenwork",
+      "store": "JSONL dir",
+      "reader": true,
+      "fixtures": 3,
+      "fixture_sessions": 1,
+      "fixture_messages": 2,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": []
+    },
+    {
+      "cli": "dsh",
+      "store": "zstd JSONL dir",
+      "reader": true,
+      "fixtures": 4,
+      "fixture_sessions": 3,
+      "fixture_messages": 7,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
+    },
+    {
+      "cli": "kimi",
+      "store": "state.json + wire.jsonl",
+      "reader": true,
+      "fixtures": 4,
+      "fixture_sessions": 1,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": true,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "shape-only",
+      "notes": []
+    },
+    {
+      "cli": "codex",
+      "store": "JSONL rollouts",
+      "reader": true,
+      "fixtures": 21,
+      "fixture_sessions": 19,
+      "fixture_messages": 426,
+      "fixture_ok": true,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": true,
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
+    },
+    {
+      "cli": "qoder-ide",
+      "store": "Electron leveldb — no session files on disk",
+      "reader": false,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "roadmap",
+      "notes": []
+    },
+    {
+      "cli": "opencode",
+      "store": "storage layout undocumented",
+      "reader": false,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "roadmap",
+      "notes": []
+    },
+    {
+      "cli": "trae",
+      "store": "IDE SQLite; read-only only, never written",
+      "reader": false,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "roadmap",
+      "notes": []
+    }
+  ]
+}

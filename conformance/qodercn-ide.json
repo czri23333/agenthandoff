@@ -1,0 +1,161 @@
+{
+  "cli": "qodercn-ide",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 133,
+    "files": 25,
+    "messages": 31,
+    "nonempty_messages": 31,
+    "proven": true,
+    "sampled": true,
+    "sessions": 5,
+    "shape_only": false,
+    "source_messages": 322,
+    "tool_calls": 267,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 3,
+      ".jsonl": 5,
+      ".txt": 17
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "active-leaf": [
+        "explicit",
+        "leafUuid",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "assistant": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "attachment": [
+        "attachment",
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "parentUuid",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "progress": [
+        "cwd",
+        "data",
+        "sessionId",
+        "timestamp",
+        "type",
+        "uuid"
+      ],
+      "runtime-config": [
+        "contextWindow",
+        "generation",
+        "model",
+        "reasoningEffort",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "session_meta": [
+        "cwd",
+        "data",
+        "sessionId",
+        "timestamp",
+        "type",
+        "uuid"
+      ],
+      "system": [
+        "compactMetadata",
+        "content",
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isCompactSummary",
+        "isSidechain",
+        "level",
+        "logicalParentUuid",
+        "parentUuid",
+        "requiresActiveLeafCommit",
+        "sessionId",
+        "subtype",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "user": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "humanInput",
+        "isSidechain",
+        "message",
+        "origin",
+        "parentUuid",
+        "permissionMode",
+        "promptId",
+        "requestSetId",
+        "sessionId",
+        "sourceToolAssistantUUID",
+        "timestamp",
+        "toolUseResult",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "workspace-directories": [
+        "directories",
+        "sessionId",
+        "type"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 505,
+      "<scalar>": 3,
+      "active-leaf": 71,
+      "assistant": 380,
+      "attachment": 9,
+      "progress": 153,
+      "runtime-config": 2,
+      "session_meta": 2,
+      "system": 1,
+      "user": 245,
+      "workspace-directories": 1
+    },
+    "tables": {},
+    "top_key_sets": {
+      "attachment,cwd,entrypoint,gitBranch": 9,
+      "compactMetadata,content,cwd,entrypoint": 1,
+      "contextWindow,generation,model,reasoningEffort": 2,
+      "cwd,data,sessionId,timestamp": 155,
+      "cwd,entrypoint,gitBranch,humanInput": 1,
+      "cwd,entrypoint,gitBranch,isSidechain": 115,
+      "cwd,message,sessionId,timestamp": 509,
+      "directories,sessionId,type": 1,
+      "explicit,leafUuid,sessionId,timestamp": 71
+    }
+  },
+  "version": "1"
+}

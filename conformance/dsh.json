@@ -1,0 +1,210 @@
+{
+  "cli": "dsh",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 4,
+    "messages": 7,
+    "nonempty_messages": 7,
+    "proven": true,
+    "sampled": true,
+    "sessions": 3,
+    "shape_only": false,
+    "source_messages": 335,
+    "tool_calls": 0,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 1,
+      ".zstd": 3
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "agent-preset/selected": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "agent/inbox/spliced": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "approval/policy": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "assistant/chunk": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "assistant/message": [
+        "data",
+        "seq",
+        "sourceEventSeqs",
+        "surfaceOp",
+        "time",
+        "type"
+      ],
+      "permission/preset": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "reasoning-chunks": [
+        "data",
+        "seq0",
+        "time0",
+        "type"
+      ],
+      "request/context": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "request/header": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "sandbox/mode": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "session": [
+        "agentPreset",
+        "createdAt",
+        "cwd",
+        "delegationDepth",
+        "id",
+        "type",
+        "version"
+      ],
+      "session/end-seed": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "session/title": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "session/title-llm-request": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "step/end": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "step/start": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "text-chunks": [
+        "data",
+        "seq0",
+        "time0",
+        "type"
+      ],
+      "tool-call-chunks": [
+        "data",
+        "seq0",
+        "time0",
+        "type"
+      ],
+      "tool/call": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "tool/result": [
+        "data",
+        "seq",
+        "sourceEventSeqs",
+        "surfaceOp",
+        "time",
+        "type"
+      ],
+      "turn/end": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "turn/start": [
+        "data",
+        "seq",
+        "time",
+        "type"
+      ],
+      "user/message": [
+        "data",
+        "seq",
+        "surfaceOp",
+        "time",
+        "type"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 33,
+      "<scalar>": 1,
+      "agent-preset/selected": 1,
+      "agent/inbox/spliced": 11,
+      "approval/policy": 3,
+      "assistant/chunk": 243,
+      "assistant/message": 29,
+      "permission/preset": 3,
+      "reasoning-chunks": 181,
+      "request/context": 3,
+      "request/header": 4,
+      "sandbox/mode": 3,
+      "session": 3,
+      "session/end-seed": 2,
+      "session/title": 5,
+      "session/title-llm-request": 2,
+      "step/end": 6,
+      "step/start": 11,
+      "text-chunks": 10,
+      "tool-call-chunks": 42,
+      "tool/call": 9,
+      "tool/result": 13,
+      "turn/end": 2,
+      "turn/start": 3,
+      "user/message": 11
+    },
+    "tables": {},
+    "top_key_sets": {
+      "agentPreset,createdAt,cwd,delegationDepth": 3,
+      "data,seq,sourceEventSeqs,surfaceOp": 42,
+      "data,seq,surfaceOp,time": 11,
+      "data,seq,time,type": 311,
+      "data,seq0,time0,type": 233
+    }
+  },
+  "version": "1"
+}

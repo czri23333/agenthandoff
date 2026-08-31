@@ -24,28 +24,29 @@ output, so bundles are diffable and trustworthy.
 
 ## Supported CLIs
 
-Evidence levels: **read** = parsed a real store on the maintainer's machine
-(2026-08-31, one Windows host); **never verified** = code exists, nobody has fed
-it data; **proven** = a sanitized fixture in this repo is parsed in CI (nobody is
-at this level yet — see [docs/limitations.md](docs/limitations.md)). Run
-`handoff doctor` to see what is real on *your* machine; it, not this table, is the
-source of truth.
+<!-- MATRIX BEGIN: generated, do not edit -->
+This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 8 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
 
-| CLI | Storage read | Evidence |
-|---|---|---|
-| ZCode | SQLite (`~/.zcode/cli/db/db.sqlite`) | ✅ read — 453 sessions |
-| Qoder CN IDE | JSONL (`~/.qoder-cn/projects/…`) | ✅ read — 118 files |
-| CodeBuddy | JSONL (`~/.codebuddy/projects/…`) | ✅ read — 32 files |
-| Qoderwork (+CN, dual-account) | JSONL (`~/.qoderwork[cn]/projects/…`) | ✅ read — 13 files, 3 account configs |
-| Qwen Work CN | JSONL (`~/.qwenworkcn/projects/…`) | ✅ read — 1 file |
-| dsh (DeepSeekHarness) | zstd-JSONL (`~/.dsh/sessions/…`) | ✅ read — 46 rolls, incl. a WSL-side store |
-| Kimi CLI | `state.json` + `wire.jsonl` | 🧪 read once — experimental |
-| Codex CLI | `~/.codex/sessions` | ❌ detected, not readable — rollout layout moved |
-| Claude Code | JSONL (`~/.claude/projects/…`) | ⚠️ never verified (no store seen, no fixture) |
-| CodeBuddy CN | JSONL (`~/.codebuddy-cn/projects/…`) | ⚠️ never verified |
-| opencode | `~/.local/share/opencode/storage` | 🔜 roadmap |
-| Qoder IDE (intl.) | Electron leveldb, no session files | 🔜 roadmap |
-| Trae / IDE-family (SQLite state) | per-vendor app data | 🔜 roadmap, read-only only |
+| CLI | store | reader | fixtures | proven from fixtures | fingerprint | status |
+|---|---|---|---|---|---|---|
+| `zcode` | SQLite (read-only URI) | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ stable (fixture-proven) |
+| `claude` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `codebuddy` | JSONL dir | ✓ | 25 | 24 ses / 44 msg | ✓ | ✅ stable (fixture-proven) |
+| `codebuddy-cn` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ stable (fixture-proven) |
+| `qodercn-ide` | JSONL dir | ✓ | 25 | 5 ses / 31 msg | ✓ | ✅ stable (fixture-proven) |
+| `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
+| `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 7 msg | ✓ | ✅ stable (fixture-proven) |
+| `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |
+| `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoder-ide` | Electron leveldb — no session files on disk | — | — | — | — | 🔜 roadmap |
+| `opencode` | storage layout undocumented | — | — | — | — | 🔜 roadmap |
+| `trae` | IDE SQLite; read-only only, never written | — | — | — | — | 🔜 roadmap |
+
+Legend: stable = a fixture parses to real dialogue; shape only = the source store held no conversation to sample; unverified = reader exists, no fixture yet; fixture fails = the fixture does not parse; roadmap = no reader; unavailable = needs an optional codec here.
+<!-- MATRIX END -->
+
 
 Multi-account harnesses are reported as evidence: `handoff doctor` shows
 `N account config(s)` (one encrypted model catalog per login); per-session
@@ -80,10 +81,11 @@ Everything is read-only. `agenthandoff` never writes into a CLI's store.
 ## What is *not* working
 
 The honest inventory lives in
-[docs/limitations.md](docs/limitations.md): which support claims rest on real
-data, which are unverified, and the 15 known gaps — including the one that
-matters most, that a brief assembled after a quota death currently drops recent
-context first. If a sentence below sounds like marketing, go read that file.
+[docs/limitations.md](docs/limitations.md): which support claims rest on parsed
+fixtures, which are unverified, and the known gaps — including the two that bite
+hardest, that a fixture freezes a format at the moment it was sampled and that the
+cockpit has never been exercised under concurrent load. If a sentence below sounds
+like marketing, go read that file.
 
 ## Why not just ask the agent to write a handoff file?
 
@@ -136,15 +138,18 @@ Details in [docs/architecture.md](docs/architecture.md).
 ```bash
 git clone https://github.com/czri23333/agenthandoff
 cd agenthandoff
-pip install -e ".[dev]"
-pytest
+pip install -e ".[dev,zstd,server]"
+pytest                                   # library + every shipped fixture
 ruff check .
+handoff matrix                           # the support table, derived from fixtures
+python -m agent_handoff.evidence --check      # README/JSON vs the fixtures
+python -m agent_handoff.conformance --check   # format fingerprints vs the baseline
 ```
 
-Design docs: [architecture](docs/architecture.md) ·
-[competitive research](docs/research.md) ·
-[bundle spec](spec/handoff-bundle-spec.md) ·
-[resume-prompt spec](spec/resume-prompt-spec.md)
+Regenerating the evidence after a vendor update (maintainer's machine, needs the
+real stores): `python scripts/sanitize_fixtures.py` rebuilds the sanitized
+fixtures and audits them for leaks, then `--write` refreshes the fingerprints and
+the README tables. Commit all three together, or CI fails - deliberately.
 
 ## License
 

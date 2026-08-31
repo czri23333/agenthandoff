@@ -22,34 +22,38 @@
 
 ## 支持的 CLI
 
-证据分级：**已读** = 在维护者本机（2026-08-31，单台 Windows）解析过真实存储；
-**未验证** = 代码在，但没人喂过它数据；**已证实** = 仓库内脱敏夹具在 CI 里被解析
-（目前还没有任何一行达到这个级，见 [docs/limitations.md](docs/limitations.md)）。
-请在自己机器上跑 `handoff doctor`——它才是这张表的真相来源。
+<!-- MATRIX BEGIN: generated, do not edit -->
+下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 8 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
 
-| CLI | 读取的存储 | 证据 |
-|---|---|---|
-| ZCode | SQLite（`~/.zcode/cli/db/db.sqlite`） | ✅ 已读 — 453 个会话 |
-| Qoder CN IDE | JSONL（`~/.qoder-cn/projects/…`，qoder-cn 家族共享） | ✅ 已读 — 118 个文件 |
-| CodeBuddy | JSONL（`~/.codebuddy/projects/…`） | ✅ 已读 — 32 个文件 |
-| Qoderwork（含 CN，双账号） | JSONL（`~/.qoderwork[cn]/projects/…`） | ✅ 已读 — 13 个文件，3 个账号配置 |
-| Qwen Work CN | JSONL（`~/.qwenworkcn/projects/…`） | ✅ 已读 — 1 个文件 |
-| dsh (DeepSeekHarness) | zstd-JSONL（`~/.dsh/sessions/…`） | ✅ 已读 — 46 个归档，含 WSL 内的存储 |
-| Kimi CLI | `state.json` + `wire.jsonl` | 🧪 只读过一次 — 实验性 |
-| Codex CLI | `~/.codex/sessions` | ❌ 检测到了但读不出 — rollout 结构已变 |
-| Claude Code | JSONL（`~/.claude/projects/…`） | ⚠️ 未验证（没有真实存储可测，也没有夹具） |
-| CodeBuddy CN | JSONL（`~/.codebuddy-cn/projects/…`） | ⚠️ 未验证 |
-| opencode | `~/.local/share/opencode/storage` | 🔜 路线图 |
-| Trae / IDE 形态（SQLite 状态） | 各家用户数据目录 | 🔜 路线图，且只做只读 |
+| CLI | 存储形态 | 读取 | 脱敏夹具 | 夹具读出 | 格式指纹 | 状态 |
+|---|---|---|---|---|---|---|
+| `zcode` | SQLite（只读 URI 打开） | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `claude` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `codebuddy` | JSONL 目录 | ✓ | 25 | 24 ses / 44 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `codebuddy-cn` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoderwork` | JSONL 目录 | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qoderwork-cn` | JSONL 目录 | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qodercn-ide` | JSONL 目录 | ✓ | 25 | 5 ses / 31 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qwenwork` | JSONL 目录 | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 7 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ 仅形态（源存档无对话内容） |
+| `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qoder-ide` | Electron leveldb——磁盘无会话文件 | — | — | — | — | 🔜 路线图 |
+| `opencode` | 存储布局无文档 | — | — | — | — | 🔜 路线图 |
+| `trae` | IDE SQLite；只读，绝不写入 | — | — | — | — | 🔜 路线图 |
+
+图例：稳定 = 夹具能解析出真实对话；仅形态 = 源存档本身没有对话内容；未验证 = 有读取器但没有夹具；夹具解析失败 = 夹具读不出来；路线图 = 尚无读取器；本机不可用 = 这里缺可选解码器。
+<!-- MATRIX END -->
+
 
 WSL 发行版内的会话存储会从 Windows 侧自动发现并读取（`handoff doctor`
 中以 `[wsl]` 标注）。
 
 ## 哪些地方还不成
 
-诚实清单在 [docs/limitations.md](docs/limitations.md)：哪些支持声明有真实数据支撑、
-哪些没验证过、以及 15 条已知不足——包括最要命的那条：额度耗尽后生成的接力提示词，
-目前最先丢掉恰恰是最近的上下文。下面这段话如果听着像营销，就去读那个文件。
+诚实清单在 [docs/limitations.md](docs/limitations.md)：哪些支持声明有夹具解析作证、哪些只
+是写了读取代码却没验证过、以及已知不足——其中最要紧的两条是：夹具只能把格式冻结在采样那一刻，
+以及驾驶舱从未在并发压力下实测过。下面任何一句听起来像宣传的话，都请以那份文件为准。
 
 ## 快速开始
 
@@ -95,6 +99,19 @@ HANDOFF.md"。它恰恰在最需要的时候失效：会话崩溃、上下文撑
 - 会话内容不出本机，零网络调用。
 - 仓库测试夹具全部为合成数据，不含任何真实会话记录。
 - 交接包只写到 `--out` 指定的位置。
+
+## 开发与验证
+
+```bash
+pip install -e ".[dev,zstd,server]"
+pytest                                   # 库 + 每一个随仓库分发的脱敏夹具
+handoff matrix                           # 支持矩阵：由夹具推导，不手写
+python -m agent_handoff.evidence --check      # README/JSON 与夹具是否一致
+python -m agent_handoff.conformance --check   # 格式指纹是否发生漂移
+```
+
+上表每一格的证据都在仓库里：夹具是真实存档的脱敏样本（结构保留、内容替换），
+CI 里解析并断言其形态。任何一格与夹具不符，CI 直接红。
 
 ## 许可
 

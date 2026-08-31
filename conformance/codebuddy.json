@@ -1,0 +1,136 @@
+{
+  "cli": "codebuddy",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 25,
+    "messages": 44,
+    "nonempty_messages": 44,
+    "proven": true,
+    "sampled": true,
+    "sessions": 24,
+    "shape_only": false,
+    "source_messages": 322,
+    "tool_calls": 0,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 1,
+      ".jsonl": 24
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "ai-title": [
+        "aiTitle",
+        "cwd",
+        "id",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "file-history-snapshot": [
+        "cwd",
+        "id",
+        "isSnapshotUpdate",
+        "snapshot",
+        "timestamp",
+        "type"
+      ],
+      "function_call": [
+        "arguments",
+        "callId",
+        "cwd",
+        "id",
+        "message",
+        "name",
+        "parentId",
+        "providerData",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "function_call_result": [
+        "callId",
+        "cwd",
+        "id",
+        "name",
+        "output",
+        "parentId",
+        "providerData",
+        "sessionId",
+        "status",
+        "timestamp",
+        "type"
+      ],
+      "message": [
+        "__codebuddyLocal",
+        "content",
+        "cwd",
+        "id",
+        "logicalParentId",
+        "message",
+        "parentId",
+        "providerData",
+        "role",
+        "sessionId",
+        "status",
+        "timestamp",
+        "type"
+      ],
+      "reasoning": [
+        "content",
+        "cwd",
+        "id",
+        "parentId",
+        "providerData",
+        "rawContent",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "session-meta": [
+        "meta",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "summary": [
+        "id",
+        "providerData",
+        "summary",
+        "timestamp",
+        "type"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 139,
+      "<scalar>": 2,
+      "ai-title": 2,
+      "file-history-snapshot": 91,
+      "function_call": 648,
+      "function_call_result": 479,
+      "message": 170,
+      "reasoning": 312,
+      "session-meta": 43,
+      "summary": 6
+    },
+    "tables": {},
+    "top_key_sets": {
+      "__codebuddyLocal,content,cwd,id": 27,
+      "aiTitle,cwd,id,sessionId": 2,
+      "arguments,callId,cwd,id": 648,
+      "callId,cwd,id,name": 479,
+      "content,cwd,id,logicalParentId": 1,
+      "content,cwd,id,message": 9,
+      "content,cwd,id,parentId": 442,
+      "content,cwd,id,providerData": 3,
+      "cwd,id,isSnapshotUpdate,snapshot": 91,
+      "id,providerData,summary,timestamp": 6,
+      "meta,sessionId,timestamp,type": 43
+    }
+  },
+  "version": "1"
+}

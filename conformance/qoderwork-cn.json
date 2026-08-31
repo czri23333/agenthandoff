@@ -1,0 +1,105 @@
+{
+  "cli": "qoderwork-cn",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 42,
+    "files": 25,
+    "messages": 34,
+    "nonempty_messages": 34,
+    "proven": true,
+    "sampled": true,
+    "sessions": 2,
+    "shape_only": false,
+    "source_messages": 100,
+    "tool_calls": 169,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 17,
+      ".jsonl": 8
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "assistant": [
+        "agentId",
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "parent_tool_use_id",
+        "sessionId",
+        "session_id",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "file-history-snapshot": [
+        "isSnapshotUpdate",
+        "messageId",
+        "snapshot",
+        "type"
+      ],
+      "last-prompt": [
+        "lastPrompt",
+        "sessionId",
+        "type"
+      ],
+      "runtime-config": [
+        "contextWindow",
+        "model",
+        "reasoningEffort",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "user": [
+        "agentId",
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isMeta",
+        "isSidechain",
+        "message",
+        "origin",
+        "parentUuid",
+        "parent_tool_use_id",
+        "permissionMode",
+        "promptId",
+        "sessionId",
+        "sourceToolAssistantUUID",
+        "timestamp",
+        "toolUseResult",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 597,
+      "<scalar>": 3,
+      "assistant": 292,
+      "file-history-snapshot": 15,
+      "last-prompt": 16,
+      "runtime-config": 12,
+      "user": 190
+    },
+    "tables": {},
+    "top_key_sets": {
+      "agentId,cwd,entrypoint,isSidechain": 327,
+      "contextWindow,model,reasoningEffort,sessionId": 12,
+      "cwd,entrypoint,gitBranch,isMeta": 1,
+      "cwd,entrypoint,gitBranch,isSidechain": 154,
+      "isSnapshotUpdate,messageId,snapshot,type": 15,
+      "lastPrompt,sessionId,type": 16
+    }
+  },
+  "version": "1"
+}

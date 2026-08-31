@@ -24,7 +24,12 @@ jobs:
         run: pytest
       - name: Lint
         run: ruff check .
+      - name: Support matrix matches the fixtures
+        run: python -m agent_handoff.evidence --check
+      - name: Format fingerprints have not drifted
+        run: python -m agent_handoff.conformance --check
       - name: CLI smoke
         run: |
           handoff --version
           handoff doctor
+          handoff matrix

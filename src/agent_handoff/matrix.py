@@ -27,11 +27,15 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from agent_handoff import fixtures
 from agent_handoff.parsers import all_parsers
 
 REPO = Path(__file__).resolve().parent.parent.parent
-FIXTURE_ROOT = REPO / "tests" / "fixtures" / "sanitized"
-BASELINE_ROOT = REPO / "conformance"
+# Single source of truth for what a fixture is and what it proves: the same
+# helpers back the conformance gate and tests/test_fixtures.py, so a row in this
+# table cannot mean something different from the assertion that guards it.
+FIXTURE_ROOT = fixtures.FIXTURE_ROOT
+BASELINE_ROOT = fixtures.BASELINE_ROOT
 
 # Facts that cannot be derived from code: the on-disk shape each store uses and
 # the roadmap entries we intend to fill. Everything else is measured.
@@ -60,6 +64,20 @@ ROADMAP: dict[str, str] = {
 
 MATRIX_VERSION = "1"
 
+# The zh table must not be an English table with a Chinese heading. Unknown
+# descriptions fall back to the source text rather than disappearing.
+STORE_ZH = {
+    "JSONL dir": "JSONL 目录",
+    "SQLite (read-only URI)": "SQLite（只读 URI 打开）",
+    "zstd JSONL dir": "zstd 压缩 JSONL 目录",
+    "state.json + wire.jsonl": "state.json + wire.jsonl",
+    "JSONL rollouts": "JSONL rollout 存档",
+    "Electron leveldb — no session files on disk": "Electron leveldb——磁盘无会话文件",
+    "storage layout undocumented": "存储布局无文档",
+    "IDE SQLite; read-only only, never written": "IDE SQLite；只读，绝不写入",
+    "per-vendor app data": "各厂商应用数据目录",
+}
+
 
 @dataclass
 class Row:
@@ -70,6 +88,8 @@ class Row:
     fixture_sessions: int = 0
     fixture_messages: int = 0
     fixture_ok: bool = False
+    shape_only: bool = False
+    codec_missing: bool = False
     conformance: bool = False
     status: str = "unverified"
     notes: list[str] = field(default_factory=list)
@@ -78,34 +98,6 @@ class Row:
         return asdict(self)
 
 
-def _fixture_dir(cli: str) -> Path:
-    return FIXTURE_ROOT / cli
-
-
-def _measure_fixture(parser, directory: Path) -> tuple[int, int, int, bool]:
-    """(files, sessions, messages, ok) actually produced from the fixtures.
-
-    The parser is pointed at the fixture directory instead of the user's store;
-    nothing here touches a real session file.
-    """
-    files = sorted(p for p in directory.rglob("*") if p.is_file())
-    sessions = messages = 0
-    ok = False
-    probe = getattr(parser, "with_root", None)
-    if probe is None or not files:
-        return len(files), 0, 0, False
-    try:
-        scoped = probe(directory)
-        metas = scoped.list_sessions()
-        sessions = len(metas)
-        for meta in metas[:5]:  # bounded: a fixture dir is small by design
-            raw = scoped.load(meta.session_id)
-            if raw is not None:
-                messages += len(raw.messages)
-        ok = sessions > 0 and messages > 0
-    except (OSError, ValueError):  # a broken fixture is a failed measurement
-        ok = False
-    return len(files), sessions, messages, ok
 
 
 def derive_status(row: Row) -> str:
@@ -114,6 +106,12 @@ def derive_status(row: Row) -> str:
         return "roadmap"
     if not row.fixtures:
         return "unverified"
+    if row.codec_missing:
+        # Says something about this environment, not about the format. Keep it
+        # out of the "our parser is broken" bucket, and out of the counts.
+        return "unavailable"
+    if row.shape_only:
+        return "shape-only"
     if not row.fixture_ok:
         return "fixture-fails"
     if row.cli in EXPERIMENTAL:
@@ -132,11 +130,17 @@ def build_rows() -> list[Row]:
             reader=True,
             conformance=(BASELINE_ROOT / f"{parser.cli}.json").is_file(),
         )
-        directory = _fixture_dir(parser.cli)
-        if directory.is_dir():
-            measured = _measure_fixture(parser, directory)
-            row.fixtures, row.fixture_sessions = measured[0], measured[1]
-            row.fixture_messages, row.fixture_ok = measured[2], measured[3]
+        evidence = fixtures.measure(parser)
+        row.fixtures = evidence.files
+        row.fixture_sessions = evidence.sessions
+        row.fixture_messages = evidence.nonempty
+        row.fixture_ok = evidence.proven
+        row.shape_only = evidence.shape_only
+        row.codec_missing = evidence.codec_missing
+        if evidence.error:
+            row.notes.append(evidence.error)
+        if evidence.sampled:
+            row.notes.append("record-sampled")
         row.status = derive_status(row)
         rows.append(row)
     for cli in ROADMAP:
@@ -147,9 +151,26 @@ def build_rows() -> list[Row]:
     return rows
 
 
-def _cell(status: str, lang: str) -> str:
+# Terminal cells: no glyph is encodable on a cp936/cp1252 console, so the CLI
+# output spells its labels out. The Markdown table keeps the emoji.
+ASCII_CELL = {
+    "stable": "[ok] stable (fixture-proven)",
+    "experimental": "[exp] experimental",
+    "shape-only": "[--] shape only (source store held no dialogue)",
+    "unverified": "[gap] unverified (no fixture)",
+    "fixture-fails": "[!!] fixture fails to parse",
+    "unavailable": "[env] needs an optional codec here",
+    "roadmap": "[next] roadmap",
+}
+
+
+def _cell(status: str, lang: str, ascii_cell: bool = False) -> str:
+    if ascii_cell:
+        return ASCII_CELL.get(status, status)
     zh = {
         "stable": "✅ 稳定（有夹具证据）",
+        "shape-only": "⬜ 仅形态（源存档无对话内容）",
+        "unavailable": "❓ 本机缺少可选解码器（`pip install '.[zstd]'`）",
         "experimental": "🧪 实验性",
         "unverified": "⚠️ 未验证（缺脱敏夹具）",
         "fixture-fails": "❌ 夹具解析失败",
@@ -157,6 +178,8 @@ def _cell(status: str, lang: str) -> str:
     }
     en = {
         "stable": "✅ stable (fixture-proven)",
+        "shape-only": "⬜ shape only (source store held no dialogue)",
+        "unavailable": "❓ needs an optional codec (`pip install '.[zstd]'`)",
         "experimental": "🧪 experimental",
         "unverified": "⚠️ unverified (no fixture)",
         "fixture-fails": "❌ fixture fails to parse",
@@ -166,7 +189,10 @@ def _cell(status: str, lang: str) -> str:
     return table.get(status, status)
 
 
-def render_markdown(lang: str = "en", rows: list[Row] | None = None) -> str:
+def render_markdown(
+    lang: str = "en", rows: list[Row] | None = None, ascii_cell: bool = False
+) -> str:
+    """The support table. `ascii_cell` is for a console that cannot encode emoji."""
     rows = rows if rows is not None else build_rows()
     if lang == "zh":
         header = "| CLI | 存储形态 | 读取 | 脱敏夹具 | 夹具读出 | 格式指纹 | 状态 |"
@@ -174,19 +200,28 @@ def render_markdown(lang: str = "en", rows: list[Row] | None = None) -> str:
     else:
         header = "| CLI | store | reader | fixtures | proven from fixtures | fingerprint | status |"
         rule = "|---|---|---|---|---|---|---|"
+    blank = "-" if ascii_cell else "—"
     lines = [header, rule]
     for row in rows:
-        fixtures = str(row.fixtures) if row.fixtures else "—"
+        store = STORE_ZH.get(row.store, row.store) if lang == "zh" else row.store
+        fixtures = str(row.fixtures) if row.fixtures else blank
         proven = (
             f"{row.fixture_sessions} ses / {row.fixture_messages} msg"
             if row.fixtures
-            else "—"
+            else blank
         )
-        fingerprint = "✓" if row.conformance else "—"
-        reader = "✓" if row.reader else "—"
+        if row.shape_only or row.codec_missing:
+            # Hide the counts: without the codec they measure the environment,
+            # and a shape-only fixture would print "0 ses / 0 msg" as though the
+            # parser had failed.
+            proven = blank
+            fixtures = "—" if row.codec_missing else fixtures
+        yes, no = ("yes", "no") if ascii_cell else ("✓", "—")
+        fingerprint = yes if row.conformance else no
+        reader = yes if row.reader else no
         lines.append(
-            f"| `{row.cli}` | {row.store} | {reader} | {fixtures} | {proven} | {fingerprint} "
-            f"| {_cell(row.status, lang)} |"
+            f"| `{row.cli}` | {store} | {reader} | {fixtures} | {proven} | {fingerprint} "
+            f"| {_cell(row.status, lang, ascii_cell)} |"
         )
     return "\n".join(lines)
 
@@ -218,4 +253,5 @@ def write_baselines(rows: list[Row] | None = None) -> int:
 def unproven(rows: list[Row] | None = None) -> list[str]:
     """CLIs that claim a reader but have no fixture evidence."""
     rows = rows if rows is not None else build_rows()
-    return [r.cli for r in rows if r.reader and r.status in ("unverified", "fixture-fails")]
+    missing = ("unverified", "fixture-fails")
+    return [r.cli for r in rows if r.reader and r.status in missing]

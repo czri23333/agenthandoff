@@ -1,0 +1,91 @@
+{
+  "cli": "qoderwork",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 4,
+    "messages": 3,
+    "nonempty_messages": 3,
+    "proven": true,
+    "sampled": false,
+    "sessions": 2,
+    "shape_only": false,
+    "source_messages": 4,
+    "tool_calls": 0,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 2,
+      ".jsonl": 2
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "assistant": [
+        "cwd",
+        "entrypoint",
+        "error",
+        "errorDetails",
+        "gitBranch",
+        "isApiErrorMessage",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "last-prompt": [
+        "lastPrompt",
+        "sessionId",
+        "type"
+      ],
+      "runtime-config": [
+        "contextWindow",
+        "model",
+        "reasoningEffort",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "user": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "origin",
+        "parentUuid",
+        "permissionMode",
+        "promptId",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 48,
+      "<scalar>": 1,
+      "assistant": 3,
+      "last-prompt": 2,
+      "runtime-config": 4,
+      "user": 2
+    },
+    "tables": {},
+    "top_key_sets": {
+      "contextWindow,model,reasoningEffort,sessionId": 4,
+      "cwd,entrypoint,error,errorDetails": 1,
+      "cwd,entrypoint,gitBranch,isSidechain": 4,
+      "lastPrompt,sessionId,type": 2
+    }
+  },
+  "version": "1"
+}

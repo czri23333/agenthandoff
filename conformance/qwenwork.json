@@ -1,0 +1,94 @@
+{
+  "cli": "qwenwork",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 3,
+    "messages": 2,
+    "nonempty_messages": 2,
+    "proven": true,
+    "sampled": false,
+    "sessions": 1,
+    "shape_only": false,
+    "source_messages": 2,
+    "tool_calls": 0,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 2,
+      ".jsonl": 1
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "assistant": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "last-prompt": [
+        "lastPrompt",
+        "sessionId",
+        "type"
+      ],
+      "runtime-config": [
+        "contextWindow",
+        "model",
+        "reasoningEffort",
+        "sessionId",
+        "timestamp",
+        "type"
+      ],
+      "user": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "origin",
+        "parentUuid",
+        "permissionMode",
+        "promptId",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "workspace-directories": [
+        "directories",
+        "sessionId",
+        "type"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 42,
+      "<scalar>": 1,
+      "assistant": 2,
+      "last-prompt": 1,
+      "runtime-config": 2,
+      "user": 1,
+      "workspace-directories": 2
+    },
+    "tables": {},
+    "top_key_sets": {
+      "contextWindow,model,reasoningEffort,sessionId": 2,
+      "cwd,entrypoint,gitBranch,isSidechain": 3,
+      "directories,sessionId,type": 2,
+      "lastPrompt,sessionId,type": 1
+    }
+  },
+  "version": "1"
+}

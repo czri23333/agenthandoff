@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -404,6 +405,32 @@ def build_parser() -> argparse.ArgumentParser:
     p_ui.add_argument("--port", type=int, default=8620)
     p_ui.add_argument("--open", action="store_true", help="open the browser automatically")
 
+    p_mtx = sub.add_parser(
+        "matrix",
+        help="print the support matrix derived from the shipped fixtures (never hand-written)",
+    )
+    p_mtx.add_argument("--json", action="store_true", help="emit rows + summary as JSON")
+    p_mtx.add_argument(
+        "--lang", choices=["en", "zh"], default="en", help="table language (default en)"
+    )
+    p_mtx.add_argument(
+        "--markdown",
+        action="store_true",
+        help="emit the README block (emoji cells) instead of the console table",
+    )
+
+    p_ev = sub.add_parser(
+        "evidence",
+        help="check (or regenerate) that README/JSON match the fixtures; maintainer-facing",
+    )
+    ev_group = p_ev.add_mutually_exclusive_group()
+    ev_group.add_argument(
+        "--check", action="store_true", default=True, help="exit non-zero when stale (default)"
+    )
+    ev_group.add_argument(
+        "--write", action="store_true", help="rewrite the README block and support-matrix.json"
+    )
+
     p_res = sub.add_parser("resume", help="generate a continuation brief from a bundle")
     p_res.add_argument("bundle", help="path to a bundle .md or .json file")
     p_res.add_argument("--max-chars", type=int, default=12000, help="brief budget (default 12000)")
@@ -458,6 +485,41 @@ def _cmd_search(args: argparse.Namespace) -> int:
         f" \u00b7 index {stats.index_state} ({stats.indexed}/{stats.total})"
     )
     return 0
+
+
+def _cmd_matrix(args: argparse.Namespace) -> int:
+    """The support matrix, computed from the fixtures in this repo."""
+    from agent_handoff import matrix as ah_matrix
+
+    rows = ah_matrix.build_rows()
+    if args.json:
+        print(
+            json.dumps(
+                {"rows": [r.to_dict() for r in rows], "summary": ah_matrix.summary(rows)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.markdown:
+        from agent_handoff import evidence
+
+        print(evidence.render_block(args.lang, rows))
+        return 0
+    print(ah_matrix.render_markdown(args.lang, rows, ascii_cell=True))
+    print(f"\nsummary: {ah_matrix.summary(rows)}")
+    gaps = ah_matrix.unproven(rows)
+    if gaps:
+        print("unproven readers (no fixture yet): " + ", ".join(gaps))
+    print('reproduce: pip install -e ".[dev]" && python -m agent_handoff.evidence --check')
+    return 0
+
+
+def _cmd_evidence(args: argparse.Namespace) -> int:
+    from agent_handoff import evidence
+
+    argv = ["--write"] if getattr(args, "write", False) else ["--check"]
+    return evidence.main(argv)
 
 
 def _cmd_backup(args: argparse.Namespace) -> int:
@@ -568,12 +630,32 @@ _HANDLERS = {
     "threads": _cmd_threads,
     "ui": _cmd_ui,
     "search": _cmd_search,
+    "matrix": _cmd_matrix,
+    "evidence": _cmd_evidence,
     "backup": _cmd_backup,
     "vault": _cmd_vault,
 }
 
 
+def _survive_console_codepage() -> None:
+    """Report something, even when the console cannot spell it.
+
+    A zh-CN Windows console is cp936 and a Western one is cp1252; neither can
+    encode `✓`, so printing the support matrix used to raise UnicodeEncodeError
+    before it could say anything. Replacing unencodable characters keeps the run
+    alive and leaves the native code page alone - forcing UTF-8 instead made
+    piped output arrive as mojibake, because the reader decodes with the console's
+    own code page. Glyphs belong in the Markdown, not in terminal output.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            # A redirected or closed stream is not a reason to stop working.
+            with contextlib.suppress(OSError, ValueError):
+                stream.reconfigure(errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _survive_console_codepage()
     args = build_parser().parse_args(argv)
     return _HANDLERS[args.cmd](args)
 

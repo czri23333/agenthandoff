@@ -1,0 +1,60 @@
+{
+  "cli": "kimi",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 4,
+    "messages": 0,
+    "nonempty_messages": 0,
+    "proven": false,
+    "sampled": false,
+    "sessions": 1,
+    "shape_only": true,
+    "source_messages": 0,
+    "tool_calls": 0,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".json": 2,
+      ".jsonl": 1,
+      ".log": 1
+    },
+    "keys_by_type": {
+      "<scalar>": [],
+      "config.update": [
+        "profileName",
+        "systemPrompt",
+        "time",
+        "type"
+      ],
+      "metadata": [
+        "created_at",
+        "protocol_version",
+        "type"
+      ],
+      "tools.set_active_tools": [
+        "names",
+        "time",
+        "type"
+      ]
+    },
+    "record_types": {
+      "<not-json>": 46,
+      "<scalar>": 1,
+      "config.update": 2,
+      "metadata": 1,
+      "tools.set_active_tools": 1
+    },
+    "tables": {},
+    "top_key_sets": {
+      "created_at,protocol_version,type": 1,
+      "names,time,type": 1,
+      "profileName,systemPrompt,time,type": 1,
+      "time,type": 1
+    }
+  },
+  "version": "1"
+}
