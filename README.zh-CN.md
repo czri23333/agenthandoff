@@ -29,7 +29,7 @@
 |---|---|---|---|---|---|---|
 | `zcode` | SQLite（只读 URI 打开） | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `claude` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `codebuddy` | JSONL 目录 | ✓ | 25 | 24 ses / 44 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `codebuddy` | JSONL 目录 | ✓ | 25 | 24 ses / 59 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `codebuddy-cn` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwork` | JSONL 目录 | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwork-cn` | JSONL 目录 | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ 稳定（有夹具证据） |

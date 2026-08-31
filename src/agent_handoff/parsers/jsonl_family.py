@@ -16,6 +16,8 @@ upstream fields never crash a capture.
 
 from __future__ import annotations
 
+import json
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,48 @@ from pathlib import Path
 from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
 from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
+
+
+def _tail_rows(path: Path, max_bytes: int = 65536) -> list[dict]:
+    """The last records of a JSONL file, without reading the whole thing.
+
+    The newest timestamp lives at the end of a long transcript, and `stat().mtime`
+    is not it: mtime is when the file was copied, restored or checked out.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as handle:
+            if size > max_bytes:
+                handle.seek(-max_bytes, os.SEEK_END)
+                handle.readline()  # drop the fragment of a partial line
+            payload = handle.read()
+    except OSError:
+        return []
+    rows: list[dict] = []
+    for line in payload.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
+def _mtime_iso(stamp: float) -> str | None:
+    """Last resort dating: the filesystem, when the store recorded nothing."""
+    if not stamp:
+        return None
+    return _iso(datetime.fromtimestamp(stamp, tz=timezone.utc))
+
+
+def _record_stamp(rows: list[dict]) -> str | None:
+    """Newest `timestamp` any record in `rows` carries."""
+    stamps = [iso for row in rows if (iso := _iso(row.get("timestamp")))]
+    return max(stamps) if stamps else None
 
 
 def _iso(value) -> str | None:
@@ -136,10 +180,14 @@ class JsonlSessionParser(Parser):
                 title = title or text[:80]
                 started = _iso(r.get("timestamp")) or started
                 break
-        try:
-            updated = _iso(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
-        except OSError:
-            updated = None
+        updated = _record_stamp(rows) or _record_stamp(_tail_rows(path))
+        if updated is None:
+            # Only a store that records no timestamps at all may be dated by its
+            # filesystem - and then the date means "copied", not "last turn".
+            try:
+                updated = _iso(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
+            except OSError:
+                updated = None
         return SessionMeta(
             cli=self.cli,
             session_id=session_id,
@@ -204,12 +252,13 @@ class JsonlSessionParser(Parser):
         cwd = ""
         title = ""
         started = None
-        newest = 0.0
+        newest_at: str | None = None
+        newest_mtime = 0.0
         seen_ids: set[tuple[str, str]] = set()
 
         for path in paths:
             try:
-                newest = max(newest, path.stat().st_mtime)
+                newest_mtime = max(newest_mtime, path.stat().st_mtime)
             except OSError:
                 continue
             for row in read_jsonl(path):
@@ -218,6 +267,8 @@ class JsonlSessionParser(Parser):
                 cwd = cwd or (row.get("cwd") or "")
                 at = _iso(row.get("timestamp"))
                 started = started or at
+                if at and (newest_at is None or at > newest_at):
+                    newest_at = at
 
                 role, text, tool_blocks = self._row_content(row)
                 if not role:
@@ -257,7 +308,7 @@ class JsonlSessionParser(Parser):
             title=title or session_id,
             cwd=cwd,
             started_at=started,
-            updated_at=_iso(datetime.fromtimestamp(newest, tz=timezone.utc)) if newest else None,
+            updated_at=newest_at or _mtime_iso(newest_mtime),
             source_path=str(paths[0]),
             origin=self._origin(),
         )
