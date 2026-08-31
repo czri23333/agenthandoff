@@ -1,0 +1,34 @@
+{
+  "cli": "dsh",
+  "with_root": "dsh",
+  "mirrors": "~/.dsh/sessions",
+  "sessions": [
+    "xezaqubif1541",
+    "kosajezu1a34",
+    "xejugi2e66"
+  ],
+  "files": [
+    {
+      "rel": "scope-59e5733761.1--\\xezaqubif1541\\session.jsonl.zstd",
+      "bytes": 64683,
+      "sampled": true
+    },
+    {
+      "rel": "scope-59e5733761.1--\\kosajezu1a34\\session.jsonl.zstd",
+      "bytes": 48283,
+      "sampled": true
+    },
+    {
+      "rel": "scope-59e5733761.1--\\xejugi2e66\\session.jsonl.zstd",
+      "bytes": 44774,
+      "sampled": true
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 88,
+  "sampled_records": true,
+  "source_messages": 335,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

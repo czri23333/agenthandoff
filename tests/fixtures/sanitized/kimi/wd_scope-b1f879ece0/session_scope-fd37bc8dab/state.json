@@ -1,0 +1,15 @@
+{
+  "createdAt": "2026-07-26T10:26:42.956Z",
+  "updatedAt": "2026-07-26T10:26:42.956Z",
+  "title": "rep sazoje.",
+  "isCustomTitle": false,
+  "agents": {
+    "main": {
+      "homedir": "syn-8950707d",
+      "type": "main",
+      "parentAgentId": null
+    }
+  },
+  "custom": {},
+  "workDir": "syn-71b34449"
+}

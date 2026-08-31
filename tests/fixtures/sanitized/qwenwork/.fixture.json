@@ -1,0 +1,27 @@
+{
+  "cli": "qwenwork",
+  "with_root": "qwenwork",
+  "mirrors": "~/.qwenworkcn/projects",
+  "sessions": [
+    "60ac9ff8-f089-63d2-f078-02653a9a33f3"
+  ],
+  "files": [
+    {
+      "rel": "scope-1bbba9dedf\\60ac9ff8-f089-63d2-f078-02653a9a33f3\\state.json",
+      "bytes": 681,
+      "sampled": false
+    },
+    {
+      "rel": "scope-1bbba9dedf\\60ac9ff8-f089-63d2-f078-02653a9a33f3.jsonl",
+      "bytes": 3474,
+      "sampled": false
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 5,
+  "sampled_records": false,
+  "source_messages": 2,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

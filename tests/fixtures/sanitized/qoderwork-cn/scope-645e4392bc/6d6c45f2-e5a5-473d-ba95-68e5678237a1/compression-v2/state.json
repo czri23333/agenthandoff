@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "state": {
+    "replacementDecisions": {},
+    "seenFunctionResponseIds": [
+      "kewehep5064b045f",
+      "hohujatas5cb215176",
+      "vowapuzd919b9530",
+      "nejad2c84c3ef"
+    ],
+    "sessionMemoryState": {
+      "initialized": false,
+      "toolCallsSinceLastExtraction": 4,
+      "lastHistoryLength": 15
+    },
+    "autoCompactTracking": {
+      "consecutiveFailures": 0,
+      "lastCompressionStatus": 5
+    },
+    "snippedMessageIds": []
+  }
+}

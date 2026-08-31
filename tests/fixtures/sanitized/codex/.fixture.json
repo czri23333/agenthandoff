@@ -1,0 +1,119 @@
+{
+  "cli": "codex",
+  "with_root": "codex\\sessions",
+  "mirrors": "~/.codex/sessions",
+  "sessions": [
+    "0c3c7e95-3aa9-d152-ba07-c4a5c82ddfe0",
+    "2a3571cd-3cfe-0fd3-eaef-b04bdc5e96eb",
+    "342aafb5-8c30-85e5-ed04-f929ddf49fb9"
+  ],
+  "files": [
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-39f193cfd7\\scope-632667547e\\rollout-2026-07-31T21-35-28-0c3c7e95-3aa9-d152-ba07-c4a5c82ddfe0.jsonl",
+      "bytes": 174261,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T22-00-42-2a3571cd-3cfe-0fd3-eaef-b04bdc5e96eb.jsonl",
+      "bytes": 154200,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T22-00-37-342aafb5-8c30-85e5-ed04-f929ddf49fb9.jsonl",
+      "bytes": 186121,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T00-41-59-0f748691-22aa-6cd8-2bc4-4949b1ec4385.jsonl",
+      "bytes": 158685,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T00-42-05-15f3af8a-9daa-e268-c013-ac45062cca20.jsonl",
+      "bytes": 145117,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T00-42-12-4ebee201-2082-8a52-9cf8-5018307c912c.jsonl",
+      "bytes": 144232,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-19-45-fdbc06e7-155c-b989-e533-98174da48f41.jsonl",
+      "bytes": 159531,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-19-56-44032699-d94e-a263-3440-2b80273ebe2b.jsonl",
+      "bytes": 158381,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-20-11-c4cb21a8-c8e4-e6b3-34f4-5969a0c1636e.jsonl",
+      "bytes": 161298,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-40-46-177daa11-0f05-1f30-31af-a99ce2a1341d.jsonl",
+      "bytes": 151900,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-41-02-41853b23-bde2-e7c4-8a2c-7504af8057f3.jsonl",
+      "bytes": 157890,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-41-12-8844ae10-a88d-604b-dc11-d0593d752294.jsonl",
+      "bytes": 155389,
+      "sampled": true
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-47-08-742d8c0d-63dc-0fa9-2dd7-b2171dbdcb07.jsonl",
+      "bytes": 78159,
+      "sampled": false
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T01-47-24-6273b382-ef67-6d73-7e59-74f34e60d1b4.jsonl",
+      "bytes": 36950,
+      "sampled": false
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T02-16-20-36414e4f-d820-f350-829f-07ad5d0dc465.jsonl",
+      "bytes": 38847,
+      "sampled": false
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T19-45-01-ee29c1a1-887c-96f0-0ada-633198fc2205.jsonl",
+      "bytes": 43851,
+      "sampled": false
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T19-45-05-7141a186-92c8-eec0-e8a3-667dfec341cd.jsonl",
+      "bytes": 67968,
+      "sampled": false
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T22-08-44-c7b954d9-dd10-cb22-0db7-fd2be6ec22cb.jsonl",
+      "bytes": 33579,
+      "sampled": false
+    },
+    {
+      "rel": "sessions\\scope-aee655773d\\scope-1ea51bf324\\scope-ddfe163345\\rollout-2026-08-01T22-28-02-ef8af8b3-3ab8-5f4c-c640-9cd9c571f695.jsonl",
+      "bytes": 30506,
+      "sampled": false
+    },
+    {
+      "rel": "session_index.jsonl",
+      "bytes": 146,
+      "sampled": false
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 1306,
+  "sampled_records": true,
+  "source_messages": 2933,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

@@ -1,0 +1,52 @@
+{
+  "cli": "zcode",
+  "with_root": "zcode\\db.sqlite",
+  "mirrors": "~/.zcode/cli/db/db.sqlite",
+  "sessions": [
+    "zaxexomuf4c9",
+    "puvosuha575",
+    "sune2105"
+  ],
+  "files": [
+    {
+      "rel": "db.sqlite",
+      "bytes": 1642496,
+      "sampled": false,
+      "sqlite": {
+        "rows": 1540,
+        "tables": 19,
+        "capped": [
+          "message",
+          "part",
+          "session_entry",
+          "model_usage",
+          "turn_usage",
+          "tool_usage",
+          "session_input"
+        ],
+        "unfiltered": [
+          "schema_migration",
+          "permission",
+          "local_setting",
+          "workflow_definition",
+          "workflow_activity",
+          "workflow_event"
+        ],
+        "empty": [
+          "session_target",
+          "workflow_run",
+          "session_task_link"
+        ]
+      }
+    }
+  ],
+  "redacted_keys": [
+    "key"
+  ],
+  "scrubbed_hits": 393,
+  "sampled_records": false,
+  "source_messages": 2978,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

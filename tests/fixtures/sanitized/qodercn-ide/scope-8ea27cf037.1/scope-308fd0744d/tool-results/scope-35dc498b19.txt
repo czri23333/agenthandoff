@@ -1,0 +1,5 @@
+baqimaye hamayili mor cuh.
+higejezu poranuqon ruyebe qaruxa.
+zizej r.
+{"url": "httpsyn-4464198d", "textNodes": 1623, "failCount": 9, "fails": [{"ratio": 1.1, "px": 12, "need": 4.5, "sample": "vakuxoti tu."}, {"ratio": 1.1, "px": 12, "need": 4.5, "sample": "pup j."}, {"ratio": 2.24, "px": 14, "need": 4.5, "sample": "wexe l。"}, {"ratio": 2.24, "px": 14, "need": 4.5, "sample": "话处响代果。"}, {"ratio": 2.53, "px": 12, "need": 4.5, "sample": "ri."}, {"ratio": 3.39, "px": 12, "need": 4.5, "sample": "cevepegu."}, {"ratio": 4.15, "px": 14, "need": 4.5, "sample": "mixi。"}, {"ratio": 4.16, "px": 12, "need": 4.5, "sample": "quwuw."}, {"ratio": 4.47, "px": 14, "need": 4.5, "sample": "fuf fayog."}]}
+fij.

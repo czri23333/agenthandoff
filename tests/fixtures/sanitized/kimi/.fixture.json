@@ -1,0 +1,32 @@
+{
+  "cli": "kimi",
+  "with_root": "kimi",
+  "mirrors": "~/.kimi-code/sessions",
+  "sessions": [
+    "hog9d74"
+  ],
+  "files": [
+    {
+      "rel": "wd_scope-b1f879ece0\\session_scope-fd37bc8dab\\agents\\main\\wire.jsonl",
+      "bytes": 966,
+      "sampled": false
+    },
+    {
+      "rel": "wd_scope-b1f879ece0\\session_scope-fd37bc8dab\\logs\\scope-5270d09504.log",
+      "bytes": 815,
+      "sampled": false
+    },
+    {
+      "rel": "wd_scope-b1f879ece0\\session_scope-fd37bc8dab\\state.json",
+      "bytes": 307,
+      "sampled": false
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 10,
+  "sampled_records": false,
+  "source_messages": 0,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

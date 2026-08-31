@@ -1,0 +1,33 @@
+{
+  "cli": "qoderwork",
+  "with_root": "qoderwork",
+  "mirrors": "~/.qoderwork/projects",
+  "sessions": [
+    "fdd681fc-0731-f230-6490-8c405055c9af",
+    "fb80eeab-80cc-9ec1-4adb-cb961dd03453"
+  ],
+  "files": [
+    {
+      "rel": "scope-1bbba9dedf\\fdd681fc-0731-f230-6490-8c405055c9af\\state.json",
+      "bytes": 682,
+      "sampled": false
+    },
+    {
+      "rel": "scope-1bbba9dedf\\fdd681fc-0731-f230-6490-8c405055c9af.jsonl",
+      "bytes": 3481,
+      "sampled": false
+    },
+    {
+      "rel": "scope-75168725d2\\fb80eeab-80cc-9ec1-4adb-cb961dd03453.jsonl",
+      "bytes": 2490,
+      "sampled": false
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 8,
+  "sampled_records": false,
+  "source_messages": 4,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

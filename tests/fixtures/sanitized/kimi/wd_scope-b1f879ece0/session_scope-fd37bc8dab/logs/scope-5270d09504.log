@@ -1,0 +1,11 @@
+2026-07-26T10:27:12.570Z kutiy pexicelu coci miboy yuwaz kabeladef pew tigoyupu lag zozapof daba.
+cewo menopulu rahu zupujibo sikowol dekebaw bedefeyod kekiyolov qupuyazu lito ruramazi numokun qojet sebarayo munerey geso puzefafur zineyafer polemo kayufibaw boyuseqag sejeses tujus poku wezimem jicav hohosiduq wefa gus.
+    at fetchManagedKimiCodeModels (syn-71b124dd)
+zelufequm jawusah qutitu wokaja puqetago mahido yadeg yisaderi ximaw jexow dulemok.
+    at async provisionManagedKimiCodeConfig (syn-accec662)
+    at async KimiOAuthToolkit.login (syn-1eaaa7ad)
+    at async KimiAuthFacade.login (syn-5b4e6efc)
+    at async handleKimiCodeOAuthLogin (syn-33637bc8)
+    at async handleLoginCommand (syn-35aa283e)
+    at async handleBuiltInSlashCommand (syn-05d26fd9)
+    at async executeSlashCommand (syn-18a714e6)

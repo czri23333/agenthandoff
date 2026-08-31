@@ -1,0 +1,142 @@
+{
+  "cli": "qodercn-ide",
+  "with_root": "qodercn-ide",
+  "mirrors": "~/.qoder-cn/projects",
+  "sessions": [
+    "vep0bc2",
+    "6c123aff-947c-75c1-0ed7-f30519aa2d68",
+    "kuzu8c33"
+  ],
+  "files": [
+    {
+      "rel": "scope-33094d3356.1\\scope-ed12c18812\\scope-948c5e8b67.jsonl",
+      "bytes": 118671,
+      "sampled": true
+    },
+    {
+      "rel": "scope-592c1277d3\\syn-8da8ca81-d1ea-4c8f-a15c-fdfabed8be40\\compression-v2\\state.json",
+      "bytes": 8609,
+      "sampled": false
+    },
+    {
+      "rel": "scope-592c1277d3\\6c123aff-947c-75c1-0ed7-f30519aa2d68\\state.json",
+      "bytes": 677,
+      "sampled": false
+    },
+    {
+      "rel": "scope-592c1277d3\\6c123aff-947c-75c1-0ed7-f30519aa2d68.jsonl",
+      "bytes": 152818,
+      "sampled": true
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-b9dc10c50e.txt",
+      "bytes": 1907,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-660343d713.txt",
+      "bytes": 401,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-35dc498b19.txt",
+      "bytes": 713,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-e0e5d3aab4.txt",
+      "bytes": 710,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-71cb8e91db.txt",
+      "bytes": 123,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-96feb1684b.txt",
+      "bytes": 232,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-d782a1f072.txt",
+      "bytes": 465,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-df103961c9.txt",
+      "bytes": 83,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-4d4c8fd94d.txt",
+      "bytes": 91,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-e7351b7d18.txt",
+      "bytes": 649,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-d7ffd185c0.txt",
+      "bytes": 128,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-d8ab0cd2ef.txt",
+      "bytes": 129,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-70d4f3d89d.txt",
+      "bytes": 92,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-49178726cf.txt",
+      "bytes": 709,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-767d26c0b2.txt",
+      "bytes": 137,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-cab4830f17.txt",
+      "bytes": 137,
+      "sampled": false
+    },
+    {
+      "rel": "scope-8ea27cf037.1\\scope-308fd0744d\\tool-results\\scope-83de5b4173.txt",
+      "bytes": 2887,
+      "sampled": false
+    },
+    {
+      "rel": "scope-33094d3356.1\\scope-ed12c18812\\scope-8ca95ce8ad.jsonl",
+      "bytes": 123395,
+      "sampled": true
+    },
+    {
+      "rel": "scope-33094d3356.1\\scope-ed12c18812\\216ec12d-d3ff-438b-e6d3-a41c80e3043c.jsonl",
+      "bytes": 93916,
+      "sampled": false
+    },
+    {
+      "rel": "scope-33094d3356.1\\scope-ed12c18812\\d25e0900-8738-168c-00af-aafc220830da.jsonl",
+      "bytes": 74268,
+      "sampled": false
+    }
+  ],
+  "redacted_keys": [
+    "key_words",
+    "keywords"
+  ],
+  "scrubbed_hits": 1041,
+  "sampled_records": true,
+  "source_messages": 322,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}
