@@ -90,6 +90,17 @@ class Parser(ABC):
 
     # -- shared helpers -----------------------------------------------------
 
+    def last_request_tokens(self, session_id: str) -> dict:
+        """Token counts of this session's most recent model request, if known.
+
+        Context pressure belongs to a single request. The session total keeps
+        growing across compactions and retries, so `total / window` would claim a
+        400-call session sits at 4000% of its window. A store that cannot report
+        the per-request figure leaves this empty, and `watch` says "unknown"
+        rather than inventing a number.
+        """
+        return {}
+
     @staticmethod
     def extract_paths(tool_input: dict) -> list[str]:
         """Pull file-ish paths out of a tool call's input dict."""

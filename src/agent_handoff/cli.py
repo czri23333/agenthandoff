@@ -431,6 +431,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--write", action="store_true", help="rewrite the README block and support-matrix.json"
     )
 
+    p_watch = sub.add_parser(
+        "watch",
+        help="snapshot a running session at budget rungs, before a quota death",
+    )
+    p_watch.add_argument(
+        "session", nargs="?", default="latest", help="session id or fragment (default latest)"
+    )
+    p_watch.add_argument("--cli", help="restrict to one CLI (recommended while watching)")
+    p_watch.add_argument(
+        "--every", type=float, default=60.0, help="seconds between looks (default 60)"
+    )
+    p_watch.add_argument(
+        "--times", type=int, help="stop after N looks (default: until the session vanishes)"
+    )
+    p_watch.add_argument("--once", action="store_true", help="single look, then exit")
+    p_watch.add_argument(
+        "--ladder", help="comma-separated context percentages (default 20,45,70,90)"
+    )
+    p_watch.add_argument(
+        "--status", action="store_true", help="print fired rungs and the last snapshot"
+    )
+    p_watch.add_argument("--out", help="snapshot directory (default ~/.agenthandoff/watch/…)")
+
     p_res = sub.add_parser("resume", help="generate a continuation brief from a bundle")
     p_res.add_argument("bundle", help="path to a bundle .md or .json file")
     p_res.add_argument("--max-chars", type=int, default=12000, help="brief budget (default 12000)")
@@ -520,6 +543,81 @@ def _cmd_evidence(args: argparse.Namespace) -> int:
 
     argv = ["--write"] if getattr(args, "write", False) else ["--check"]
     return evidence.main(argv)
+
+
+def _parse_ladder(spec: str | None):
+    from agent_handoff import watch as ah_watch
+
+    if not spec:
+        return ah_watch.LADDER
+    try:
+        rungs = tuple(
+            float(part.strip().rstrip("%")) / 100.0
+            for part in spec.split(",")
+            if part.strip()
+        )
+    except ValueError as exc:
+        raise ValueError("--ladder wants percentages, e.g. 20,45,70,90") from exc
+    if not rungs or any(r <= 0 or r > 1 for r in rungs):
+        raise ValueError("--ladder values must be between 1 and 100")
+    return tuple(sorted(rungs))
+
+
+def _watch_status_line(state) -> str:
+    fired = ", ".join(f"{label}@{when}" for label, when in sorted(state.fired.items())) or "none"
+    where = state.snapshots[-1] if state.snapshots else "-"
+    return (
+        f"{state.cli}/{state.session_id[:24]}: {state.turns} turns, "
+        f"fill={state.fill if state.fill is not None else '?'} ({state.basis or 'unknown'})\n"
+        f"  fired: {fired}\n"
+        f"  last:  {where}"
+    )
+
+
+def _cmd_watch(args: argparse.Namespace) -> int:
+    from agent_handoff import watch as ah_watch
+
+    out_dir = Path(args.out) if args.out else None
+    try:
+        parser, raw = resolve_session(args.session, cli=args.cli)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    session_id = raw.meta.session_id
+
+    if args.status:
+        print(_watch_status_line(ah_watch.load_state(parser.cli, session_id)))
+        return 0
+
+    try:
+        ladder = _parse_ladder(args.ladder)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    iterations = 1 if args.once else args.times
+
+    def report(event: dict, last: dict) -> None:
+        archived = event.get("vault") or "vault unavailable"
+        print(f"[{last['basis']}] rung {event['rung']}: {event['path']}  ({archived})")
+
+    result = ah_watch.run(
+        parser,
+        session_id,
+        interval=args.every,
+        iterations=iterations,
+        on_event=report,
+        out_dir=out_dir,
+        ladder=ladder,
+    )
+    last = result.get("last") or {}
+    if last.get("status") == "gone":
+        print("session is no longer in the store - the last snapshot stands", file=sys.stderr)
+    pending = ", ".join(last.get("pending", [])) or "none"
+    print(
+        f"{result['looks']} look(s), {len(result['fired'])} snapshot(s) this run; "
+        f"basis={last.get('basis', 'unknown')}; pending: {pending}"
+    )
+    return 0
 
 
 def _cmd_backup(args: argparse.Namespace) -> int:
@@ -631,6 +729,7 @@ _HANDLERS = {
     "ui": _cmd_ui,
     "search": _cmd_search,
     "matrix": _cmd_matrix,
+    "watch": _cmd_watch,
     "evidence": _cmd_evidence,
     "backup": _cmd_backup,
     "vault": _cmd_vault,
