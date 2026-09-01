@@ -22,6 +22,7 @@ import contextlib
 import json
 import sqlite3
 import threading
+import time
 import zlib
 from pathlib import Path
 
@@ -51,41 +52,76 @@ class IndexStore:
     miss (self-healing on the next rebuild) instead of raising.
     """
 
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or index_path()
+    def __init__(self, path: Path | str | None = None) -> None:
+        # A str is a normal thing to hand a path-based constructor (CLI args,
+        # JSON, subprocess argv). Storing it verbatim made `_connect()` call
+        # `.parent` on a string - an AttributeError, not a handled failure.
+        self.path = Path(path) if path else index_path()
         self._conn: sqlite3.Connection | None = None
         self._ok = False
         self._last_error = ""
+        # Rows we wanted to persist but could not. Surfaced in stats() so a
+        # cache that drops writes cannot pretend it kept them.
+        self._write_failures = 0
 
     # -- lifecycle -----------------------------------------------------------
     def _connect(self) -> sqlite3.Connection | None:
         if self._conn is not None:
             return self._conn
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=1.0)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)"
-            )
-            # Migrate by dropping — but decide from the *actual columns*, not
-            # from the recorded version: a version marker can lie (an earlier
-            # build of this file stamped schema_version=2 onto a v1-shaped
-            # table, and every write then failed forever). The index is a
-            # cache, so rebuilding is always the correct repair.
-            if not self._schema_current(conn):
-                conn.execute("DROP TABLE IF EXISTS entries")
-                conn.execute(_ENTRIES_DDL)
-                self._write_meta(conn, "schema_version", str(SCHEMA_VERSION))
-                conn.commit()
-            self._conn = conn
-            self._ok = True
-        except (OSError, sqlite3.Error, ValueError) as exc:
-            self._ok = False
-            self._conn = None
-            self._last_error = str(exc)
-        return self._conn
+        attempts = 6
+        for attempt in range(attempts):
+            conn = None
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15.0)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)"
+                )
+                # Migrate by dropping — but decide from the *actual columns*, not
+                # from the recorded version: a version marker can lie (an earlier
+                # build of this file stamped schema_version=2 onto a v1-shaped
+                # table, and every write then failed forever). The index is a
+                # cache, so rebuilding is always the correct repair.
+                #
+                # Two processes opening a cold file at once both saw "not current",
+                # both dropped the table, and the second DROP wiped the first one's
+                # rows. BEGIN IMMEDIATE serializes the check-and-migrate so exactly
+                # one process migrates.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if not self._schema_current(conn):
+                        conn.execute("DROP TABLE IF EXISTS entries")
+                        conn.execute(_ENTRIES_DDL)
+                        self._write_meta(conn, "schema_version", str(SCHEMA_VERSION))
+                    conn.commit()
+                except sqlite3.Error:
+                    conn.rollback()
+                    raise
+                self._conn = conn
+                self._ok = True
+                return self._conn
+            except (OSError, sqlite3.Error, ValueError) as exc:
+                self._last_error = str(exc)
+                locked = isinstance(exc, sqlite3.OperationalError) and (
+                    "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                )
+                with contextlib.suppress(sqlite3.Error, OSError):
+                    if conn is not None:
+                        conn.close()
+                if locked and attempt < attempts - 1:
+                    # Another process holds the file right now. That is ordinary
+                    # for two cockpits on one index; wait it out instead of
+                    # demoting this store to memory-only on a single collision.
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                self._ok = False
+                self._conn = None
+                return None
+        self._ok = False
+        self._conn = None
+        return None
 
     @staticmethod
     def _schema_current(conn: sqlite3.Connection) -> bool:
@@ -132,27 +168,53 @@ class IndexStore:
         except zlib.error:  # pragma: no cover - corrupt blob: treat as a miss
             return None
 
-    def put(self, cli: str, sid: str, src: str, fingerprint: str, hay: str, files: str) -> None:
+    def put(self, cli: str, sid: str, src: str, fingerprint: str, hay: str, files: str) -> bool:
+        """Persist one row. Returns False (and counts it) when it could not.
+
+        Two processes can contend on the WAL; a `database is locked` after the
+        busy timeout used to be swallowed and the row silently dropped. Retrying
+        with backoff resolves ordinary contention, and whatever still fails is
+        counted and reported rather than pretended away.
+        """
         conn = self._guarded_connect()
         if conn is None:
-            return
-        try:
-            with _LOCK:
-                conn.execute(
-                    "INSERT OR REPLACE INTO entries (cli, sid, src, fp, hay, files)"
-                    " VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        cli,
-                        sid,
-                        src,
-                        fingerprint,
-                        zlib.compress(hay.encode("utf-8"), 6),
-                        zlib.compress(files.encode("utf-8"), 6),
-                    ),
-                )
-                conn.commit()
-        except sqlite3.Error:  # pragma: no cover - disk full / locked
-            self._ok = False
+            return False
+        payload = (
+            cli,
+            sid,
+            src,
+            fingerprint,
+            zlib.compress(hay.encode("utf-8"), 6),
+            zlib.compress(files.encode("utf-8"), 6),
+        )
+        attempts = 5
+        for attempt in range(attempts):
+            try:
+                with _LOCK:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO entries (cli, sid, src, fp, hay, files)"
+                        " VALUES (?, ?, ?, ?, ?, ?)",
+                        payload,
+                    )
+                    conn.commit()
+                return True
+            except sqlite3.OperationalError as exc:
+                locked = "locked" in str(exc).lower() or "busy" in str(exc).lower()
+                if locked and attempt < attempts - 1:
+                    with contextlib.suppress(sqlite3.Error):
+                        conn.rollback()
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                self._ok = False
+                self._last_error = str(exc)
+                self._write_failures += 1
+                return False
+            except sqlite3.Error as exc:  # corrupt db, disk full, ...
+                self._ok = False
+                self._last_error = str(exc)
+                self._write_failures += 1
+                return False
+        return False
 
     def keys(self) -> list[tuple[str, str, str]]:
         conn = self._guarded_connect()
@@ -179,7 +241,13 @@ class IndexStore:
 
     def stats(self) -> dict:
         conn = self._guarded_connect()
-        out = {"persisted": self._ok, "path": str(self.path), "rows": 0, "bytes": 0}
+        out = {
+            "persisted": self._ok,
+            "path": str(self.path),
+            "rows": 0,
+            "bytes": 0,
+            "write_failures": self._write_failures,
+        }
         if conn is None:
             out["persisted"] = False
             if self._last_error:
