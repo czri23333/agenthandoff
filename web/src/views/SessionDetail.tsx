@@ -453,6 +453,14 @@ export default function SessionDetail({
             }
             extra={
               <span className="flex items-center gap-1.5">
+                <Button
+                  size="small"
+                  href={api.rawUrl(cli, sid)}
+                  target="_blank"
+                  title={t("rawArchiveTitle")}
+                >
+                  {t("downloadRaw")}
+                </Button>
                 <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
                   {t("downloadBrief")}
                 </Button>

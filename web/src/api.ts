@@ -238,6 +238,9 @@ export const api = {
       `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/brief?${p}`,
     );
   },
+  /** Download the session's ORIGINAL storage (zip, byte-faithful). */
+  rawUrl: (cli: string, sid: string) =>
+    `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/raw`,
   threads: (cwd?: string) => get<ThreadGroup[]>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
   inbox: (globalScope = false) => get<InboxItem[]>(`/api/inbox?global_scope=${globalScope}`),
   launcher: (cli: string, sid: string) =>
