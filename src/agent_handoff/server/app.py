@@ -105,23 +105,26 @@ def _domain_for(cwd: str) -> str:
     cfg = Path.home() / ".agenthandoff" / "domains.toml"
     if cfg.is_file() and cwd:
         try:
-            import tomllib
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:  # pragma: no cover - the 3.10 leg of CI
+            tomllib = None  # type: ignore[assignment]
+        if tomllib is not None:
+            try:
+                rules = tomllib.loads(cfg.read_text(encoding="utf-8")).get("domains", {})
+                norm = cwd.replace("\\\\", "/").replace("\\", "/")
+                for pattern, name in rules.items():
+                    pat = str(pattern)
+                    if pat.startswith("regex:"):
+                        import re
 
-            rules = tomllib.loads(cfg.read_text(encoding="utf-8")).get("domains", {})
-            norm = cwd.replace("\\\\", "/").replace("\\", "/")
-            for pattern, name in rules.items():
-                pat = str(pattern)
-                if pat.startswith("regex:"):
-                    import re
-
-                    if re.search(pat[6:], norm):
+                        if re.search(pat[6:], norm):
+                            return str(name)
+                    elif norm.lower().startswith(
+                        pat.replace("\\\\", "/").replace("\\", "/").lower().rstrip("/")
+                    ):
                         return str(name)
-                elif norm.lower().startswith(
-                    pat.replace("\\\\", "/").replace("\\", "/").lower().rstrip("/")
-                ):
-                    return str(name)
-        except (OSError, ValueError, tomllib.TOMLDecodeError):
-            pass
+            except (OSError, ValueError, TypeError):
+                pass
     return cwd
 
 

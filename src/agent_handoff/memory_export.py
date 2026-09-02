@@ -40,7 +40,10 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover - 3.10 leg
+    tomllib = None  # type: ignore[assignment]
 
 # Budgets for untrusted input (the memory files themselves): a runaway file
 # must not balloon the export or the scan. See docs/research.md item 15.
@@ -286,9 +289,11 @@ def _config_note(path: Path) -> str:
             data = json.loads(raw.decode("utf-8", errors="replace"))
             keys = sorted(k for k in data if isinstance(k, str)) if isinstance(data, dict) else []
         else:
+            if tomllib is None:
+                return "present but TOML requires Python 3.11+ (missing tomli); skipped"
             data = tomllib.loads(raw.decode("utf-8", errors="replace"))
             keys = sorted(data)
-    except (ValueError, tomllib.TOMLDecodeError) as exc:
+    except (ValueError, TypeError) as exc:
         return f"present but unparsable ({exc.__class__.__name__})"
     return f"parsed; top-level keys: {', '.join(keys[:12])}" if keys else "parsed; empty"
 
