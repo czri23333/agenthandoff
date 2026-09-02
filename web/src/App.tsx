@@ -7,6 +7,7 @@ import SessionDetail from "./views/SessionDetail";
 import Threads from "./views/Threads";
 import Inbox from "./views/Inbox";
 import Doctor from "./views/Doctor";
+import MemoryExport from "./views/MemoryExport";
 
 // Hash routing: every view and session is a shareable, bookmarkable URL — also
 // the reason keyboard/automation can reach any screen without clicking.
@@ -15,13 +16,15 @@ type View =
   | { name: "detail"; cli: string; sid: string }
   | { name: "threads" }
   | { name: "inbox" }
-  | { name: "doctor" };
+  | { name: "doctor" }
+  | { name: "memory" };
 
 const TABS: { id: View["name"]; key: string; labelKey: Parameters<ReturnType<typeof useT>>[0]; hash: string }[] = [
   { id: "dashboard", key: "1", labelKey: "sessions", hash: "" },
   { id: "threads", key: "2", labelKey: "threads", hash: "threads" },
   { id: "inbox", key: "3", labelKey: "inbox", hash: "inbox" },
   { id: "doctor", key: "4", labelKey: "doctor", hash: "doctor" },
+  { id: "memory", key: "5", labelKey: "memory", hash: "memory" },
 ];
 
 const THEME_ORDER: ThemeMode[] = ["auto", "dark", "light"];
@@ -33,6 +36,7 @@ export function parseHash(): View {
   if (parts[0] === "threads") return { name: "threads" };
   if (parts[0] === "inbox") return { name: "inbox" };
   if (parts[0] === "doctor") return { name: "doctor" };
+  if (parts[0] === "memory") return { name: "memory" };
   return { name: "dashboard" };
 }
 
@@ -87,7 +91,7 @@ export default function App() {
     };
   }, []);
 
-  // Keyboard: 1-4 views, T theme, / search. Skipped while a field has focus so
+  // Keyboard: 1-5 views, T theme, / search. Skipped while a field has focus so
   // typing a query never navigates away.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -186,6 +190,7 @@ export default function App() {
           {view.name === "threads" && <Threads />}
           {view.name === "inbox" && <Inbox />}
           {view.name === "doctor" && <Doctor />}
+          {view.name === "memory" && <MemoryExport />}
         </div>
       </Layout.Content>
     </Layout>

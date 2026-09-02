@@ -9,6 +9,7 @@ import {
   type TranscriptMessage,
 } from "../api";
 import { Bullets, CliBadge, CopyButton, InterruptionBanner, SectionCard, StatusTag } from "../components";
+import { Markdown } from "../Markdown";
 import { BudgetGauge, TokenBars, TurnTimeline, type ChartLabels } from "../charts";
 import { formatNum, useT } from "../i18n";
 
@@ -20,6 +21,23 @@ import { formatNum, useT } from "../i18n";
  * -important-to-ink lines, so they use the AA-verified tiers rather than the
  * old opacity-faded text that made them unreadable in dark mode.
  */
+/** UAX #29 (L4 rule): never cut inside a grapheme cluster — emoji ZWJ
+ * sequences and combining marks stay whole at the truncation boundary. */
+function graphemeSlice(text: string, maxGraphemes: number): string {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    let out = "";
+    let n = 0;
+    for (const { segment } of seg.segment(text)) {
+      if (n >= maxGraphemes) break;
+      out += segment;
+      n += 1;
+    }
+    return out;
+  }
+  return [...text].slice(0, maxGraphemes).join("");
+}
+
 function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: string; assistant: string; expand: string; collapse: string } }) {
   const [open, setOpen] = useState(false);
   const long = m.text.length > 500;
@@ -33,9 +51,40 @@ function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: st
       <span className="ah-label mr-1.5 select-none" style={{ textTransform: "none" }}>
         {m.role === "user" ? "👤" : "🤖"} {who}
       </span>
-      <span className="whitespace-pre-wrap break-words text-[var(--ah-text-1)]">
-        {open || !long ? m.text : `${m.text.slice(0, 500)}…`}
-      </span>
+      {m.subagent && (
+        <span className="ah-accent mr-1.5 px-1.5 py-px font-mono text-[11px]" title={m.subagent}>
+          ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
+        </span>
+      )}
+      {m.model && (
+        <span
+          className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+          title={`${m.model}${
+            typeof m.tokens_in === "number" || typeof m.tokens_out === "number"
+              ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
+                  typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
+                }`
+              : ""
+          }`}
+        >
+          <span>{m.model}</span>
+          {(typeof m.tokens_in === "number" || typeof m.tokens_out === "number") && (
+            <span className="ah-faint">
+              {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
+              {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
+            </span>
+          )}
+        </span>
+      )}
+      {m.role === "assistant" && (open || !long) ? (
+        <div dir="auto" className="tx-user min-w-0 break-words text-[var(--ah-text-1)]">
+          <Markdown text={m.text} />
+        </div>
+      ) : (
+        <span dir="auto" className="tx-user whitespace-pre-wrap break-words text-[var(--ah-text-1)]">
+          {open || !long ? m.text : `${graphemeSlice(m.text, 500)}…`}
+        </span>
+      )}
       {long && (
         <span className="ah-accent ml-1.5 select-none text-[12px]">
           {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${m.text.length})`}
@@ -76,6 +125,34 @@ export default function SessionDetail({
   const [lang, setLang] = useState<"en" | "zh">("zh");
   const [err, setErr] = useState("");
   const [pub, setPub] = useState("");
+  const [briefMode, setBriefMode] = useState<"summary" | "full">("summary");
+  const [fullBrief, setFullBrief] = useState<{ brief: string; chars: number; turns: number } | null>(null);
+  const [briefBusy, setBriefBusy] = useState(false);
+
+  // Lazy-fetch the lossless full brief the first time "全文" is selected.
+  const selectBriefMode = (mode: "summary" | "full") => {
+    setBriefMode(mode);
+    if (mode === "full" && !fullBrief && !briefBusy) {
+      setBriefBusy(true);
+      api
+        .brief(cli, sid, { lang, depth: "full" })
+        .then(setFullBrief)
+        .catch(() => setFullBrief(null))
+        .finally(() => setBriefBusy(false));
+    }
+  };
+
+  const shownBrief = briefMode === "full" && fullBrief ? fullBrief.brief : data?.brief ?? "";
+
+  const downloadBrief = () => {
+    const blob = new Blob([shownBrief], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `handoff-brief-${sid.slice(0, 8)}${briefMode === "full" ? "-full" : ""}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     setData(null);
@@ -224,6 +301,9 @@ export default function SessionDetail({
                 <span className="ah-faint font-mono">
                   Σ {formatNum(data.usage.totals.tokens_in)}↓ {formatNum(data.usage.totals.tokens_out)}↑ ·{" "}
                   {data.usage.totals.calls} {t("calls")}
+                  {typeof data.usage.totals.cost_usd === "number" && (
+                    <span className="ah-accent"> · ${data.usage.totals.cost_usd.toFixed(4)}</span>
+                  )}
                 </span>
               }
             >
@@ -357,11 +437,44 @@ export default function SessionDetail({
         <div className="ah-side ah-scroll-x flex min-h-0 flex-col gap-3">
           <Card
             size="small"
-            title={<span className="ah-label">{t("continuationBrief")}</span>}
-            extra={<CopyButton text={data.brief} label={t("copyBrief")} />}
+            title={
+              <span className="flex items-center gap-2">
+                <span className="ah-label">{t("continuationBrief")}</span>
+                <Segmented
+                  size="small"
+                  value={briefMode}
+                  onChange={(v) => selectBriefMode(v as "summary" | "full")}
+                  options={[
+                    { label: t("briefSummaryMode"), value: "summary" },
+                    { label: t("briefFullMode"), value: "full" },
+                  ]}
+                />
+              </span>
+            }
+            extra={
+              <span className="flex items-center gap-1.5">
+                <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
+                  {t("downloadBrief")}
+                </Button>
+                <CopyButton text={shownBrief} label={t("copyBrief")} />
+              </span>
+            }
           >
+            {briefMode === "full" && fullBrief && (
+              <div className="ah-faint mb-1.5 font-mono text-[11px]">
+                {t("fullBriefMeta")
+                  .replace("{turns}", String(fullBrief.turns))
+                  .replace("{chars}", fullBrief.chars.toLocaleString())}
+              </div>
+            )}
             <pre className="ah-code ah-search-panel overflow-auto whitespace-pre-wrap break-words p-2.5 text-[12px] leading-relaxed">
-              {data.brief}
+              {briefMode === "full"
+                ? briefBusy
+                  ? t("fullBriefLoading")
+                  : fullBrief
+                    ? fullBrief.brief
+                    : t("fullBriefFailed")
+                : data.brief}
             </pre>
           </Card>
 

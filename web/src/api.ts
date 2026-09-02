@@ -12,7 +12,10 @@ export interface SessionMeta {
   origin: string | null;
   parent_session_id: string | null;
   status: string | null; // proven end-state, null = unknown
+  needs_reply?: boolean | null; // ends on an un-answered user message (null = unknown)
   domain: string; // config-driven project grouping (ADR-009)
+  /** Live git branch/worktree for the session cwd (cached 30s server-side). */
+  git?: { branch?: string; worktree_count?: number };
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
@@ -33,13 +36,23 @@ export interface UsageModel {
 
 export interface UsageData {
   models: UsageModel[];
-  totals: { calls: number; tokens_in: number; tokens_out: number };
+  totals: { calls: number; tokens_in: number; tokens_out: number; cost_usd?: number };
 }
 
 export interface TranscriptMessage {
   role: string;
   text: string;
   at: string | null;
+  /** Which model answered this turn (assistant turns only, when the store records it). */
+  model?: string;
+  /** Input tokens this turn cost (only when the store records it). */
+  tokens_in?: number;
+  /** Output tokens this turn cost (assistant turns only). */
+  tokens_out?: number;
+  /** Reasoning tokens this turn cost (only when the store records it). */
+  tokens_reasoning?: number;
+  /** Sub-agent that produced this turn (absent = main conversation). */
+  subagent?: string;
 }
 
 export interface StoreInfo {
@@ -161,6 +174,33 @@ export interface IndexStatus {
   rows?: number;
 }
 
+export interface MemoryEntry {
+  source: string;
+  path: string;
+  date: string; // YYYY-MM-DD or "unknown"
+  category: string;
+  text: string;
+}
+
+export interface MemoryReport {
+  cli: string;
+  path: string;
+  status: string; // read | missing | unreadable | oversized | config-noted
+  entries: number;
+  detail: string;
+}
+
+export interface MemoryExportData {
+  entries: MemoryEntry[];
+  reports: MemoryReport[];
+  secret_flags: { label: string; offset: number; length: number }[];
+  completeness: { read: number; total: number };
+  markdown_en: string;
+  markdown_zh: string;
+  completeness_en: string;
+  completeness_zh: string;
+}
+
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -187,6 +227,17 @@ export const api = {
     get<SessionDetail>(
       `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/detail?lang=${lang}&max_chars=${maxChars}`,
     ),
+  /** Paste-ready continuation brief; depth=full carries the ENTIRE dialogue. */
+  brief: (cli: string, sid: string, opts: { lang?: string; depth?: "full" | "resume"; keepNoise?: boolean } = {}) => {
+    const p = new URLSearchParams({
+      lang: opts.lang ?? "zh",
+      depth: opts.depth ?? "full",
+      keep_noise: String(opts.keepNoise ?? false),
+    });
+    return get<{ brief: string; chars: number; turns: number }>(
+      `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/brief?${p}`,
+    );
+  },
   threads: (cwd?: string) => get<ThreadGroup[]>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
   inbox: (globalScope = false) => get<InboxItem[]>(`/api/inbox?global_scope=${globalScope}`),
   launcher: (cli: string, sid: string) =>
@@ -212,6 +263,13 @@ export const api = {
   searchStatus: () => get<IndexStatus>("/api/search/status"),
   searchWarm: () => post<IndexStatus>("/api/search/warm", {}),
   heartbeat: () => get<{ sessions: number }>("/api/heartbeat"),
+  memoryExport: (opts: { cli?: string; withProject?: boolean } = {}) => {
+    const p = new URLSearchParams({
+      with_project: String(opts.withProject ?? true),
+    });
+    if (opts.cli) p.set("cli", opts.cli);
+    return get<MemoryExportData>(`/api/memory-export?${p}`);
+  },
 };
 
 export function relTime(iso: string | null, now = Date.now()): string {

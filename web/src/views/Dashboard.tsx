@@ -44,6 +44,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
   const [, tick] = useState(0);
   const inputRef = useRef<GetRef<typeof Input.Search>>(null);
 
@@ -158,7 +159,15 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [titleFiltered]);
 
-  const visible = titleFiltered.filter((s) => !domainFilter || s.domain === domainFilter);
+  const needsReplyCount = useMemo(
+    () => (sessions ?? []).filter((s) => s.needs_reply === true).length,
+    [sessions],
+  );
+  const visible = titleFiltered.filter(
+    (s) =>
+      (!domainFilter || s.domain === domainFilter) &&
+      (!needsReplyOnly || s.needs_reply === true),
+  );
   const grouped = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
     for (const s of visible) {
@@ -235,6 +244,18 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
               label: `${d.split(/[\\/]/).filter(Boolean).pop() ?? d} (${n})`,
             }))}
           />
+        </Tooltip>
+        <Tooltip title={t("needsReplyHint")}>
+          <Button
+            size="small"
+            type={needsReplyOnly ? "primary" : "default"}
+            onClick={() => setNeedsReplyOnly((v) => !v)}
+          >
+            ⚠ {t("needsReply")}
+            {needsReplyCount > 0 && (
+              <span className="ml-1 font-mono">{needsReplyCount}</span>
+            )}
+          </Button>
         </Tooltip>
         <div className="ml-auto flex items-center gap-3">
           {indexLine()}
@@ -320,7 +341,18 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
                           className="ah-row group flex w-full items-center gap-3 px-3 py-2 text-left"
                         >
                           <CliBadge cli={s.cli} origin={s.origin} />
-                          <span className="ah-title min-w-0 flex-1 truncate">{s.title}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="ah-title block truncate">{s.title}</span>
+                            <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
+                              {s.session_id.slice(0, 8)}
+                              {s.git?.branch && (
+                                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
+                              )}
+                              {s.cwd && (
+                                <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>
+                              )}
+                            </span>
+                          </span>
                           {s.parent_session_id && (
                             <Tooltip title={`${t("subSession")} · ${s.parent_session_id}`}>
                               <span className="ah-faint hidden shrink-0 font-mono xl:inline">⤷ {t("subSession")}</span>
@@ -339,6 +371,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
                           <span className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden">
                             {relTime(s.updated_at)}
                           </span>
+                          {s.needs_reply === true && (
+                            <Tooltip title={t("needsReplyHint")}>
+                              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
+                            </Tooltip>
+                          )}
                           <span className="w-24 shrink-0 text-right max-sm:hidden">
                             <StatusTag kind={s.status} />
                           </span>

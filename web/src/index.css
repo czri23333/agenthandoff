@@ -194,6 +194,20 @@ button:disabled {
   animation: view-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
+/* User-authored text (memory-export entries, completeness notes).
+   From the L0-L7 font-stack brief: the browser owns shaping and layout;
+   our job is to not break them:
+   - line-break: strict = UAX #14 kinsoku (no leading CJK punctuation);
+   - overflow-wrap: anywhere = long unbreakable paths wrap, never clip;
+   - unicode-bidi: isolate = a stray RTL span cannot reorder the line;
+   - pre-wrap keeps authored line breaks. Pair with dir="auto" on the node. */
+.tx-user {
+  line-break: strict;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  white-space: pre-wrap;
+}
+
 @keyframes row-in {
   from {
     opacity: 0;
@@ -343,3 +357,61 @@ html {
   max-height: min(46vh, 620px);
   overflow-y: auto;
 }
+
+/* ---- Rich markdown in transcripts (agent-grade rendering) ---- */
+.ah-md { font-size: 13px; line-height: 1.65; word-break: break-word;
+  /* L3 layout rules: UAX #14 kinsoku (no CJK punctuation leading a line),
+     long unbreakable tokens wrap instead of clipping, and an RTL span
+     cannot reorder the surrounding line (bidi isolation). */
+  line-break: strict; overflow-wrap: anywhere; unicode-bidi: isolate; }
+.ah-md > *:first-child { margin-top: 0; }
+.ah-md > *:last-child { margin-bottom: 0; }
+.ah-md p { margin: 0.4em 0; }
+.ah-md h1, .ah-md h2, .ah-md h3, .ah-md h4 {
+  margin: 0.8em 0 0.4em; font-weight: 600; line-height: 1.35;
+  color: var(--ah-text-1);
+}
+.ah-md h1 { font-size: 1.12em; } .ah-md h2 { font-size: 1.06em; }
+.ah-md h3, .ah-md h4 { font-size: 1em; }
+.ah-md ul, .ah-md ol { margin: 0.4em 0; padding-left: 1.4em; }
+.ah-md ul { list-style: disc; } .ah-md ol { list-style: decimal; }
+.ah-md li { margin: 0.15em 0; }
+.ah-md li > p { margin: 0.2em 0; }
+.ah-md a.ah-link { color: var(--ah-accent); text-decoration: underline; text-underline-offset: 2px; }
+.ah-md strong { color: var(--ah-text-1); font-weight: 600; }
+.ah-md blockquote {
+  margin: 0.5em 0; padding: 0.2em 0.8em; border-left: 3px solid var(--ah-line-strong);
+  color: var(--ah-text-2);
+}
+.ah-md hr { border: 0; border-top: 1px solid var(--ah-line); margin: 0.8em 0; }
+.ah-md del { color: var(--ah-text-3); }
+/* GFM tables */
+.ah-md table { border-collapse: collapse; margin: 0.6em 0; font-size: 12.5px; display: block; overflow-x: auto; max-width: 100%; }
+.ah-md th, .ah-md td { border: 1px solid var(--ah-line); padding: 4px 9px; text-align: left; }
+.ah-md th { background: var(--ah-surface-2); color: var(--ah-text-1); font-weight: 600; }
+.ah-md tbody tr:nth-child(even) { background: color-mix(in srgb, var(--ah-surface-2) 45%, transparent); }
+/* Inline code */
+.ah-md :not(pre) > code {
+  background: var(--ah-surface-2); border: 1px solid var(--ah-line);
+  padding: 0.08em 0.4em; border-radius: 4px; font-size: 0.92em; color: var(--ah-text-1);
+}
+/* Code block shell */
+.ah-codeblock pre { background: var(--ah-code-bg); border: 1px solid var(--ah-line); margin: 0; }
+.ah-copybtn { background: var(--ah-surface-2); border: 1px solid var(--ah-line-strong); color: var(--ah-text-2); }
+.ah-copybtn:hover { color: var(--ah-text-1); border-color: var(--ah-accent); }
+/* Syntax theme base: highlight.js github-dark is imported; tune its backdrop
+   to our code surface and brighten it for the light theme. */
+/* Dark theme uses the imported github-dark palette; for light we re-map the
+   token classes onto the cockpit semantic variables so both themes stay on the
+   token table (no hardcoded colours). */
+.ah-md .hljs { background: transparent; }
+:root[data-theme="light"] .ah-md .hljs { color: var(--ah-text-1); }
+:root[data-theme="light"] .ah-md .hljs-keyword,
+:root[data-theme="light"] .ah-md .hljs-selector-tag,
+:root[data-theme="light"] .ah-md .hljs-literal { color: var(--ah-accent); }
+:root[data-theme="light"] .ah-md .hljs-string,
+:root[data-theme="light"] .ah-md .hljs-regexp { color: var(--ah-ok); }
+:root[data-theme="light"] .ah-md .hljs-number { color: var(--ah-warn); }
+:root[data-theme="light"] .ah-md .hljs-comment { color: var(--ah-text-3); }
+:root[data-theme="light"] .ah-md .hljs-title,
+:root[data-theme="light"] .ah-md .hljs-function { color: var(--ah-accent); }
