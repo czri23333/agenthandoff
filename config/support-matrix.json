@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-01",
+  "generated": "2026-09-02",
   "rows": [
     {
       "cli": "zcode",
@@ -35,8 +35,8 @@
       "store": "JSONL dir",
       "reader": true,
       "fixtures": 25,
-      "fixture_sessions": 24,
-      "fixture_messages": 59,
+      "fixture_sessions": 23,
+      "fixture_messages": 110,
       "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,
@@ -95,7 +95,7 @@
       "store": "JSONL dir",
       "reader": true,
       "fixtures": 25,
-      "fixture_sessions": 5,
+      "fixture_sessions": 3,
       "fixture_messages": 31,
       "fixture_ok": true,
       "shape_only": false,
@@ -105,6 +105,20 @@
       "notes": [
         "record-sampled"
       ]
+    },
+    {
+      "cli": "qoder-ide",
+      "store": "unknown",
+      "reader": true,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "unverified",
+      "notes": []
     },
     {
       "cli": "qwenwork",
@@ -118,6 +132,20 @@
       "codec_missing": false,
       "conformance": true,
       "status": "stable",
+      "notes": []
+    },
+    {
+      "cli": "workbuddy",
+      "store": "unknown",
+      "reader": true,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "unverified",
       "notes": []
     },
     {
@@ -167,9 +195,9 @@
       ]
     },
     {
-      "cli": "qoder-ide",
-      "store": "Electron leveldb — no session files on disk",
-      "reader": false,
+      "cli": "opencode",
+      "store": "unknown",
+      "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
       "fixture_messages": 0,
@@ -177,13 +205,13 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
-      "status": "roadmap",
+      "status": "unverified",
       "notes": []
     },
     {
-      "cli": "opencode",
-      "store": "storage layout undocumented",
-      "reader": false,
+      "cli": "qoderwake",
+      "store": "unknown",
+      "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
       "fixture_messages": 0,
@@ -191,7 +219,21 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
-      "status": "roadmap",
+      "status": "unverified",
+      "notes": []
+    },
+    {
+      "cli": "qoderwake-cn",
+      "store": "unknown",
+      "reader": true,
+      "fixtures": 0,
+      "fixture_sessions": 0,
+      "fixture_messages": 0,
+      "fixture_ok": false,
+      "shape_only": false,
+      "codec_missing": false,
+      "conformance": false,
+      "status": "unverified",
       "notes": []
     },
     {

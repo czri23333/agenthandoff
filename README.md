@@ -31,17 +31,20 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 |---|---|---|---|---|---|---|
 | `zcode` | SQLite (read-only URI) | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ stable (fixture-proven) |
 | `claude` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `codebuddy` | JSONL dir | ✓ | 25 | 24 ses / 59 msg | ✓ | ✅ stable (fixture-proven) |
+| `codebuddy` | JSONL dir | ✓ | 25 | 23 ses / 110 msg | ✓ | ✅ stable (fixture-proven) |
 | `codebuddy-cn` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ stable (fixture-proven) |
-| `qodercn-ide` | JSONL dir | ✓ | 25 | 5 ses / 31 msg | ✓ | ✅ stable (fixture-proven) |
+| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 31 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
+| `workbuddy` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 7 msg | ✓ | ✅ stable (fixture-proven) |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |
 | `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ stable (fixture-proven) |
-| `qoder-ide` | Electron leveldb — no session files on disk | — | — | — | — | 🔜 roadmap |
-| `opencode` | storage layout undocumented | — | — | — | — | 🔜 roadmap |
+| `opencode` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `qoderwake` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `trae` | IDE SQLite; read-only only, never written | — | — | — | — | 🔜 roadmap |
 
 Legend: stable = a fixture parses to real dialogue; shape only = the source store held no conversation to sample; unverified = reader exists, no fixture yet; fixture fails = the fixture does not parse; roadmap = no reader; unavailable = needs an optional codec here.

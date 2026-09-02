@@ -185,3 +185,57 @@ def render_brief(
             if len(brief) <= max_chars:
                 break
     return brief
+
+def render_full_brief(b: HandoffBundle, transcript: list[tuple[str, str]], lang: str = "en") -> str:
+    """Lossless continuation brief: scaffold sections + the ENTIRE dialogue.
+
+    No budget trimming — this is the explicit full-context handoff. ``transcript``
+    is the full dialogue oldest first (from the vault, the bundle's
+    ``full_transcript``, or a fresh re-parse of the source). Because nothing is
+    dropped, the successor inherits the previous session's whole working context
+    instead of a 6 000-char tail.
+    """
+    t = _SCAFFOLD_ZH if lang == "zh" else _SCAFFOLD_EN
+    updated = b.meta.updated_at or "unknown"
+
+    sections: dict[str, str] = {
+        "project": (
+            f"cwd: {b.meta.cwd}\n"
+            f"source: {b.meta.cli} session {b.meta.session_id} "
+            f'("{b.meta.title}"), last active {updated}'
+            + (f"\nprovider: {b.meta.provider}" if b.meta.provider else "")
+            + (f"\nparent session: {b.meta.parent_session_id}" if b.meta.parent_session_id else "")
+            + (("\nnotes: " + "; ".join(b.meta.notes)) if b.meta.notes else "")
+        ),
+        "objective": b.objective or "(not captured)",
+        "facts": _bullet(b.done),
+        "open": _bullet(b.in_progress + b.blocked),
+        "rules": _bullet(b.directives),
+        "artifacts": _bullet([f"`{p}` (\u00d7{n})" for p, n in b.files]),
+        "steps": _numbered(b.next_steps),
+        "digest": _bullet(b.context_notes),
+    }
+
+    if transcript or b.unfinished:
+        sections["resume_pack"] = _pack_body(list(transcript), b.unfinished, t)
+
+    if b.interruption.detected:
+        warn = (
+            "WARNING: the previous session ended abruptly \u2014 "
+            f"{b.interruption.describe()}. "
+            "Treat state below as possibly incomplete."
+        )
+        if b.interruption.kind == "user_pending" and b.interruption.pending_user_text:
+            warn += (
+                "\nThe user's last instruction was never executed: "
+                f'"{b.interruption.pending_user_text}" \u2014 it is already '
+                "step 1 in <steps>."
+            )
+        sections["interruption"] = warn
+
+    parts = ["# Continuation brief (agenthandoff v0.2 \u00b7 FULL context)", "", t["intro"], ""]
+    for name, _prio in _ORDER:
+        if name in sections:
+            parts.append(f"<{t[name]}>\n{sections[name]}\n</{t[name]}>")
+            parts.append("")
+    return "\n".join(parts).rstrip() + "\n"

@@ -343,3 +343,20 @@ def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:
                     bundle.next_steps.insert(
                         0, f"[pending from interrupted session] {pending}"
                     )
+
+def build_full_transcript(raw: RawSession, keep_noise: bool = False) -> list[tuple[str, str]]:
+    """Every dialogue turn verbatim, oldest first — the lossless handoff body.
+
+    Harness-injected noise (system reminders, tool results, environment dumps)
+    is dropped unless ``keep_noise`` is set: it carries no handoff signal and
+    only bloats the brief. Tool-call blocks are not part of the message stream
+    (parsers strip them into counters), so they are never included here.
+    """
+    out: list[tuple[str, str]] = []
+    for m in raw.messages:
+        if not m.text or not m.text.strip():
+            continue
+        if not keep_noise and is_injected(m.text):
+            continue
+        out.append((m.role, m.text.strip()))
+    return out

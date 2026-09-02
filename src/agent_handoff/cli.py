@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from agent_handoff import __version__, vault
+from agent_handoff import __version__, memory_export, vault
 from agent_handoff import search as ah_search
 from agent_handoff.exchange import (
     AlreadyClaimed,
@@ -31,8 +31,8 @@ from agent_handoff.exchange import (
 from agent_handoff.locations import discover
 from agent_handoff.parsers import available_parsers, resolve_session
 from agent_handoff.render import load_bundle, render_json, render_markdown
-from agent_handoff.resume import render_brief
-from agent_handoff.summarize import summarize
+from agent_handoff.resume import render_brief, render_full_brief
+from agent_handoff.summarize import build_full_transcript, summarize
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
@@ -156,6 +156,10 @@ def _cmd_capture(args: argparse.Namespace) -> int:
         return 1
 
     bundle = summarize(raw)
+    if getattr(args, "full", False):
+        bundle.full_transcript = build_full_transcript(
+            raw, keep_noise=getattr(args, "keep_noise", False)
+        )
     if args.note:
         bundle.meta.notes = list(args.note)
 
@@ -177,21 +181,54 @@ def _cmd_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_full_transcript(bundle, args) -> list[tuple[str, str]]:
+    """Full dialogue for a lossless brief, from the best available source.
+
+    Order of preference:
+    1. The bundle's own ``full_transcript`` (capture --full) — portable.
+    2. The lossless vault archive (same machine, lossless round-trip).
+    3. A fresh re-parse of the source session store.
+    Falls back to the bundle's recent tail when nothing else is reachable.
+    """
+    if bundle.full_transcript:
+        return list(bundle.full_transcript)
+    keep_noise = getattr(args, "keep_noise", False)
+    cli = bundle.meta.cli
+    sid = bundle.meta.session_id
+    # Vault first — it is the guaranteed-lossless local copy.
+    try:
+        from agent_handoff import vault
+
+        raw = vault.load(cli, sid)
+        if raw is not None:
+            return build_full_transcript(raw, keep_noise=keep_noise)
+    except Exception:
+        pass
+    # Then re-parse the live source store.
+    try:
+        _parser, raw = resolve_session(sid, cli=cli)
+        return build_full_transcript(raw, keep_noise=keep_noise)
+    except (FileNotFoundError, Exception):
+        pass
+    return list(bundle.recent)
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
     try:
         bundle = load_bundle(args.bundle)
     except (OSError, ValueError) as e:
         print(f"error: cannot read bundle: {e}", file=sys.stderr)
         return 1
-    budget = args.max_chars
     if args.depth == "full":
-        budget = 10**9  # explicit opt-in: no paste window to fit into
-    brief = render_brief(
-        bundle,
-        lang=args.lang,
-        max_chars=budget,
-        with_pack=args.depth != "brief",
-    )
+        transcript = _resolve_full_transcript(bundle, args)
+        brief = render_full_brief(bundle, transcript, lang=args.lang)
+    else:
+        brief = render_brief(
+            bundle,
+            lang=args.lang,
+            max_chars=args.max_chars,
+            with_pack=args.depth != "brief",
+        )
     if args.out:
         Path(args.out).write_text(brief, encoding="utf-8")
         print(f"brief written: {args.out} ({len(brief)} chars)")
@@ -371,6 +408,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="attach a provenance note (repeatable), e.g. --note 'account:work'",
     )
+    p_cap.add_argument(
+        "--full",
+        action="store_true",
+        help="embed the ENTIRE dialogue verbatim in the bundle (lossless handoff body)",
+    )
+    p_cap.add_argument(
+        "--keep-noise",
+        action="store_true",
+        help="with --full: keep harness-injected noise instead of filtering it",
+    )
 
     p_pub = sub.add_parser(
         "publish", help="copy a bundle into the exchange dir for other agents"
@@ -533,7 +580,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--depth",
         choices=["brief", "resume", "full"],
         default="resume",
-        help="brief: no verbatim tail; resume: protected tail (default); full: ignore the budget",
+        help="brief: no verbatim tail; resume: protected tail (default); "
+        "full: the ENTIRE dialogue verbatim (lossless)",
+    )
+    p_res.add_argument(
+        "--keep-noise",
+        action="store_true",
+        help="with --depth full: keep harness-injected noise instead of filtering it",
+    )
+
+    p_mem = sub.add_parser(
+        "memory-export",
+        help="export standing instructions/memory files across CLIs (five-section format)",
+    )
+    p_mem.add_argument(
+        "--cli", help="restrict to one cli (claude, codex, gemini, kimi-code, zcode)"
+    )
+    p_mem.add_argument(
+        "--project", default=".", help="project dir for AGENTS.md/CLAUDE.md (default: cwd)"
+    )
+    p_mem.add_argument(
+        "--no-project", action="store_true", help="skip the project-level files"
+    )
+    p_mem.add_argument("--out", help="write to file (default: stdout)")
+    p_mem.add_argument("--json", action="store_true", help="machine-readable output")
+    p_mem.add_argument(
+        "--lang", choices=["en", "zh"], default="en", help="section headings language"
     )
 
     return ap
@@ -865,6 +937,34 @@ def _vault_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_memory_export(args: argparse.Namespace) -> int:
+    """Standing instructions across CLIs, exported in the five-section format."""
+    if args.cli and args.cli not in memory_export.known_clis():
+        known = ", ".join(memory_export.known_clis())
+        print(f"error: unknown cli '{args.cli}' (known: {known})", file=sys.stderr)
+        return 2
+    project = None if args.no_project else Path(args.project)
+    if args.json:
+        payload = memory_export.export_json(project=project, cli=args.cli)
+        text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    else:
+        text = memory_export.export_markdown(
+            project=project, cli=args.cli, lang=args.lang
+        )
+    if args.out:
+        try:
+            out = Path(args.out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            print(f"error: cannot write {args.out}: {exc}", file=sys.stderr)
+            return 2
+        print(f"memory export written to {args.out}")
+        return 0
+    print(text)
+    return 0
+
+
 _HANDLERS = {
     "doctor": _cmd_doctor,
     "list": _cmd_list,
@@ -883,6 +983,7 @@ _HANDLERS = {
     "evidence": _cmd_evidence,
     "backup": _cmd_backup,
     "vault": _cmd_vault,
+    "memory-export": _cmd_memory_export,
 }
 
 

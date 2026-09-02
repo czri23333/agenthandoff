@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from agent_handoff import memory_export as ah_memory
 from agent_handoff import search as ah_search
 from agent_handoff import watch as ah_watch
 from agent_handoff.exchange import (
@@ -40,8 +41,8 @@ from agent_handoff.exchange import (
 from agent_handoff.locations import discover
 from agent_handoff.parsers import all_parsers
 from agent_handoff.render import render_markdown
-from agent_handoff.resume import render_brief
-from agent_handoff.summarize import summarize
+from agent_handoff.resume import render_brief, render_full_brief
+from agent_handoff.summarize import build_full_transcript, summarize
 from agent_handoff.threads import (
     SessionNode,
     build_threads,
@@ -124,6 +125,50 @@ def _domain_for(cwd: str) -> str:
     return cwd
 
 
+
+# Git branch/worktree detection per cwd, cached to avoid repeated subprocess calls.
+_git_cache: dict[str, tuple[float, dict]] = {}
+_GIT_TTL = 30.0
+
+
+def _git_info(cwd: str) -> dict:
+    """Detect git branch and worktree info for a session cwd. Cached 30s."""
+    if not cwd:
+        return {}
+    now = time.monotonic()
+    hit = _git_cache.get(cwd)
+    if hit and now - hit[0] < _GIT_TTL:
+        return hit[1]
+    import subprocess
+    info: dict = {}
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "branch", "--show-current"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            info["branch"] = r.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if r.returncode == 0:
+            worktrees = [
+                w.split(" ", 1)[1]
+                for w in r.stdout.splitlines()
+                if w.startswith("worktree ")
+            ]
+            if len(worktrees) > 1:
+                info["worktree_count"] = len(worktrees)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    _git_cache[cwd] = (now, info)
+    return info
+
+
 @app.get("/api/sessions")
 def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = None):
     cache_key = f"{cli}|{cwd}|{q}"
@@ -156,8 +201,13 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),
+                    # Agent-View-style "Needs input": ends on an un-answered user
+                    # message (cheap tail probe; null = store has no probe)
+                    "needs_reply": p.peek_needs_reply(m.session_id),
                     # config-driven project domain (ADR-009): cwd by default
                     "domain": _domain_for(m.cwd),
+                    # live git branch/worktree for the session cwd (cached 30s)
+                    **({"git": g} if (g := _git_info(m.cwd)) else {}),
                 }
             )
     out.sort(key=lambda s: s["updated_at"] or "", reverse=True)
@@ -184,7 +234,18 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
     # many times and everything before a marker exists only as a summary.
     # Hiding that would present a truncated history as complete.
     stream: list[dict] = [
-        {"role": m.role, "text": m.text[:2000], "at": m.at} for m in raw.messages
+        {
+            "role": m.role,
+            "text": m.text[:2000],
+            "at": m.at,
+            # per-turn billing: which model answered, what it cost in tokens
+            **({"model": m.model} if m.model else {}),
+            **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
+            **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
+            **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
+            **({"subagent": m.subagent} if m.subagent else {}),
+        }
+        for m in raw.messages
     ]
     markers: list[dict] = [
         {
@@ -232,6 +293,38 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         "usage": _parser_or_404(cli).usage(sid),
         "compactions": len(raw.compactions),
         "messages": stream[::-1],
+    }
+
+
+@app.get("/api/sessions/{cli}/{sid}/brief")
+def session_brief(
+    cli: str,
+    sid: str,
+    lang: str = "zh",
+    depth: str = "full",
+    keep_noise: bool = False,
+):
+    """The paste-ready continuation brief, generated without any CLI.
+
+    depth=full resolves the ENTIRE dialogue (noise-filtered unless keep_noise)
+    and renders the lossless brief; depth=resume falls back to the budgeted
+    12 000-char brief the detail view already shows.
+    """
+    raw = _raw_or_404(cli, sid)
+    bundle = summarize(raw)
+    if depth == "full":
+        transcript = build_full_transcript(raw, keep_noise=keep_noise)
+        brief = render_full_brief(bundle, transcript, lang=lang)
+    else:
+        brief = render_brief(bundle, lang=lang, max_chars=12000)
+    return {
+        "brief": brief,
+        "chars": len(brief),
+        "turns": (
+            len(build_full_transcript(raw, keep_noise=keep_noise))
+            if depth == "full"
+            else len(bundle.recent)
+        ),
     }
 
 
@@ -429,6 +522,30 @@ def launcher(cli: str, sid: str):
         "kind": entry["kind"],
         "command": entry["resume"].format(session_id=sid),
         "headless": entry.get("headless"),
+    }
+
+
+@app.get("/api/memory-export")
+def memory_export_api(cli: str | None = None, with_project: bool = True):
+    """The memory-export page data. Same honesty contract as the CLI:
+    missing stores stay listed; secret flags carry no text."""
+    if cli is not None and cli not in ah_memory.known_clis():
+        raise HTTPException(404, f"unknown cli: {cli} (known: {', '.join(ah_memory.known_clis())})")
+    project = Path.cwd() if with_project else None
+    entries, reports = ah_memory.scan_sources(project=project, cli=cli)
+    blob = "\n".join(e.text for e in entries)
+    return {
+        "entries": [asdict(e) for e in ah_memory._sorted_entries(entries)],
+        "reports": [asdict(r) for r in reports],
+        "secret_flags": ah_memory.scan_secrets(blob),
+        "completeness": {
+            "read": sum(1 for r in reports if r.status == "read"),
+            "total": len(reports),
+        },
+        "markdown_en": ah_memory.render(entries, reports, lang="en"),
+        "markdown_zh": ah_memory.render(entries, reports, lang="zh"),
+        "completeness_en": "\n".join(ah_memory._completeness_lines(reports, "en")),
+        "completeness_zh": "\n".join(ah_memory._completeness_lines(reports, "zh")),
     }
 
 

@@ -11,11 +11,15 @@ from agent_handoff.parsers.jsonl_family import (
     CodebuddyCnParser,
     CodebuddyParser,
     QodercnIdeParser,
+    QoderIdeParser,
     QoderworkCnParser,
     QoderworkParser,
     QwenworkParser,
+    WorkbuddyParser,
 )
 from agent_handoff.parsers.kimi import KimiParser
+from agent_handoff.parsers.opencode import OpenCodeParser
+from agent_handoff.parsers.qoderwake import QoderwakeCnParser, QoderwakeParser
 from agent_handoff.parsers.zcode import ZcodeParser
 
 __all__ = [
@@ -28,8 +32,12 @@ __all__ = [
     "QodercnIdeParser",
     "QoderworkCnParser",
     "QwenworkParser",
+    "WorkbuddyParser",
     "DshParser",
     "KimiParser",
+    "OpenCodeParser",
+    "QoderwakeParser",
+    "QoderwakeCnParser",
     "CodexParser",
     "available_parsers",
     "resolve_session",
@@ -46,10 +54,15 @@ def available_parsers() -> list[Parser]:
         QoderworkParser(),
         QoderworkCnParser(),
         QodercnIdeParser(),
+        QoderIdeParser(),
         QwenworkParser(),
+        WorkbuddyParser(),
         DshParser(),
         KimiParser(),
         CodexParser(),
+        OpenCodeParser(),
+        QoderwakeParser(),
+        QoderwakeCnParser(),
     ]
     return [p for p in instances if p.available()]
 
@@ -63,10 +76,15 @@ def all_parsers() -> list[Parser]:
         QoderworkParser(),
         QoderworkCnParser(),
         QodercnIdeParser(),
+        QoderIdeParser(),
         QwenworkParser(),
+        WorkbuddyParser(),
         DshParser(),
         KimiParser(),
         CodexParser(),
+        OpenCodeParser(),
+        QoderwakeParser(),
+        QoderwakeCnParser(),
     ]
 
 

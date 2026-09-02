@@ -75,6 +75,14 @@ class Parser(ABC):
         """
         return None
 
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """Cheap signal: does the session end on an un-answered user message?
+
+        Mirrors Claude Code Agent View's "Needs input" bucket. Stores without a
+        cheap tail probe return None (unknown), never False.
+        """
+        return None
+
     def usage(self, session_id: str) -> dict | None:
         """Token/latency accounting for a session, or None if the store
         records none.

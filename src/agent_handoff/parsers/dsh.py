@@ -29,8 +29,16 @@ except ImportError:  # pragma: no cover - exercised via doctor only
 
 
 def _decompress(path: Path, limit_bytes: int | None = None) -> bytes:
+    """Decompress a dsh roll, crossing frame boundaries.
+
+    dsh appends one zstd frame per flush, so a roll is a concatenation of
+    frames. The stream reader stops at the first frame end unless told to
+    read across frames — which silently truncated every roll to its opening
+    `session` line and cost list_sessions() every title and load() every
+    message.
+    """
     with open(path, "rb") as fh:
-        reader = _zstd.ZstdDecompressor().stream_reader(fh)
+        reader = _zstd.ZstdDecompressor().stream_reader(fh, read_across_frames=True)
         return reader.read(limit_bytes) if limit_bytes else reader.read()
 
 
@@ -64,7 +72,7 @@ class DshParser(Parser):
         # Config lines (full system prompts) can occupy the head of a roll;
         # 256 KiB is usually enough to also reach the first real user turn.
         try:
-            head = _decompress(path, limit_bytes=262144).decode("utf-8", errors="replace")
+            head = _decompress(path, limit_bytes=1048576).decode("utf-8", errors="replace")
         except Exception:
             return None
         sid = path.parent.name

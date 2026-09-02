@@ -10,6 +10,11 @@ from agent_handoff.model import HandoffBundle, Interruption, SessionMeta
 
 BUNDLE_VERSION = "0.2"
 
+# Begin-sentinel for the lossless full-transcript block. It is appended last and
+# parsed to end-of-file, so `## ` headings inside verbatim dialogue can never be
+# mistaken for bundle section boundaries (which truncated the block before).
+_FULL_TRANSCRIPT_SENTINEL = "<!-- agenthandoff:full-transcript (verbatim, oldest first) -->"
+
 _MARKDOWN_TEMPLATE = """\
 # Agent Handoff Bundle
 
@@ -134,7 +139,7 @@ def render_markdown(b: HandoffBundle) -> str:
     if b.topics:
         t_items = "\n".join(f'- "{o}" ({n} user message(s))' for o, n in b.topics)
         topics_block = f"## Topic segments (mixed session)\n\n{t_items}\n"
-    return _MARKDOWN_TEMPLATE.format(
+    out = _MARKDOWN_TEMPLATE.format(
         version=BUNDLE_VERSION,
         cli=b.meta.cli,
         session_id=b.meta.session_id,
@@ -164,6 +169,14 @@ def render_markdown(b: HandoffBundle) -> str:
         unfinished=b.unfinished or "(none)",
         tools=tools,
     )
+    if b.full_transcript:
+        payload = json.dumps(
+            [{"role": r, "text": t} for r, t in b.full_transcript],
+            ensure_ascii=False,
+            indent=1,
+        )
+        out += "\n" + _FULL_TRANSCRIPT_SENTINEL + "\n" + payload + "\n"
+    return out
 
 
 def render_json(b: HandoffBundle) -> str:
@@ -225,6 +238,24 @@ def _subsection(text: str, name: str) -> list[str]:
             if item and item != "(none recorded)":
                 items.append(item)
     return items
+
+
+def _parse_full_transcript(text: str) -> list[tuple[str, str]]:
+    """Verbatim dialogue from the sentinel block, captured to end-of-file.
+
+    The block is JSON (not the `**role** — text` markdown used for the recent
+    tail), so blank lines and `## ` headings inside a message can never corrupt
+    the round-trip — the full handoff body is genuinely lossless.
+    """
+    idx = text.rfind(_FULL_TRANSCRIPT_SENTINEL)
+    if idx < 0:
+        return []
+    blob = text[idx + len(_FULL_TRANSCRIPT_SENTINEL):].strip()
+    try:
+        rows = json.loads(blob)
+    except ValueError:
+        return []
+    return [(str(r.get("role")), str(r.get("text"))) for r in rows if isinstance(r, dict)]
 
 
 def parse_bundle_markdown(text: str) -> HandoffBundle:
@@ -294,6 +325,7 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
         next_steps=next_steps,
         context_notes=_section_items(text, "Context notes (last assistant conclusions)"),
         recent=_parse_recent(_section(text, "Recent context (verbatim tail, oldest first)")),
+        full_transcript=_parse_full_transcript(text),
         unfinished=_section(text, "Unfinished output (continue from here)"),
     )
 
@@ -341,5 +373,8 @@ def load_bundle(path: str) -> HandoffBundle:
             files=[(f["path"], f["hits"]) for f in d.get("files_touched", [])],
             next_steps=d.get("next_steps", []),
             context_notes=d.get("context_notes", []),
+            full_transcript=[
+                (m["role"], m["text"]) for m in d.get("full_transcript", [])
+            ],
         )
     return parse_bundle_markdown(text)

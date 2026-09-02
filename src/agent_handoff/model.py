@@ -73,11 +73,24 @@ class SessionMeta:
 
 @dataclass
 class Message:
-    """A single conversation turn (tool noise already stripped by the parser)."""
+    """A single conversation turn (tool noise already stripped by the parser).
+
+    The optional billing fields carry what the store records per turn: which
+    model answered and how many tokens that request consumed. Parsers fill
+    them when the dialect has them; None means "the store says nothing".
+    """
 
     role: str  # "user" | "assistant"
     text: str
     at: str | None = None
+    model: str | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    tokens_reasoning: int | None = None
+    # Set when the turn came from a sub-agent transcript (label = which one);
+    # None for the main conversation. Lets the UI nest sub-agent work under the
+    # parent session instead of interleaving it flat.
+    subagent: str | None = None
 
 
 @dataclass
@@ -181,6 +194,9 @@ class HandoffBundle:
     # Verbatim tail, oldest first: (role, text). The brief's most protected
     # content, because it is what a context death takes with it.
     recent: list[tuple[str, str]] = field(default_factory=list)
+    # Full verbatim dialogue (oldest first) for lossless handoff. Populated only
+    # when capture uses --full; empty for the default lossy bundle.
+    full_transcript: list[tuple[str, str]] = field(default_factory=list)
     # The tail of the last assistant turn when it was cut off mid-sentence, so
     # the successor continues the sentence instead of inventing a new one.
     unfinished: str = ""
@@ -222,5 +238,6 @@ class HandoffBundle:
             "tool_summary": [{"tool": t, "calls": n} for t, n in self.tool_summary],
             "topics": [{"opener": o, "messages": n} for o, n in self.topics],
             "recent": [{"role": r, "text": t} for r, t in self.recent],
+            "full_transcript": [{"role": r, "text": t} for r, t in self.full_transcript],
             "unfinished": self.unfinished,
         }

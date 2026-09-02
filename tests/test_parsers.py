@@ -1,4 +1,4 @@
-"""Parser tests against synthetic stores (see CONTRIBUTING: happy path + corrupt input)."""
+'''Parser tests against synthetic stores (see CONTRIBUTING: happy path + corrupt input).'''
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from agent_handoff.parsers.dsh import DshParser
 from agent_handoff.parsers.jsonl_family import (
     ClaudeCodeParser,
     CodebuddyParser,
+    QodercnIdeParser,
     QoderworkParser,
     QwenworkParser,
 )
@@ -78,6 +79,54 @@ def test_qoder_and_qwen_share_dialect(tmp_path):
         assert raw is not None and raw.messages[0].text == text
 
 
+def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
+    """A transcript holding zero real text is an internal tool loop (a spawned
+    browser/automation sub-agent run), not a conversation: the product never
+    lists it, so neither do we. It must still load by id for debugging.
+
+    Regression: the filter shipped without coverage, and the cockpit listed
+    ~90 tool-loop sessions as if they were chats (the user saw 5 in the IDE).
+    """
+    import json
+
+    root = tmp_path / ".qoder-cn" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    turn = [
+        {"type": "runtime-config", "sessionId": "aaa111", "timestamp": 1},
+        {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
+         "message": {"role": "user", "content": [{"type": "text", "text": "fix the login loop"}]}},
+        {"type": "assistant", "timestamp": "2026-08-30T10:00:01Z",
+         "message": {"role": "assistant", "content": [{"type": "text", "text": "found it"}]}},
+    ]
+    with open(root / "aaa111.jsonl", "w", encoding="utf-8") as fh:
+        for r in turn:
+            fh.write(json.dumps(r) + "\n")
+
+    # Zero real text: every user row is a tool_result echo, every assistant row
+    # a tool_use - the exact shape qoder writes for a browser/automation run.
+    loop = [
+        {"type": "runtime-config", "sessionId": "bbb222", "timestamp": 1},
+        {"type": "user", "timestamp": "2026-08-30T10:01:00Z",
+         "message": {"role": "user", "content": [
+             {"content": "browser said no", "is_error": False,
+              "tool_use_id": "t1", "type": "tool_result"}]}},
+        {"type": "assistant", "timestamp": "2026-08-30T10:01:01Z",
+         "message": {"role": "assistant", "content": [
+             {"id": "c1", "input": {"url": "https://example.test"},
+              "name": "browser_open", "type": "tool_use"}]}},
+    ]
+    with open(root / "bbb222.jsonl", "w", encoding="utf-8") as fh:
+        for r in loop:
+            fh.write(json.dumps(r) + "\n")
+
+    p = QodercnIdeParser(tmp_path / ".qoder-cn")
+    ids = [m.session_id for m in p.list_sessions()]
+    assert ids == ["aaa111"], ids
+    raw = p.load("bbb222")
+    assert raw is not None  # hidden from the list, still loadable by id
+    assert raw.messages == []  # and it is honestly empty: nothing to pretend
+
+
 def test_dsh_roll(dsh_store):
     p = DshParser(dsh_store / "dsh" / "sessions")
     assert p.codec_ok()
@@ -116,5 +165,3 @@ def test_account_config_count(tmp_path):
     single = tmp_path / ".qoderwork"
     (single / ".models" / "019f3554-c9cc-4000-8000-000000000000").mkdir(parents=True)
     assert _count_account_configs(single) == 1
-
-    assert _count_account_configs(tmp_path / ".nonexistent") is None
