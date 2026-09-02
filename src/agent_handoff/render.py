@@ -14,6 +14,7 @@ BUNDLE_VERSION = "0.2"
 # parsed to end-of-file, so `## ` headings inside verbatim dialogue can never be
 # mistaken for bundle section boundaries (which truncated the block before).
 _FULL_TRANSCRIPT_SENTINEL = "<!-- agenthandoff:full-transcript (verbatim, oldest first) -->"
+_RAW_SENTINEL = "<!-- agenthandoff:raw-archive (byte-faithful vendor storage) -->"
 
 _MARKDOWN_TEMPLATE = """\
 # Agent Handoff Bundle
@@ -176,6 +177,9 @@ def render_markdown(b: HandoffBundle) -> str:
             indent=1,
         )
         out += "\n" + _FULL_TRANSCRIPT_SENTINEL + "\n" + payload + "\n"
+    if b.raw_files:
+        payload = json.dumps(b.raw_files, ensure_ascii=False, indent=1)
+        out += "\n" + _RAW_SENTINEL + "\n" + payload + "\n"
     return out
 
 
@@ -251,11 +255,31 @@ def _parse_full_transcript(text: str) -> list[tuple[str, str]]:
     if idx < 0:
         return []
     blob = text[idx + len(_FULL_TRANSCRIPT_SENTINEL):].strip()
+    end = blob.rfind(_RAW_SENTINEL)
+    if end >= 0:
+        blob = blob[:end].strip()
     try:
         rows = json.loads(blob)
     except ValueError:
         return []
     return [(str(r.get("role")), str(r.get("text"))) for r in rows if isinstance(r, dict)]
+
+
+def _parse_raw_archive(text: str) -> list[dict]:
+    """Byte-faithful raw files from the final sentinel block."""
+    idx = text.rfind(_RAW_SENTINEL)
+    if idx < 0:
+        return []
+    blob = text[idx + len(_RAW_SENTINEL):].strip()
+    try:
+        rows = json.loads(blob)
+    except ValueError:
+        return []
+    return [
+        r
+        for r in rows
+        if isinstance(r, dict) and r.get("path") and r.get("text")
+    ]
 
 
 def parse_bundle_markdown(text: str) -> HandoffBundle:
@@ -326,6 +350,7 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
         context_notes=_section_items(text, "Context notes (last assistant conclusions)"),
         recent=_parse_recent(_section(text, "Recent context (verbatim tail, oldest first)")),
         full_transcript=_parse_full_transcript(text),
+        raw_files=_parse_raw_archive(text),
         unfinished=_section(text, "Unfinished output (continue from here)"),
     )
 
@@ -376,5 +401,6 @@ def load_bundle(path: str) -> HandoffBundle:
             full_transcript=[
                 (m["role"], m["text"]) for m in d.get("full_transcript", [])
             ],
+            raw_files=list(d.get("raw_files", [])),
         )
     return parse_bundle_markdown(text)

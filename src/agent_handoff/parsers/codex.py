@@ -202,6 +202,30 @@ class CodexParser(Parser):
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         return metas
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """The rollout event stream itself, verbatim — every event the
+        product appended (agent_message, function_call, token_count, ...)."""
+        from agent_handoff.parsers.base import file_entry
+
+        for path in self._files():
+            rows = read_jsonl(path)
+            header = next((r for r in rows if r.get("type") == "session_meta"), None)
+            if header is None:
+                continue
+            meta = self._meta_from_header(path, header.get("payload") or {}, None)
+            if meta.session_id != session_id:
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                return None
+            try:
+                rel = str(path.resolve().relative_to(self.root.resolve()))
+            except (ValueError, OSError):
+                rel = str(path)
+            return [file_entry(path, raw, rel)]
+        return None
+
     def load(self, session_id: str) -> RawSession | None:
         for path in self._files():
             rows = read_jsonl(path)

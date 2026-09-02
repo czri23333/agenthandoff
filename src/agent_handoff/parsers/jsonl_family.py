@@ -26,7 +26,7 @@ from pathlib import Path
 
 from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
-from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
+from agent_handoff.parsers.base import Parser, as_text_blocks, file_entry, read_jsonl
 
 
 def _tail_rows(path: Path, max_bytes: int = 65536) -> list[dict]:
@@ -298,6 +298,30 @@ class JsonlSessionParser(Parser):
         if not paths:
             return None
         return self._load_paths(paths, session_id)
+
+    def _raw_entries(self, paths: list[Path]) -> list[dict] | None:
+        """One verbatim entry per transcript file (byte-faithful)."""
+        out: list[dict] = []
+        for path in paths:
+            if not path.is_file():
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            try:
+                rel = str(path.resolve().relative_to(self.root.resolve()))
+            except (ValueError, OSError):
+                rel = str(path)
+            out.append(file_entry(path, raw, rel))
+        return out or None
+
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """Every file that makes the session, byte-faithful. JSONL stores keep
+        their conversation exactly as the vendor appended it — tool calls,
+        system rows and future fields included; nothing re-derived.
+        """
+        return self._raw_entries(self._resolve_group(session_id))
 
     def peek_needs_reply(self, session_id: str) -> bool | None:
         """Tail-scan the canonical transcript: is the last real turn a user one?
@@ -730,6 +754,25 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                 return subagents_dir.parent
         return None
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """Verbatim files exactly as load() reads them: the flat main
+        transcript plus every sub-agent roll of the session dir."""
+        if session_id.endswith(".jsonl"):
+            one = Path(session_id)
+            return self._raw_entries([one]) if one.is_file() else None
+        session_dir = self._find_session_dir(session_id)
+        if session_dir is not None:
+            paths: list[Path] = []
+            flat = session_dir.parent / (session_id + ".jsonl")
+            if flat.is_file():
+                paths.append(flat)
+            sub = session_dir / "subagents"
+            if sub.is_dir():
+                paths.extend(sorted(sub.glob("*.jsonl")))
+            if paths:
+                return self._raw_entries(paths)
+        return super().raw_archive(session_id)
+
 
 class CodebuddyParser(_CodebuddyHybridParser):
     cli = "codebuddy"
@@ -1032,6 +1075,17 @@ class QodercnIdeParser(JsonlSessionParser):
         if ta is None or tb is None:
             return False
         return abs((tb - ta).total_seconds()) <= self._FRAG_GAP_MINUTES * 60
+
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """Verbatim files of the WHOLE conversation: when a chat was merged
+        from per-turn fragments, every fragment file is carried too."""
+        group = self._frag_groups.get(session_id)
+        if group and len(group) > 1:
+            paths: list[Path] = []
+            for fid in group:
+                paths.extend(self._resolve_group(fid))
+            return self._raw_entries(paths)
+        return super().raw_archive(session_id)
 
     def _fragment_user_text(self, session_id: str) -> str:
         """The single user message of an add_user_message fragment file."""

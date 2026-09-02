@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `handoff search` + `GET /api/search` — ranked full-text search over titles,
   file anchors and message bodies of every discovered session.
 - `handoff backup` + `GET /api/backup` — timestamped snapshot of all stores.
+- Verbatim raw archive: `handoff capture --full --raw` embeds the session's
+  ORIGINAL storage byte-faithfully (tool calls, system rows, vendor fields no
+  parser reads), `handoff resume --dump-raw` extracts it hash-verified, and
+  `GET /api/sessions/{cli}/{sid}/raw` serves the same files as a zip from the
+  cockpit. SQLite stores archive record-level (every column of every row).
 - Portable single-exe spec for the cockpit (`agenthandoff-ui.spec`,
   `docs/portable-single-exe.md`).
 

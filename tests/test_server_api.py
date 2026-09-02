@@ -186,3 +186,37 @@ def test_detail_carries_the_budget_block(client, monkeypatch):
     assert "1000" in budget["basis"]
     assert budget["fired"] == [] and "45%" in budget["pending"]
 
+
+def test_raw_zip_endpoint_carries_verbatim_files(client, monkeypatch):
+    """The zip is the unfiltered truth: the vendor's own lines, hash-tagged."""
+    import io
+    import zipfile
+
+    from agent_handoff import server
+
+    payload = "{\"type\":\"user\",\"text\":\"original bytes\"}\n"
+    import hashlib
+
+    class StubRawParser:
+        cli = "qodercn-ide"
+
+        def raw_archive(self, session_id):
+            if session_id == "sess_raw":
+                return [{
+                    "path": "D----x/transcript/sess_raw.jsonl",
+                    "encoding": "utf-8",
+                    "sha256": hashlib.sha256(payload.encode()).hexdigest(),
+                    "text": payload,
+                }]
+            return None
+
+    monkeypatch.setattr(server.app, "_parser_or_404", lambda cli: StubRawParser())
+    r = client.get("/api/sessions/qodercn-ide/sess_raw/raw")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        assert zf.read("D----x/transcript/sess_raw.jsonl") == payload.encode()
+
+    # unsupported (archive None) is a 404, not a silent empty zip
+    assert client.get("/api/sessions/qodercn-ide/nope/raw").status_code == 404
+

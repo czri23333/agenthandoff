@@ -78,21 +78,27 @@ sampled away.
    agents cannot work the same handoff unknowingly. There is no push channel: the
    cockpit polls every 30 s, and two agents cannot exchange messages - only
    bundles. "Alternating on one task" works; "watching each other work" does not.
-9. **No editor-side integration.** No VS Code/Cursor extension, no skill/slash
+9. **The brief is still a summary; the raw layer is beside it, not in it.**
+    `capture --full --raw` carries the vendor's original storage verbatim
+    (hash-verifiable, extractable), but the *brief* the next agent reads is a
+    rendered summary of that storage — it does not inline the tool calls or
+    system rows. A successor that needs the unfiltered truth must ask for the
+    raw archive, not rely on the brief.
+10. **No editor-side integration.** No VS Code/Cursor extension, no skill/slash
     command; `handoff` is CLI-plus-local-web.
-10. **Write-back is deliberately absent.** We never inject into another CLI's
+11. **Write-back is deliberately absent.** We never inject into another CLI's
     store (Constitution: read-only). That rules out "resume inside the target
     agent natively", which some competing tools do offer. A trade, not an
     oversight — but a functional limit from a user's point of view.
-11. **The bundle schema is documented, not enforced.** No test validates a
+12. **The bundle schema is documented, not enforced.** No test validates a
     rendered bundle against `schema/handoff-bundle-v0.1.schema.json`; the field
     contract is held by the renderers and their unit tests only.
-12. **Everything rests on one user, one OS family, one toolchain.** CI covers
+13. **Everything rests on one user, one OS family, one toolchain.** CI covers
     3 OSes × 3 Pythons for code paths that are unit-testable, and the fixtures
     make that part reproducible — but the store *shapes* were sampled from a
     single machine, and a locale, filesystem or permission model unlike this one
     is still untested ground.
-13. **Not published on PyPI** (the badge was removed for that reason); install
+14. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
 
 ## How to check any of this yourself

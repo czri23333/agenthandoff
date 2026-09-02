@@ -61,6 +61,34 @@ class ZcodeParser(Parser):
             )
         return out
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """Every row the store holds for this session — all columns of
+        session/message/part/todo/model_usage, including fields no parser
+        reads (the verbatim contract). Record-level JSON lines.
+        """
+        if not self.available():
+            return None
+        from agent_handoff.parsers.base import json_records_entry
+
+        records: list[tuple[str, dict]] = []
+        try:
+            with self._connect() as con:
+                for table in ("session", "message", "part", "todo", "model_usage"):
+                    idcol = "id" if table == "session" else "session_id"
+                    try:
+                        rows = con.execute(
+                            f"SELECT * FROM {table} WHERE {idcol}=?", (session_id,)
+                        ).fetchall()
+                    except sqlite3.Error:
+                        continue
+                    for row in rows:
+                        records.append((table, dict(row)))
+        except sqlite3.Error:
+            return None
+        if not records:
+            return None
+        return [json_records_entry(f"zcode/{session_id}.records.jsonl", records)]
+
     def load(self, session_id: str) -> RawSession | None:
         if not self.available():
             return None

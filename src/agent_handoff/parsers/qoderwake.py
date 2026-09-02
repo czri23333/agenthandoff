@@ -126,6 +126,37 @@ class QoderwakeParser(Parser):
 
     # -- loading ------------------------------------------------------------
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """Team chats record-level (all columns of the v3 tables); worker/
+        group transcripts delegate to the shared-store archive."""
+        if not self.available():
+            return self._shared.raw_archive(session_id) if self._shared else None
+        from agent_handoff.parsers.base import json_records_entry
+
+        records: list[tuple[str, dict]] = []
+        try:
+            with self._connect() as con:
+                for table in (
+                    "team_group_conversations_v3",
+                    "team_group_messages_v3",
+                    "team_group_activities_v3",
+                ):
+                    idcol = "id" if table == "team_group_conversations_v3" else "session_id"
+                    try:
+                        cur = con.execute(
+                            f"SELECT * FROM {table} WHERE {idcol}=?", (session_id,)
+                        )
+                        cols = [d[0] for d in cur.description]
+                        for row in cur.fetchall():
+                            records.append((table, dict(zip(cols, row, strict=True))))
+                    except sqlite3.Error:
+                        continue
+        except sqlite3.Error:
+            return None
+        if records:
+            return [json_records_entry(f"qoderwake/{session_id}.records.jsonl", records)]
+        return self._shared.raw_archive(session_id) if self._shared else None
+
     def load(self, session_id: str) -> RawSession | None:
         if not self.available():
             return self._shared.load(session_id) if self._shared else None

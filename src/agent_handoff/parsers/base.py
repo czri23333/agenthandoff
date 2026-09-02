@@ -46,6 +46,40 @@ _NOISE_MARKERS = (
 )
 
 
+def file_entry(path: Path, raw: bytes, rel: str) -> dict:
+    """One verbatim file as a raw-archive entry (see Parser.raw_archive)."""
+    import hashlib
+
+    return {
+        "path": rel,
+        "encoding": "utf-8",
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "text": raw.decode("utf-8", "surrogateescape"),
+    }
+
+
+def json_records_entry(path: str, records: list[tuple[str, dict]]) -> dict:
+    """One session's record-level archive (SQLite stores) as JSON lines.
+
+    ``records`` is (table, row-dict) pairs; every column of every row is
+    kept, including columns no parser reads — verbatim means verbatim.
+    """
+    import hashlib
+    import json as _json
+
+    lines = [
+        _json.dumps({"table": table, "row": row}, ensure_ascii=False)
+        for table, row in records
+    ]
+    text = "\n".join(lines)
+    return {
+        "path": path,
+        "encoding": "json",
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "text": text,
+    }
+
+
 class Parser(ABC):
     """A parser turns one CLI's private storage into a RawSession."""
 
@@ -93,6 +127,31 @@ class Parser(ABC):
                           "reasoning", "cache_write", "cache_read",
                           "avg_ttft_ms", "tok_per_s"}],
              "totals": {"calls", "tokens_in", "tokens_out"}}
+        """
+        return None
+
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """The session's own storage, byte-faithful, or None when unsupported.
+
+        This is the *verbatim* layer the summarized brief and the parsed
+        transcript both sit above: whatever the vendor wrote for this session
+        is carried out unchanged — tool calls, system rows, provider metadata,
+        unknown future fields — instead of being re-derived by a parser.
+
+        Contract for each entry:
+            {"path": str,          # store-relative where possible, else absolute
+             "encoding": str,      # "utf-8" (text, exact bytes) | "json" (records)
+             "sha256": str,        # of the ORIGINAL bytes / record payload
+             "text": str}          # verbatim content
+
+        ``text`` decodes with errors="surrogateescape", so re-encoding with
+        ``.encode("utf-8", "surrogateescape")`` restores the original bytes
+        exactly; the hash is over those bytes. For SQLite stores there is no
+        single file per session, so entries are record-level JSON lines holding
+        every column the store wrote (including ones no parser reads).
+
+        Return None only when the store cannot be addressed per session
+        (never pretend a copy exists that does not).
         """
         return None
 

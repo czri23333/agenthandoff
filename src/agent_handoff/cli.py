@@ -160,6 +160,16 @@ def _cmd_capture(args: argparse.Namespace) -> int:
         bundle.full_transcript = build_full_transcript(
             raw, keep_noise=getattr(args, "keep_noise", False)
         )
+    if getattr(args, "raw", False):
+        archive = _parser.raw_archive(ref if ref != "latest" else raw.meta.session_id)
+        if archive is None:
+            print(
+                f"warning: {_parser.cli} has no per-session raw archive; "
+                "the bundle carries the parsed transcript only",
+                file=sys.stderr,
+            )
+        else:
+            bundle.raw_files = archive
     if args.note:
         bundle.meta.notes = list(args.note)
 
@@ -213,12 +223,41 @@ def _resolve_full_transcript(bundle, args) -> list[tuple[str, str]]:
     return list(bundle.recent)
 
 
+def dump_raw_files(bundle, dest: Path) -> list[tuple[str, bool]] | None:
+    """Extract the bundle's byte-faithful raw storage; verify each sha256.
+
+    Returns (path, ok) pairs, or None when the bundle carries no raw archive.
+    """
+    if not bundle.raw_files:
+        return None
+    import hashlib
+
+    out: list[tuple[str, bool]] = []
+    for entry in bundle.raw_files:
+        rel = str(entry.get("path") or "unnamed")
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = str(entry.get("text") or "").encode("utf-8", "surrogateescape")
+        target.write_bytes(data)
+        ok = hashlib.sha256(data).hexdigest() == str(entry.get("sha256"))
+        out.append((str(target), ok))
+    return out
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
     try:
         bundle = load_bundle(args.bundle)
     except (OSError, ValueError) as e:
         print(f"error: cannot read bundle: {e}", file=sys.stderr)
         return 1
+    if getattr(args, "dump_raw", None):
+        dest = dump_raw_files(bundle, Path(args.dump_raw))
+        if dest is None:
+            print("error: bundle carries no raw archive", file=sys.stderr)
+            return 1
+        for path, ok in dest:
+            print(f"  {'ok ' if ok else 'MISMATCH'} {path}")
+        print(f"raw storage extracted: {len(dest)} file(s) -> {Path(args.dump_raw)}")
     if args.depth == "full":
         transcript = _resolve_full_transcript(bundle, args)
         brief = render_full_brief(bundle, transcript, lang=args.lang)
@@ -414,6 +453,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="embed the ENTIRE dialogue verbatim in the bundle (lossless handoff body)",
     )
     p_cap.add_argument(
+        "--raw",
+        action="store_true",
+        help="with --full: also embed the session's ORIGINAL storage, byte-faithful "
+        "(tool calls, system rows, unknown vendor fields \u2014 nothing re-derived)",
+    )
+    p_cap.add_argument(
         "--keep-noise",
         action="store_true",
         help="with --full: keep harness-injected noise instead of filtering it",
@@ -587,6 +632,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-noise",
         action="store_true",
         help="with --depth full: keep harness-injected noise instead of filtering it",
+    )
+    p_res.add_argument(
+        "--dump-raw",
+        default=None,
+        metavar="DIR",
+        help="extract the bundle's byte-faithful raw storage into DIR (hash-verified)",
     )
 
     p_mem = sub.add_parser(

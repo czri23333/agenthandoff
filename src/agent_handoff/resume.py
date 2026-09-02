@@ -238,4 +238,35 @@ def render_full_brief(b: HandoffBundle, transcript: list[tuple[str, str]], lang:
         if name in sections:
             parts.append(f"<{t[name]}>\n{sections[name]}\n</{t[name]}>")
             parts.append("")
+    if b.raw_files:
+        part = _raw_appendix(b)
+        parts.append(part)
+        parts.append("")
     return "\n".join(parts).rstrip() + "\n"
+
+
+def _raw_appendix(b: HandoffBundle) -> str:
+    """Manifest of the byte-faithful vendor storage carried in the bundle.
+
+    The brief itself is a readable summary; these are the originals. Every
+    line the vendor wrote for the session (tool calls, system rows, fields
+    no parser reads) is in the bundle, hash-verifiable, extractable with
+    ``handoff resume <bundle> --dump-raw <dir>``.
+    """
+    lines = [
+        "",
+        "<原始存储（逐字，byte-faithful）>",
+        "",
+        "The bundle carries the vendor's own storage for this session, unchanged:",
+        "",
+    ]
+    for f in b.raw_files:
+        size = len((f.get("text") or "").encode("utf-8", "surrogateescape"))
+        digest = (f.get("sha256") or "?")[:12]
+        lines.append(f"- `{f.get('path')}` — {size:,} bytes, sha256:{digest}")
+    lines += [
+        "",
+        "Extract verbatim: `handoff resume <bundle> --dump-raw <dir>`",
+        "</原始存储（逐字，byte-faithful）>",
+    ]
+    return "\n".join(lines)

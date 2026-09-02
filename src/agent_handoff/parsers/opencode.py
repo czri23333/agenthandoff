@@ -77,6 +77,31 @@ class OpenCodeParser(Parser):
 
     # -- loading ------------------------------------------------------------
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """Every row the SQLite store holds for this session, all columns
+        (message/part/todo/session), record-level JSON lines."""
+        from agent_handoff.parsers.base import json_records_entry
+
+        records: list[tuple[str, dict]] = []
+        try:
+            with self._connect() as con:
+                for table in ("session", "message", "part", "todo"):
+                    idcol = "id" if table == "session" else "session_id"
+                    try:
+                        cur = con.execute(
+                            f"SELECT * FROM {table} WHERE {idcol}=?", (session_id,)
+                        )
+                        cols = [d[0] for d in cur.description]
+                        for row in cur.fetchall():
+                            records.append((table, dict(zip(cols, row, strict=True))))
+                    except sqlite3.Error:
+                        continue
+        except sqlite3.Error:
+            return None
+        if not records:
+            return None
+        return [json_records_entry(f"opencode/{session_id}.records.jsonl", records)]
+
     def load(self, session_id: str) -> RawSession | None:
         if not self.available():
             return None

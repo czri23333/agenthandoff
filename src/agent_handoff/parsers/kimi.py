@@ -56,6 +56,33 @@ class KimiParser(Parser):
             source_path=str(state_file),
         )
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """The session directory's files, verbatim (state.json plus any
+        companion rolls the store keeps beside it)."""
+        from agent_handoff.parsers.base import file_entry
+
+        if not self.available():
+            return None
+        hits = list(self.root.glob(f"wd_*/{session_id}/state.json"))
+        if not hits:
+            return None
+        session_dir = hits[0].parent
+        files = [p for p in session_dir.iterdir() if p.is_file()]
+        if not files:
+            return None
+        entries: list[dict] = []
+        for p in sorted(files):
+            try:
+                raw = p.read_bytes()
+            except OSError:
+                continue
+            try:
+                rel = str(p.resolve().relative_to(self.root.resolve()))
+            except (ValueError, OSError):
+                rel = str(p)
+            entries.append(file_entry(p, raw, rel))
+        return entries or None
+
     def load(self, session_id: str) -> RawSession | None:
         if not self.available():
             return None

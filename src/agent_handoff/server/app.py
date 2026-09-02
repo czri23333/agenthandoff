@@ -13,7 +13,7 @@ from importlib import resources
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -329,6 +329,36 @@ def session_brief(
             else len(bundle.recent)
         ),
     }
+
+
+@app.get("/api/sessions/{cli}/{sid}/raw")
+def session_raw(cli: str, sid: str):
+    """The session's ORIGINAL storage as a zip: byte-faithful files, hash-
+    verified inside the archive. This is the verbatim layer — the brief only
+    summarises, the zip is the unfiltered truth (tool calls, system rows,
+    vendor fields no parser reads).
+    """
+    import io
+    import zipfile
+    from pathlib import Path as _Path
+
+    parser = _parser_or_404(cli)
+    archive = parser.raw_archive(sid)
+    if archive is None:
+        raise HTTPException(status_code=404, detail=f"{cli} cannot archive session {sid} verbatim")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for entry in archive:
+            data = str(entry.get("text") or "").encode("utf-8", "surrogateescape")
+            zf.writestr(_Path(entry.get("path") or "unnamed").as_posix(), data)
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{cli}-{sid[:8]}-raw.zip"'
+        },
+    )
 
 
 # Threads clusters every session across every store (~15s live); cache the

@@ -197,6 +197,10 @@ class HandoffBundle:
     # Full verbatim dialogue (oldest first) for lossless handoff. Populated only
     # when capture uses --full; empty for the default lossy bundle.
     full_transcript: list[tuple[str, str]] = field(default_factory=list)
+    # Byte-faithful original storage (see Parser.raw_archive): the vendor's
+    # own lines — tool calls, system rows, unknown fields — carried unchanged.
+    # Populated only when capture uses --full --raw.
+    raw_files: list[dict] = field(default_factory=list)
     # The tail of the last assistant turn when it was cut off mid-sentence, so
     # the successor continues the sentence instead of inventing a new one.
     unfinished: str = ""
@@ -239,5 +243,6 @@ class HandoffBundle:
             "topics": [{"opener": o, "messages": n} for o, n in self.topics],
             "recent": [{"role": r, "text": t} for r, t in self.recent],
             "full_transcript": [{"role": r, "text": t} for r, t in self.full_transcript],
+            "raw_files": list(self.raw_files),
             "unfinished": self.unfinished,
         }

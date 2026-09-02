@@ -133,6 +133,26 @@ class DshParser(Parser):
 
     # -- extraction ----------------------------------------------------------
 
+    def raw_archive(self, session_id: str) -> list[dict] | None:
+        """The session's zstd roll, decompressed across all its frames —
+        every record the worker wrote, byte-faithful after decompression."""
+        if not self.available() or not self.codec_ok():
+            return None
+        path = self._resolve(session_id)
+        if path is None:
+            return None
+        from agent_handoff.parsers.base import file_entry
+
+        try:
+            data = _decompress(path)
+        except Exception:
+            return None
+        try:
+            rel = str(path.resolve().relative_to(self.root.resolve()))
+        except (ValueError, OSError):
+            rel = str(path)
+        return [file_entry(path, data, rel)]
+
     def load(self, session_id: str) -> RawSession | None:
         if not self.available() or not self.codec_ok():
             return None
