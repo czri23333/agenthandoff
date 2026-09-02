@@ -18,6 +18,8 @@ node_modules/
 # Local session dumps / generated bundles: real transcripts, never publish
 transfers/
 handover*.md
+brief-full-*.md
+handoff-full-*.md
 AGENT_HANDOFF_GUIDE.md
 *-handoff-ui.bat
 
