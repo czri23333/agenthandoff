@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from agent_handoff.parsers.codex import CodexParser
 from agent_handoff.parsers.dsh import DshParser
 from agent_handoff.parsers.jsonl_family import (
     ClaudeCodeParser,
     CodebuddyParser,
     QodercnIdeParser,
+    QoderworkCnParser,
     QoderworkParser,
     QwenworkParser,
 )
@@ -125,6 +128,54 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     raw = p.load("bbb222")
     assert raw is not None  # hidden from the list, still loadable by id
     assert raw.messages == []  # and it is honestly empty: nothing to pretend
+
+
+def test_qoder_shared_store_splits_families(tmp_path):
+    """The qoder-cn store is shared by IDE chats, qoderwake workers and qoderwork
+    workspaces. Each family must list only its own; wake/work transcripts
+    belong to their CLI entries, and the IDE list stays one family.
+
+    Regression: the cockpit listed 125 qodercn-ide sessions although the IDE
+    UI shows 5; 90+ were tool loops (now hidden) and ~11 were wake/work.
+    """
+    import json
+
+    def write_session(rootdir: Path, name: str, sid: str, text: str) -> None:
+        rootdir.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {"type": "runtime-config", "sessionId": sid, "timestamp": 1},
+            {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
+             "message": {"role": "user", "content": [{"type": "text", "text": text}]}},
+            {"type": "assistant", "timestamp": "2026-08-30T10:00:01Z",
+             "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}},
+        ]
+        with open(rootdir / f"{name}.jsonl", "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+
+    store = tmp_path / ".qoder-cn" / "projects"
+    write_session(store / "D----x" / "transcript", "aaa111", "aaa111", "ide chat")
+    write_session(
+        store / "C--u--qoderwake-cn-data-team-groups-team-group-g1-workspace",
+        "bbb222",
+        "bbb222",
+        "wake group ask",
+    )
+    write_session(
+        store / "C--u--qoderworkcn-workspace-m1", "ccc333", "ccc333", "work ask"
+    )
+
+    from agent_handoff.parsers.qoderwake import _WakeShared
+
+    p_ide = QodercnIdeParser(tmp_path / ".qoder-cn")
+    assert [m.session_id for m in p_ide.list_sessions()] == ["aaa111"]
+
+    p_wake = _WakeShared(tmp_path / ".qoder-cn", "qoderwake-cn", "QoderCN", ".qoderwake-cn")
+    assert [m.session_id for m in p_wake.list_sessions()] == ["bbb222"]
+
+    p_work = QoderworkCnParser(tmp_path / ".qoderworkcn")
+    assert [m.session_id for m in p_work.list_sessions()] == ["ccc333"]
+    assert p_work.load("ccc333") is not None
 
 
 def test_dsh_roll(dsh_store):

@@ -110,6 +110,26 @@ def _summary_title(text: str) -> str:
 # by id for debugging).
 _TOOLLOOP_TITLE = "工具循环会话（无用户消息）"
 
+# ~/.qoder-cn (and ~/.qoder) is SHARED by the whole qoder family: the IDE's own
+# chats live under <project>/transcript/ or in plain <project> dirs, while
+# qoderwake team-groups/workers and qoderwork workspaces each create top-level
+# project dirs named after the product. One listing must not mix families —
+# the wake/work transcripts belong to their own CLI entries.
+_FAMILY_MARKERS = ("qoderwake", "qoderwork")
+
+
+def _family_of_path(root: Path, path: str) -> str | None:
+    """Which qoder family a transcript belongs to, from the store dir name."""
+    try:
+        rel = Path(path).resolve().relative_to(Path(root).resolve())
+    except (ValueError, OSError):
+        return None
+    for part in rel.parts:
+        for family in _FAMILY_MARKERS:
+            if family in part:
+                return family
+    return None
+
 # Cache of absorbed add_user_message fragments per store, keyed by the store
 # root and invalidated by the newest file mtime, so repeated dashboard loads do
 # not rescan every real session just to de-duplicate a handful of turn fragments.
@@ -831,14 +851,44 @@ class WorkbuddyParser(_CodebuddyHybridParser):
         return t[:120]
 
 
-class QoderworkParser(JsonlSessionParser):
+class _QoderworkSharedMixin:
+    """The work CLI also lands workspace sessions in the shared qoder store
+    (~/.qoder/projects/<...qoderwork-workspace-...>); they belong to the work
+    CLI entry, not to the IDE one. Overriding ``_iter_jsonl`` keeps listing
+    and loading on the same file set.
+    """
+
+    shared_store = ".qoder"
+    workspace_marker = "qoderwork-workspace"
+
+    def _shared_root(self) -> Path | None:
+        # ``self.root`` is either ``<home>/<hidden-store>/projects`` (production)
+        # or the hidden-store dir itself (tests with an explicit root).
+        candidates = (self.root.parent.parent, self.root.parent)
+        for base in candidates:
+            shared = base / self.shared_store / "projects"
+            if shared.is_dir() and shared.resolve() != self.root.resolve():
+                return shared
+        return None
+
+    def _iter_jsonl(self) -> list[Path]:
+        paths = list(super()._iter_jsonl())
+        shared = self._shared_root()
+        if shared is not None:
+            for p in shared.rglob("*.jsonl"):
+                if self.workspace_marker in str(p):
+                    paths.append(p)
+        return sorted(set(paths))
+
+
+class QoderworkParser(_QoderworkSharedMixin, JsonlSessionParser):
     """Qoderwork — Claude-Code-style JSONL under ~/.qoderwork/projects."""
 
     cli = "qoderwork"
     projects_dirname = ".qoderwork"
 
 
-class QoderworkCnParser(JsonlSessionParser):
+class QoderworkCnParser(_QoderworkSharedMixin, JsonlSessionParser):
     """Qoderwork CN — a separate login (second account) under ~/.qoderworkcn.
 
     Variant directories of the same product are distinct account scopes:
@@ -849,6 +899,8 @@ class QoderworkCnParser(JsonlSessionParser):
 
     cli = "qoderwork-cn"
     projects_dirname = ".qoderworkcn"
+    shared_store = ".qoder-cn"
+    workspace_marker = "qoderworkcn-workspace"
 
 
 class QwenworkParser(JsonlSessionParser):
@@ -904,7 +956,13 @@ class QodercnIdeParser(JsonlSessionParser):
                     break
         return meta
 
-    def list_sessions(self) -> list[SessionMeta]:
+    def _list_all(self) -> list[SessionMeta]:
+        """Every session in the shared store, before family filtering.
+
+        The wake/work families live in the same store, so their parsers reuse
+        this pipeline (fragment merge/absorb, official titles) and filter the
+        other direction.
+        """
         self._frag_ids = set()
         self._frag_groups = {}
         metas = super().list_sessions()
@@ -914,13 +972,6 @@ class QodercnIdeParser(JsonlSessionParser):
             t = titles.get(m.session_id) or wake.get(m.session_id)
             if t:
                 m.title = t
-            elif m.title.startswith((
-                "You name the current internal session",
-                "You are the Leader for a temporary",
-            )) and "team-group" in (m.cwd or ""):
-                # Harness-generated opener of a QoderWake team worker session;
-                # the harness prompt is not a title.
-                m.title = "团队工作会话 (QoderWake)"
 
         # Absorb fragments whose single user message already lives inside a real
         # (task/uuid) session — those are redundant turn-echoes of a conversation
@@ -963,6 +1014,16 @@ class QodercnIdeParser(JsonlSessionParser):
         # UI never lists them, so neither do we. Still loadable by id.
         out = [m for m in out if m.title != _TOOLLOOP_TITLE]
         out.sort(key=lambda m: m.updated_at or "", reverse=True)
+        return out
+
+    def list_sessions(self) -> list[SessionMeta]:
+        """The IDE's own chats only: wake/work families leave the shared store
+        for their own CLI entries (still deep-linkable by id via load())."""
+        out = [
+            m
+            for m in self._list_all()
+            if _family_of_path(self.root, m.source_path) is None
+        ]
         return out
 
     def _within_gap(self, a: SessionMeta, b: SessionMeta) -> bool:
