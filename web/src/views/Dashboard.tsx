@@ -366,6 +366,13 @@ function DomainGroup({
   const t = useT();
   const short =
     domain.split(/[\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
+  // Group paging (§2-1): a 200-row domain renders 50 rows + one expander
+  // instead of 200 rows. The expander is per-domain so task-tree parents
+  // stay mounted where the user left them.
+  const PAGE = 50;
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => setShown(PAGE), [domain, rows.length]);
+  const visible = rows.slice(0, shown);
   return (
     <div className="mb-4">
       <button
@@ -382,9 +389,19 @@ function DomainGroup({
       </button>
       {!collapsed && (
         <ul className="m-0 list-none space-y-1.5 p-0">
-          {rows.map((s) => (
+          {visible.map((s) => (
             <SessionRow key={`${s.cli}:${s.session_id}`} s={s} onOpen={onOpen} />
           ))}
+          {rows.length > shown && (
+            <li>
+              <button
+                onClick={() => setShown((n) => n + PAGE)}
+                className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+              >
+                {t("showMore")} ({rows.length - shown})
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </div>

@@ -161,6 +161,7 @@ const dict = {
     accountConfigs: "个账号配置",
     roll: "个归档",
     sessionsN: "个会话",
+    showMore: "展开剩余",
     lang: "EN",
     /* search --------------------------------------------------------------- */
     searchTitles: "搜索标题…",
@@ -354,6 +355,7 @@ const dict = {
     accountConfigs: "account config(s)",
     roll: "roll(s)",
     sessionsN: "session file(s)",
+    showMore: "show remaining",
     lang: "中",
     /* search --------------------------------------------------------------- */
     searchTitles: "search titles…",
