@@ -105,6 +105,39 @@ def test_codebuddy_dialect(codebuddy_store):
     assert raw.messages[1].role == "assistant"
 
 
+def test_codebuddy_job_state(tmp_path):
+    """jobs/<short>/state.json state surfaces via peek_status (working/idle)."""
+    import json
+
+    from agent_handoff.parsers.jsonl_family import CodebuddyParser
+
+    root = tmp_path / ".codebuddy" / "projects" / "d--demo"
+    root.mkdir(parents=True)
+    (root / "aaa111.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "message",
+                "role": "user",
+                "sessionId": "aaa111",
+                "cwd": "D:/demo",
+                "timestamp": 1756548000000,
+                "content": [{"type": "input_text", "text": "hi"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    jobs = tmp_path / ".codebuddy" / "jobs" / "a1b2c3"
+    jobs.mkdir(parents=True)
+    (jobs / "state.json").write_text(
+        json.dumps({"sessionId": "aaa111", "name": "Agent", "state": "working"}),
+        encoding="utf-8",
+    )
+    p = CodebuddyParser(tmp_path / ".codebuddy")
+    assert p.peek_status("aaa111") == "working"
+    assert p.peek_status("nope") is None
+
+
 def test_qoder_and_qwen_share_dialect(tmp_path):
     for cls, dirname, text in [
         (QoderworkParser, ".qoderwork", "qoder ask"),

@@ -35,7 +35,13 @@ export function StatusTag({ kind }: { kind: string | null }) {
       </Tooltip>
     );
   const tone =
-    kind === "clean" ? "ah-ok" : kind === "user_pending" || kind === "cancelled" ? "ah-warn" : "ah-err";
+    kind === "clean" || kind === "completed"
+      ? "ah-ok"
+      : kind === "user_pending" || kind === "cancelled" || kind === "working"
+        ? "ah-warn"
+        : kind === "idle" || kind === "archived"
+          ? "ah-faint"
+          : "ah-err";
   return (
     <Tooltip title={kind}>
       <span className={`ah-meta ${tone}`}>{t(`it_${kind}` as Parameters<typeof t>[0])}</span>

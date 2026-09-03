@@ -915,6 +915,30 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         metas = [m for m in metas if m.title != _TOOLLOOP_TITLE]
         return metas
 
+    def _job_dirs(self) -> list:
+        """Candidate jobs/ dirs: own store plus the codebuddy shared one.
+
+        WorkBuddy reuses CodeBuddy's job runtime (same shortId dir names,
+        same state.json schema); its own tree has no jobs/ dir. Resolved
+        from the store dirname (not root.parent: tests may aim root at the
+        store itself instead of its projects/ child).
+        """
+        from agent_handoff.locations import home
+
+        dirs = []
+        if self.projects_dirname:
+            # Walk up from root until the hidden-store dir is found.
+            rp = self.root
+            for _ in range(4):
+                if rp.name == self.projects_dirname:
+                    dirs.append(rp / "jobs")
+                    break
+                rp = rp.parent
+        shared = home() / ".codebuddy" / "jobs"
+        if all(shared != d for d in dirs):
+            dirs.append(shared)
+        return [d for d in dirs if d.is_dir()]
+
     def _job_titles(self) -> dict[str, str]:
         """sessionId -> official agent name from ``jobs/*/state.json``.
 
@@ -922,19 +946,47 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         highest-priority source, above ai-title rows and first-user fallback.
         """
         out: dict[str, str] = {}
-        jobs_dir = self.root.parent / "jobs"
-        if not jobs_dir.is_dir():
-            return out
-        for state in jobs_dir.glob("*/state.json"):
-            try:
-                d = json.loads(state.read_text(encoding="utf-8", errors="replace"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            sid = d.get("sessionId")
-            name = d.get("name")
-            if sid and name:
-                out[sid] = str(name)[:80]
+        for jobs_dir in self._job_dirs():
+            for state in jobs_dir.glob("*/state.json"):
+                try:
+                    d = json.loads(state.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                sid = d.get("sessionId")
+                name = d.get("name")
+                if sid and name:
+                    out[sid] = str(name)[:80]
         return out
+
+    def _job_states(self) -> dict[str, str]:
+        """sessionId -> live job state from ``jobs/*/state.json``.
+
+        The product UI shows background agents as working/idle; the state
+        field is that same signal. Cached per call site (see peek_status).
+        """
+        out: dict[str, str] = {}
+        for jobs_dir in self._job_dirs():
+            for state in jobs_dir.glob("*/state.json"):
+                try:
+                    d = json.loads(state.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                sid = d.get("sessionId")
+                st = d.get("state")
+                if sid and isinstance(st, str) and st:
+                    out[sid] = st
+        return out
+
+    def peek_status(self, session_id: str) -> str | None:
+        """codebuddy-family job state (working/idle/…) or None.
+
+        One glob over small state.json files — cheap enough for list views,
+        same cost class as _job_titles which list_sessions already pays.
+        """
+        try:
+            return self._job_states().get(session_id)
+        except OSError:
+            return None
 
     def _cb_peek_dir(
         self, sid: str, agent_files: list[Path], scan_files: list[Path] | None = None
@@ -1128,6 +1180,31 @@ class WorkbuddyParser(_CodebuddyHybridParser):
                 if t:
                     m.title = t
         return metas
+
+    def peek_status(self, session_id: str) -> str | None:
+        """workbuddy.db sessions.status (completed/archived/error/…).
+
+        Same cost class as the title lookup; deleted rows report None.
+        """
+        try:
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return None
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                row = conn.execute(
+                    "SELECT status FROM sessions WHERE id=? AND deleted_at IS NULL",
+                    (session_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        except Exception:
+            return None
+        if not row or not row[0]:
+            return None
+        return str(row[0])
 
     def _db_titles(self) -> dict[str, str]:
         """session_id -> display title from workbuddy.db (read-only)."""
