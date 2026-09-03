@@ -582,9 +582,23 @@ class JsonlSessionParser(Parser):
                     if not model:
                         model = runtime_model
                     if role == "assistant" and tokens.get("in") is None and tokens.get("out") is None:
-                        pend = pending_billing.pop("pending", None)
+                        pend = pending_billing.get("pending")
                         if pend:
+                            # The usage row bills the whole request: the text
+                            # turn takes it, and so do the run-up thinking
+                            # turns of the same request that have none yet.
                             tokens = {**tokens, **{k: v for k, v in pend.items() if tokens.get(k) is None}}
+                            for m in reversed(messages):
+                                if m.role != "assistant":
+                                    break
+                                if m.tokens_in is None and m.tokens_out is None:
+                                    m.tokens_in = pend.get("in")
+                                    m.tokens_out = pend.get("out")
+                                    if pend.get("reasoning") is not None and m.tokens_reasoning is None:
+                                        m.tokens_reasoning = pend.get("reasoning")
+                                elif m.text and not m.text.startswith("[思考]"):
+                                    break
+                            pending_billing.pop("pending", None)
                     messages.append(
                         self.msg(
                             role,
