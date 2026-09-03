@@ -1461,6 +1461,16 @@ class QodercnIdeParser(JsonlSessionParser):
         # (browser/automation sub-agent run), not a conversation — the product
         # UI never lists them, so neither do we. Still loadable by id.
         out = [m for m in out if m.title != _TOOLLOOP_TITLE]
+        # Quest-task transcripts live under <project>/transcript/ and surface
+        # in the product's task panel, not its chat list. Tag them so the
+        # cockpit can group/filter like the product does.
+        for m in out:
+            try:
+                rel = str(Path(m.source_path).parent)
+            except (ValueError, OSError):
+                continue
+            if Path(m.source_path).parent.name == "transcript":
+                m.task_type = "quest-task"
         out.sort(key=lambda m: m.updated_at or "", reverse=True)
         return out
 
