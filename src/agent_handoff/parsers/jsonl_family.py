@@ -1055,6 +1055,56 @@ class _QoderworkSharedMixin:
                     paths.append(p)
         return sorted(set(paths))
 
+    def execution_anchors(self, state_dir: Path | None = None) -> Counter[str]:
+        """Task-execution traces the CLI never lists as sessions.
+
+        ``~/.qodersec/state/*/*.session.execution.json`` records, per task,
+        every path the agent touched (plus l1 lint findings). They carry no
+        dialogue — only file anchors — so they supplement, never create,
+        sessions. Read-only; lock files skipped.
+        """
+        from agent_handoff.locations import home
+
+        out: Counter[str] = Counter()
+        state = state_dir or home() / ".qodersec" / "state"
+        if not state.is_dir():
+            return out
+        for path in state.rglob("*.session.execution.json"):
+            if path.name.endswith(".lock"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            touched = data.get("touched_paths") or []
+            if isinstance(touched, list):
+                for p in touched:
+                    if isinstance(p, str) and p.strip():
+                        out[p] += 1
+        return out
+
+    def load(self, session_id: str) -> RawSession | None:
+        """Transcript first, then the qodersec execution traces as file-only
+        supplements: they carry no dialogue, so they merge into
+        ``files_touched`` (never into messages) and are marked in notes.
+        Fixture/test trees (root outside the real home) never merge: the
+        evidence layer must measure the transcript alone."""
+        raw = super().load(session_id)
+        if raw is None:
+            return None
+        try:
+            rooted = self.root.resolve().is_relative_to(home().resolve())
+        except (OSError, ValueError):
+            rooted = False
+        if not rooted:
+            return raw
+        anchors = self.execution_anchors()
+        if anchors:
+            for p, n in anchors.items():
+                raw.files_touched[p] = raw.files_touched.get(p, 0) + n
+            raw.meta.notes = [*raw.meta.notes, f"qodersec_anchors:{len(anchors)}"]
+        return raw
+
 
 class QoderworkParser(_QoderworkSharedMixin, JsonlSessionParser):
     """Qoderwork — Claude-Code-style JSONL under ~/.qoderwork/projects."""

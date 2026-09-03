@@ -263,3 +263,104 @@ def codex_store(tmp_path: Path) -> Path:
         ],
     )
     return tmp_path
+
+
+@pytest.fixture
+def cherrystudio_store(tmp_path: Path) -> Path:
+    """Minimal CherryStudio agents.db with one dialogue session."""
+    import json as _json
+
+    db = tmp_path / "agents.db"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE agents (id TEXT, name TEXT, created_at TEXT);
+        CREATE TABLE sessions (id TEXT, agent_id TEXT, name TEXT,
+            created_at TEXT, updated_at TEXT);
+        CREATE TABLE session_messages (id TEXT, session_id TEXT, role TEXT,
+            content TEXT, created_at TEXT);
+        """
+    )
+    con.execute("INSERT INTO agents VALUES ('a1','Cherry Claw','2026-06-28T10:10:01.068Z')")
+    con.execute(
+        "INSERT INTO sessions VALUES ('sess_cs','a1','Demo chat',"
+        " '2026-07-05T08:19:30.000Z','2026-07-05T08:19:42.000Z')"
+    )
+    con.execute(
+        "INSERT INTO session_messages VALUES ('r1','sess_cs','user',?,"
+        " '2026-07-05T08:19:30.000Z')",
+        (
+            _json.dumps(
+                {
+                    "message": {
+                        "role": "user",
+                        "model": {"name": "glm-5.2"},
+                        "usage": {"prompt_tokens": 81, "completion_tokens": 81},
+                    },
+                    "blocks": [{"type": "main_text", "content": "hello cherry"}],
+                }
+            ),
+        ),
+    )
+    con.execute(
+        "INSERT INTO session_messages VALUES ('r2','sess_cs','assistant',?,"
+        " '2026-07-05T08:19:42.000Z')",
+        (
+            _json.dumps(
+                {
+                    "message": {"role": "assistant", "model": {"name": "glm-5.2"}},
+                    "blocks": [{"type": "main_text", "content": "hi there"}],
+                }
+            ),
+        ),
+    )
+    con.commit()
+    con.close()
+    return tmp_path
+
+
+@pytest.fixture
+def qoderapp_store(tmp_path: Path) -> Path:
+    """Minimal QoderWork-desktop agents.db with one task chat."""
+    import json as _json
+
+    db = tmp_path / "agents.db"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE projects (id TEXT, name TEXT);
+        CREATE TABLE chats (id TEXT, name TEXT, project_id TEXT,
+            created_at INTEGER, updated_at INTEGER, chat_type TEXT,
+            source_chat_id TEXT, deleted_at TEXT);
+        CREATE TABLE messages (id TEXT, chat_id TEXT, sequence INTEGER,
+            role TEXT, parts TEXT, metadata TEXT, searchable_text TEXT,
+            created_at INTEGER);
+        """
+    )
+    con.execute("INSERT INTO projects VALUES ('p1','workspace')")
+    con.execute(
+        "INSERT INTO chats VALUES ('chat1','Demo task','p1',"
+        " 1784636979,1784640539,'task',NULL,NULL)"
+    )
+    con.execute(
+        "INSERT INTO messages VALUES ('m1','chat1',0,'user',?,"
+        " '{\"sessionId\":\"sess-x\"}','hello task',1784636979)",
+        (_json.dumps([{"type": "text", "text": "hello task"}]),),
+    )
+    con.execute(
+        "INSERT INTO messages VALUES ('m2','chat1',1,'assistant',?,"
+        " '{}','done',1784636980)",
+        (
+            _json.dumps(
+                [
+                    {"type": "tool-Thinking", "toolName": "Thinking",
+                     "input": {"text": "thinking aloud"}},
+                    {"type": "tool-Read", "toolName": "Read",
+                     "input": {"file_path": "src/a.ts"}},
+                ]
+            ),
+        ),
+    )
+    con.commit()
+    con.close()
+    return tmp_path

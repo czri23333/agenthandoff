@@ -25,7 +25,7 @@ output, so bundles are diffable and trustworthy.
 ## Supported CLIs
 
 <!-- MATRIX BEGIN: generated, do not edit -->
-This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 8 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
+This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 11 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
 
 | CLI | store | reader | fixtures | proven from fixtures | fingerprint | status |
 |---|---|---|---|---|---|---|
@@ -45,6 +45,10 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `opencode` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `qoderwork-app` | unknown | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork-cn-app` | unknown | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ stable (fixture-proven) |
+| `qwenwork-app` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `cherrystudio` | unknown | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ stable (fixture-proven) |
 | `trae` | IDE SQLite; read-only only, never written | — | — | — | — | 🔜 roadmap |
 
 Legend: stable = a fixture parses to real dialogue; shape only = the source store held no conversation to sample; unverified = reader exists, no fixture yet; fixture fails = the fixture does not parse; roadmap = no reader; unavailable = needs an optional codec here.

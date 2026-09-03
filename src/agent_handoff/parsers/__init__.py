@@ -5,6 +5,7 @@ from __future__ import annotations
 from agent_handoff.model import RawSession, SessionMeta
 from agent_handoff.parsers.base import Parser
 from agent_handoff.parsers.codex import CodexParser
+from agent_handoff.parsers.cherrystudio import CherryStudioParser
 from agent_handoff.parsers.dsh import DshParser
 from agent_handoff.parsers.jsonl_family import (
     ClaudeCodeParser,
@@ -19,6 +20,11 @@ from agent_handoff.parsers.jsonl_family import (
 )
 from agent_handoff.parsers.kimi import KimiParser
 from agent_handoff.parsers.opencode import OpenCodeParser
+from agent_handoff.parsers.qoderapp import (
+    QoderworkAppParser,
+    QoderworkCnAppParser,
+    QwenworkAppParser,
+)
 from agent_handoff.parsers.qoderwake import QoderwakeCnParser, QoderwakeParser
 from agent_handoff.parsers.zcode import ZcodeParser
 
@@ -38,7 +44,11 @@ __all__ = [
     "OpenCodeParser",
     "QoderwakeParser",
     "QoderwakeCnParser",
+    "QoderworkAppParser",
+    "QoderworkCnAppParser",
+    "QwenworkAppParser",
     "CodexParser",
+    "CherryStudioParser",
     "available_parsers",
     "resolve_session",
 ]
@@ -63,6 +73,10 @@ def available_parsers() -> list[Parser]:
         OpenCodeParser(),
         QoderwakeParser(),
         QoderwakeCnParser(),
+        QoderworkAppParser(),
+        QoderworkCnAppParser(),
+        QwenworkAppParser(),
+        CherryStudioParser(),
     ]
     return [p for p in instances if p.available()]
 
@@ -85,6 +99,10 @@ def all_parsers() -> list[Parser]:
         OpenCodeParser(),
         QoderwakeParser(),
         QoderwakeCnParser(),
+        QoderworkAppParser(),
+        QoderworkCnAppParser(),
+        QwenworkAppParser(),
+        CherryStudioParser(),
     ]
 
 

@@ -1,0 +1,43 @@
+{
+  "cli": "cherrystudio",
+  "with_root": "cherrystudio\\agents.db",
+  "mirrors": "%APPDATA%/CherryStudio/Data/agents.db",
+  "sessions": [
+    "xak690c79d3e15",
+    "sifaqoton6ca358474a3",
+    "tixa48a1dc3d18c"
+  ],
+  "files": [
+    {
+      "rel": "agents.db",
+      "bytes": 2236416,
+      "sampled": false,
+      "sqlite": {
+        "rows": 221,
+        "tables": 10,
+        "capped": [],
+        "unfiltered": [
+          "migrations",
+          "agents",
+          "channel_task_subscriptions",
+          "scheduled_tasks",
+          "skills",
+          "agent_skills"
+        ],
+        "empty": [
+          "channels",
+          "task_run_logs"
+        ]
+      }
+    }
+  ],
+  "redacted_keys": [
+    "i18nKey"
+  ],
+  "scrubbed_hits": 1311,
+  "sampled_records": false,
+  "source_messages": 1921,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

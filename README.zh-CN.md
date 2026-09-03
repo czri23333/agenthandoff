@@ -23,7 +23,7 @@
 ## 支持的 CLI
 
 <!-- MATRIX BEGIN: generated, do not edit -->
-下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 8 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
+下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 11 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
 
 | CLI | 存储形态 | 读取 | 脱敏夹具 | 夹具读出 | 格式指纹 | 状态 |
 |---|---|---|---|---|---|---|
@@ -43,6 +43,10 @@
 | `opencode` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoderwork-app` | unknown | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qoderwork-cn-app` | unknown | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qwenwork-app` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `cherrystudio` | unknown | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `trae` | IDE SQLite；只读，绝不写入 | — | — | — | — | 🔜 路线图 |
 
 图例：稳定 = 夹具能解析出真实对话；仅形态 = 源存档本身没有对话内容；未验证 = 有读取器但没有夹具；夹具解析失败 = 夹具读不出来；路线图 = 尚无读取器；本机不可用 = 这里缺可选解码器。

@@ -1,0 +1,146 @@
+{
+  "cli": "cherrystudio",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 2,
+    "messages": 1816,
+    "nonempty_messages": 1816,
+    "proven": true,
+    "sampled": false,
+    "sessions": 3,
+    "shape_only": false,
+    "source_messages": 1921,
+    "tool_calls": 825,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {
+      ".db": 1
+    },
+    "keys_by_type": {},
+    "record_types": {},
+    "tables": {
+      "agent_skills": [
+        "agent_id",
+        "created_at",
+        "is_enabled",
+        "skill_id",
+        "updated_at"
+      ],
+      "agents": [
+        "accessible_paths",
+        "allowed_tools",
+        "configuration",
+        "created_at",
+        "deleted_at",
+        "description",
+        "id",
+        "instructions",
+        "mcps",
+        "model",
+        "name",
+        "plan_model",
+        "small_model",
+        "sort_order",
+        "type",
+        "updated_at"
+      ],
+      "channel_task_subscriptions": [
+        "channel_id",
+        "task_id"
+      ],
+      "channels": [
+        "active_chat_ids",
+        "agent_id",
+        "config",
+        "created_at",
+        "id",
+        "is_active",
+        "name",
+        "permission_mode",
+        "session_id",
+        "type",
+        "updated_at"
+      ],
+      "migrations": [
+        "executed_at",
+        "tag",
+        "version"
+      ],
+      "scheduled_tasks": [
+        "agent_id",
+        "created_at",
+        "id",
+        "last_result",
+        "last_run",
+        "name",
+        "next_run",
+        "prompt",
+        "schedule_type",
+        "schedule_value",
+        "status",
+        "timeout_minutes",
+        "updated_at"
+      ],
+      "session_messages": [
+        "agent_session_id",
+        "content",
+        "created_at",
+        "id",
+        "metadata",
+        "role",
+        "session_id",
+        "updated_at"
+      ],
+      "sessions": [
+        "accessible_paths",
+        "agent_id",
+        "agent_type",
+        "allowed_tools",
+        "configuration",
+        "created_at",
+        "description",
+        "id",
+        "instructions",
+        "mcps",
+        "model",
+        "name",
+        "plan_model",
+        "slash_commands",
+        "small_model",
+        "sort_order",
+        "updated_at"
+      ],
+      "skills": [
+        "author",
+        "content_hash",
+        "created_at",
+        "description",
+        "folder_name",
+        "id",
+        "is_enabled",
+        "name",
+        "namespace",
+        "source",
+        "source_url",
+        "tags",
+        "updated_at"
+      ],
+      "task_run_logs": [
+        "duration_ms",
+        "error",
+        "id",
+        "result",
+        "run_at",
+        "session_id",
+        "status",
+        "task_id"
+      ]
+    },
+    "top_key_sets": {}
+  },
+  "version": "1"
+}

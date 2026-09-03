@@ -307,89 +307,148 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             <FirstRun />
           </Empty>
         ) : (
-          grouped.map(([domain, rows]) => {
-            const isCollapsed = collapsed.has(domain);
-            const short =
-              domain.split(/[\\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
-            return (
-              <div key={domain} className="mb-4">
-                <button
-                  onClick={() =>
-                    setCollapsed((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(domain)) next.delete(domain);
-                      else next.add(domain);
-                      return next;
-                    })
-                  }
-                  className="mb-1.5 flex w-full items-baseline gap-2 text-left"
-                >
-                  <span className="w-3 ah-faint">{isCollapsed ? "▸" : "▾"}</span>
-                  <span className="ah-title font-mono font-medium">{short}</span>
-                  <Tooltip title={domain}>
-                    <span className="ah-faint font-mono">
-                      {rows.length} {t("sessionsN")}
-                    </span>
-                  </Tooltip>
-                </button>
-                {!isCollapsed && (
-                  <ul className="m-0 list-none space-y-1.5 p-0">
-                    {rows.map((s) => (
-                      <li key={`${s.cli}:${s.session_id}`} className="row-enter">
-                        <button
-                          onClick={() => onOpen(s.cli, s.session_id)}
-                          className="ah-row group flex w-full items-center gap-3 px-3 py-2 text-left"
-                        >
-                          <CliBadge cli={s.cli} origin={s.origin} />
-                          <span className="min-w-0 flex-1">
-                            <span className="ah-title block truncate">{s.title}</span>
-                            <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
-                              {s.session_id.slice(0, 8)}
-                              {s.git?.branch && (
-                                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
-                              )}
-                              {s.cwd && (
-                                <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>
-                              )}
-                            </span>
-                          </span>
-                          {s.parent_session_id && (
-                            <Tooltip title={`${t("subSession")} · ${s.parent_session_id}`}>
-                              <span className="ah-faint hidden shrink-0 font-mono xl:inline">⤷ {t("subSession")}</span>
-                            </Tooltip>
-                          )}
-                          {s.provider && (
-                            <Tooltip title={t("provider")}>
-                              <span className="ah-faint hidden shrink-0 font-mono lg:inline">
-                                {(s.provider as string).slice(0, 18)}
-                              </span>
-                            </Tooltip>
-                          )}
-                          {/* Below sm these two fixed columns starved the title to
-                          zero width; the title is the only thing that identifies a
-                          row, so the columns give way first. */}
-                          <span className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden">
-                            {relTime(s.updated_at)}
-                          </span>
-                          {s.needs_reply === true && (
-                            <Tooltip title={t("needsReplyHint")}>
-                              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
-                            </Tooltip>
-                          )}
-                          <span className="w-24 shrink-0 text-right max-sm:hidden">
-                            <StatusTag kind={s.status} />
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })
+          grouped.map(([domain, rows]) => (
+            <DomainGroup
+              key={domain}
+              domain={domain}
+              rows={rows}
+              collapsed={collapsed.has(domain)}
+              onToggle={() =>
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(domain)) next.delete(domain);
+                  else next.add(domain);
+                  return next;
+                })
+              }
+              onOpen={onOpen}
+            />
+          ))
         )}
       </div>
     </div>
+  );
+}
+
+function DomainGroup({
+  domain,
+  rows,
+  collapsed,
+  onToggle,
+  onOpen,
+}: {
+  domain: string;
+  rows: SessionMeta[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onOpen: (cli: string, sid: string) => void;
+}) {
+  const t = useT();
+  const short =
+    domain.split(/[\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
+  return (
+    <div className="mb-4">
+      <button
+        onClick={onToggle}
+        className="mb-1.5 flex w-full items-baseline gap-2 text-left"
+      >
+        <span className="w-3 ah-faint">{collapsed ? "▸" : "▾"}</span>
+        <span className="ah-title font-mono font-medium">{short}</span>
+        <Tooltip title={domain}>
+          <span className="ah-faint font-mono">
+            {rows.length} {t("sessionsN")}
+          </span>
+        </Tooltip>
+      </button>
+      {!collapsed && (
+        <ul className="m-0 list-none space-y-1.5 p-0">
+          {rows.map((s) => (
+            <SessionRow key={`${s.cli}:${s.session_id}`} s={s} onOpen={onOpen} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SessionRow({
+  s,
+  onOpen,
+  depth = 0,
+}: {
+  s: SessionMeta;
+  onOpen: (cli: string, sid: string) => void;
+  depth?: number;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const kids = s.children ?? [];
+  return (
+    <li className="row-enter">
+      <div className="flex items-stretch gap-1">
+        {depth > 0 && <span className="ah-faint w-4 shrink-0 select-none self-center">└</span>}
+        {kids.length > 0 && (
+          <button
+            onClick={() => setOpen(!open)}
+            className="ah-faint w-7 shrink-0 select-none self-center"
+            title={open ? t("collapseSubs") : t("expandSubs")}
+          >
+            {open ? "▾" : `▸${kids.length}`}
+          </button>
+        )}
+        <button
+          onClick={() => onOpen(s.cli, s.session_id)}
+          className="ah-row group flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
+        >
+          <CliBadge cli={s.cli} origin={s.origin} />
+          <span className="min-w-0 flex-1">
+            <span className="ah-title block truncate">{s.title}</span>
+            <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
+              {s.session_id.slice(0, 8)}
+              {s.git?.branch && (
+                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
+              )}
+              {s.cwd && (
+                <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>
+              )}
+              {kids.length > 0 && !open && (
+                <span className="ml-1.5">· {kids.length} {t("subSessions")}</span>
+              )}
+            </span>
+          </span>
+          {s.parent_session_id && depth === 0 && (
+            <Tooltip title={`${t("subSession")} · ${s.parent_session_id}`}>
+              <span className="ah-faint hidden shrink-0 font-mono xl:inline">⤷ {t("subSession")}</span>
+            </Tooltip>
+          )}
+          {s.provider && (
+            <Tooltip title={t("provider")}>
+              <span className="ah-faint hidden shrink-0 font-mono lg:inline">
+                {(s.provider as string).slice(0, 18)}
+              </span>
+            </Tooltip>
+          )}
+          <span className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden">
+            {relTime(s.updated_at)}
+          </span>
+          {s.needs_reply === true && (
+            <Tooltip title={t("needsReplyHint")}>
+              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
+            </Tooltip>
+          )}
+          <span className="w-24 shrink-0 text-right max-sm:hidden">
+            <StatusTag kind={s.status} />
+          </span>
+        </button>
+      </div>
+      {open && kids.length > 0 && (
+        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
+          {kids.map((k) => (
+            <SessionRow key={`${k.cli}:${k.session_id}`} s={k} onOpen={onOpen} depth={depth + 1} />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

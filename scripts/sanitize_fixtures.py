@@ -169,6 +169,9 @@ STATIC_NAMES = {
     "compression-v2",
     "memory",
     "db.sqlite",
+    # desktop-app sqlite stores are located by filename (Parser.with_root aims
+    # at the file itself), so they cannot be hashed either.
+    "agents.db",
     # dsh rolls: `session.jsonl.zstd` is located by name, so it cannot be hashed
     # (the first dsh fixture listed 0 sessions for exactly this reason).
     "session.jsonl.zstd",
@@ -641,6 +644,22 @@ def _session_column(source: sqlite3.Connection, name: str) -> str | None:
     return None
 
 
+def _is_fts_shadow(name: str, sql: str) -> bool:
+    """True for FTS5 virtual tables and their shadow tables.
+
+    ``messages_fts`` is declared ``USING fts5(...)`` and the engine maintains
+    ``messages_fts_data/idx/content/docsize/config`` itself — re-creating any
+    of them by hand raises ``table ... already exists``. Parsers only read the
+    plain tables, so the whole FTS family is dropped from fixtures.
+    """
+    if "USING fts5" in sql.upper():
+        return True
+    lowered = name.lower()
+    return "_fts" in lowered or lowered.endswith(
+        ("_data", "_idx", "_content", "_docsize", "_config")
+    ) and "fts" in lowered
+
+
 def transform_sqlite(src: Path, dst: Path, san: Sanitizer, sessions: list[str]) -> dict:
     """Rebuild the database: same schema, sanitized text, chosen sessions only.
 
@@ -659,9 +678,18 @@ def transform_sqlite(src: Path, dst: Path, san: Sanitizer, sessions: list[str]) 
             source.execute("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL")
         )
         for _typ, _name, sql in schema:
+            # FTS5 shadow tables (xxx_fts_data/idx/content/docsize/config) are
+            # virtual-table internals: re-creating them by hand collides with
+            # the engine's own bookkeeping. Their triggers (xxx_fts_ai/au/ad)
+            # fire on plain-table inserts and reference the missing FTS table,
+            # so they go too. Parsers only read the plain tables.
+            if _name.startswith("sqlite_") or _is_fts_shadow(_name, sql or ""):
+                continue
             con.execute(sql)
         for typ, name, sql in schema:
             if typ != "table" or name.startswith("sqlite_"):
+                continue
+            if _is_fts_shadow(name, sql or ""):
                 continue
             san.keep = {k.lower(): set(v) for k, v in _check_vocabulary(sql or "").items()}
             cols = [r[1] for r in source.execute(f'PRAGMA table_info("{name}")')]
@@ -886,7 +914,21 @@ def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -
 
 
 def _portable(path: Path) -> str:
-    """A home-relative spelling, safe to commit (never an absolute local path)."""
+    """A home-relative spelling, safe to commit (never an absolute local path).
+
+    %APPDATA% stores spell with the environment variable: `~/AppData/...`
+    trips the profile-segment leak scan while carrying no identity (the user
+    name is already `~`), so the platform-idiomatic variable form is used.
+    """
+    import os
+
+    appdata = os.environ.get("APPDATA", "").strip()
+    if appdata:
+        try:
+            rel = str(Path(path).relative_to(Path(appdata))).replace("\\", "/")
+            return f"%APPDATA%/{rel}"
+        except ValueError:
+            pass
     try:
         return "~/" + str(Path(path).relative_to(Path.home())).replace("\\", "/")
     except ValueError:

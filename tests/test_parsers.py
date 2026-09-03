@@ -300,3 +300,71 @@ def test_account_config_count(tmp_path):
     single = tmp_path / ".qoderwork"
     (single / ".models" / "019f3554-c9cc-4000-8000-000000000000").mkdir(parents=True)
     assert _count_account_configs(single) == 1
+
+
+def test_cherrystudio_happy(cherrystudio_store):
+    from agent_handoff.parsers.cherrystudio import CherryStudioParser
+
+    p = CherryStudioParser(cherrystudio_store / "agents.db")
+    metas = p.list_sessions()
+    assert [m.session_id for m in metas] == ["sess_cs"]
+    assert metas[0].title == "Demo chat"
+    raw = p.load("sess_cs")
+    assert raw is not None
+    assert [(m.role, m.text) for m in raw.messages] == [
+        ("user", "hello cherry"),
+        ("assistant", "hi there"),
+    ]
+    assert p.raw_archive("sess_cs")[0]["path"] == "cherrystudio/sess_cs.records.jsonl"
+    assert p.load("nope") is None
+
+
+def test_qoderapp_happy(qoderapp_store):
+    from agent_handoff.parsers.qoderapp import (
+        QoderworkAppParser,
+        QoderworkCnAppParser,
+        QwenworkAppParser,
+    )
+
+    for cls in (QoderworkAppParser, QoderworkCnAppParser, QwenworkAppParser):
+        p = cls(qoderapp_store / "agents.db")
+        metas = p.list_sessions()
+        assert [m.session_id for m in metas] == ["chat1"]
+        raw = p.load("chat1")
+        assert raw is not None
+        assert raw.messages[0].text == "hello task"
+        assert any(m.text.startswith("[思考]") for m in raw.messages)
+        assert raw.tool_counts["Read"] == 1
+        assert raw.files_touched["src/a.ts"] == 1
+        assert p.raw_archive("chat1")[0]["path"] == "qoderapp/chat1.records.jsonl"
+
+
+def test_qoderwork_execution_anchors(tmp_path):
+    import json as _json
+
+    state = tmp_path / ".qodersec" / "state" / "proj"
+    state.mkdir(parents=True)
+    (state / "task-1.session.execution.json").write_text(
+        _json.dumps({"touched_paths": ["src/a.ts", "src/b.ts"]}), encoding="utf-8"
+    )
+    (state / "task-2.session.execution.json.lock").write_text("locked", encoding="utf-8")
+    (state / "task-3.session.execution.json").write_text("{broken", encoding="utf-8")
+
+    root = tmp_path / ".qoderwork" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    (root / "sess1.jsonl").write_text(
+        _json.dumps(
+            {
+                "type": "user",
+                "sessionId": "sess1",
+                "cwd": "D:/demo",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    p = QoderworkParser(tmp_path / ".qoderwork")
+    anchors = p.execution_anchors(state_dir=tmp_path / ".qodersec" / "state")
+    assert anchors == {"src/a.ts": 1, "src/b.ts": 1}

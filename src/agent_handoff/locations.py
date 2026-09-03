@@ -122,6 +122,51 @@ def qwenwork_store() -> StoreInfo | None:
     return _projects_store("qwenwork", ".qwenworkcn")
 
 
+def _appdata_sqlite(cli: str, *parts: str) -> StoreInfo | None:
+    """A desktop app's SQLite store under %APPDATA% (sqlite kind)."""
+    import os
+
+    base = os.environ.get("APPDATA", "").strip()
+    p = (Path(base) if base else home() / "AppData" / "Roaming").joinpath(*parts)
+    if not p.exists():
+        return None
+    import sqlite3
+
+    detail = ""
+    try:
+        con = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=1)
+        try:
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "session_messages" in tables:
+                n = con.execute("SELECT COUNT(*) FROM session_messages").fetchone()[0]
+                detail = f"{n} message row(s)"
+            elif "messages" in tables:
+                n = con.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+                detail = f"{n} message row(s)"
+        finally:
+            con.close()
+        readable = True
+    except sqlite3.Error:
+        readable = False
+    return StoreInfo(cli, "sqlite", p, readable, detail)
+
+
+def cherrystudio_store() -> StoreInfo | None:
+    return _appdata_sqlite("cherrystudio", "CherryStudio", "Data", "agents.db")
+
+
+def qoderwork_app_store() -> StoreInfo | None:
+    return _appdata_sqlite("qoderwork-app", "QoderWork", "data", "agents.db")
+
+
+def qoderwork_cn_app_store() -> StoreInfo | None:
+    return _appdata_sqlite("qoderwork-cn-app", "QoderWork CN", "data", "agents.db")
+
+
+def qwenwork_app_store() -> StoreInfo | None:
+    return _appdata_sqlite("qwenwork-app", "QwenWorkCN", "data", "agents.db")
+
+
 def dsh_store() -> StoreInfo | None:
     p = home() / ".dsh" / "sessions"
     if not p.is_dir():
@@ -253,6 +298,10 @@ def discover() -> list[StoreInfo]:
         dsh_store,
         kimi_store,
         codex_store,
+        cherrystudio_store,
+        qoderwork_app_store,
+        qoderwork_cn_app_store,
+        qwenwork_app_store,
     ]
     found: list[StoreInfo] = []
     for probe in probes:

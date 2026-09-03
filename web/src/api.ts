@@ -11,6 +11,8 @@ export interface SessionMeta {
   provider: string | null;
   origin: string | null;
   parent_session_id: string | null;
+  children?: SessionMeta[];
+  child_count?: number;
   task_type?: string | null; // interactive | subagent_child … (zcode)
   title_source?: string | null; // generated | first_input … (zcode)
   permission?: string | null; // yolo | plan … (zcode/opencode)

@@ -237,8 +237,26 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
     canonical = {k: max(v, key=v.get) for k, v in merge.items()}
     for s in out:
         s["domain"] = canonical[s["domain"].casefold()]
-    _sessions_cache[cache_key] = (now, out)
-    return out
+    # Parent → children tree, the way the products themselves nest sub-agent
+    # runs under their spawner: a child whose parent id matches a listed
+    # session id moves under it (same cli; cross-cli ids never collide
+    # because stores mint disjoint id spaces — verified on this machine).
+    by_id = {(s["cli"], s["session_id"]): s for s in out}
+    roots: list[dict] = []
+    for s in out:
+        parent = s.get("parent_session_id")
+        host = by_id.get((s["cli"], parent)) if parent else None
+        if host is not None and host is not s:
+            host.setdefault("children", []).append(s)
+        else:
+            roots.append(s)
+    for host in by_id.values():
+        kids = host.get("children")
+        if kids:
+            kids.sort(key=lambda k: k.get("updated_at") or "")
+            host["child_count"] = len(kids)
+    _sessions_cache[cache_key] = (now, roots)
+    return roots
 
 
 @app.get("/api/sessions/{cli}/{sid}/detail")
