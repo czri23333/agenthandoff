@@ -1602,7 +1602,41 @@ class QodercnIdeParser(JsonlSessionParser):
                 anchor = self._workspace_model_anchor(session_id, raw.meta.cwd)
                 if anchor:
                     raw.meta.notes = [*raw.meta.notes, f"workspace_model:{anchor}"]
+            task_files = self._task_execution_files(session_id)
+            if task_files:
+                for pth in task_files:
+                    raw.files_touched[pth] += 1
+                raw.meta.notes = [*raw.meta.notes, f"task_files:{len(task_files)}"]
         return raw
+
+    def _task_execution_files(self, session_id: str) -> list[str]:
+        """Exact-match file supplement for quest-task sessions.
+
+        ``~/.qodersec/state/*/<task-id>.session.execution.json`` shares the
+        task id with the transcript filename, so unlike the global
+        execution_anchors merge this attributes touched paths to the exact
+        session. Dialogue untouched; file anchors only.
+        """
+        from agent_handoff.locations import home
+
+        if ".session.execution" not in session_id:
+            return []
+        task_id = session_id.split(".session.execution")[0]
+        state = home() / ".qodersec" / "state"
+        if not state.is_dir():
+            return []
+        out: list[str] = []
+        for path in state.rglob(f"{task_id}.session.execution.json"):
+            if path.name.endswith(".lock"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            touched = data.get("touched_paths") or []
+            if isinstance(touched, list):
+                out.extend(p for p in touched if isinstance(p, str) and p.strip())
+        return out
 
     def _workspace_model_anchor(self, session_id: str, cwd: str) -> str | None:
         """Same-workspace, time-overlapping sibling's runtime-config model.

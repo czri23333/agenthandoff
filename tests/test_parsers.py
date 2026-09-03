@@ -450,3 +450,39 @@ def test_qoderwork_execution_anchors(tmp_path):
     p = QoderworkParser(tmp_path / ".qoderwork")
     anchors = p.execution_anchors(state_dir=tmp_path / ".qodersec" / "state")
     assert anchors == {"src/a.ts": 1, "src/b.ts": 1}
+
+
+def test_ide_task_execution_files_exact(tmp_path, monkeypatch):
+    """task sessions merge only their own execution record's touched paths."""
+    import json as _json
+
+    from agent_handoff.parsers.jsonl_family import QodercnIdeParser
+
+    state = tmp_path / ".qodersec" / "state" / "proj"
+    state.mkdir(parents=True)
+    (state / "task-1.session.execution.json").write_text(
+        _json.dumps({"touched_paths": ["src/own.ts"]}), encoding="utf-8"
+    )
+    (state / "task-9.session.execution.json").write_text(
+        _json.dumps({"touched_paths": ["src/other.ts"]}), encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENTHANDOFF_HOME", str(tmp_path))
+    root = tmp_path / ".qoder-cn" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    (root / "task-1.session.execution.jsonl").write_text(
+        _json.dumps(
+            {
+                "type": "user",
+                "sessionId": "task-1.session.execution",
+                "cwd": "D:/demo",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    p = QodercnIdeParser(tmp_path / ".qoder-cn")
+    assert p._task_execution_files("task-1.session.execution") == ["src/own.ts"]
+    assert p._task_execution_files("task-9.session.execution") == ["src/other.ts"]
+    assert p._task_execution_files("plain-uuid") == []
