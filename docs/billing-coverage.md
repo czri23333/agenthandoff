@@ -25,7 +25,7 @@
 
 ## §1 task-/quest 类会话不可达证明
 
-候选数据源（全部翻过，2026-09-03，共 8 处）：
+候选数据源（全部翻过，2026-09-03，共 9 处）：
 
 1. transcript（`~/.qoder-cn/projects/*/*.jsonl`）：行类型仅
    progress/session_meta/assistant/user；assistant 行如
@@ -46,6 +46,8 @@
    无账单。
 7. `cache/projects/<project>-<hash>/`：空目录（两个任务缓存目录均无文件），
    无账单。
+8. `chatEditingSessions/task-*/state.json` 的 `timeline`：536 个 textEdit
+   文件操作 + 7 个 checkpoint，纯编辑时间线，无模型/消耗键。
 
 结论：task- 类逐消息账单在本机磁盘不可达。UI 以“本存储不记模型”诚实标注。
 
@@ -71,7 +73,7 @@ dsh turn 级 usage chunk 只存在于新 roll；老 turn 只有 text 流。
 
 ## §4 降级验收确认（2026-09-03，用户逐项确认）
 
-1. quest/task 类逐消息 model+tokens：接受降级（7 处数据源穷尽，§1）。
+1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
 2. 桌面端 app 系逐消息 tokens：接受降级（库内无字段，§2 全扫描为证）。
    模型已 171/171（`model_level` 继承）+ `context_fill` 水位 + 跨源跳转。
