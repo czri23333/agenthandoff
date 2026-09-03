@@ -31,7 +31,7 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 |---|---|---|---|---|---|---|
 | `zcode` | SQLite (read-only URI) | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ stable (fixture-proven) |
 | `claude` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `codebuddy` | JSONL dir | ✓ | 25 | 23 ses / 110 msg | ✓ | ✅ stable (fixture-proven) |
+| `codebuddy` | JSONL dir | ✓ | 25 | 23 ses / 250 msg | ✓ | ✅ stable (fixture-proven) |
 | `codebuddy-cn` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ stable (fixture-proven) |

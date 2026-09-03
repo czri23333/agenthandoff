@@ -4,7 +4,7 @@
     "zstandard": true
   },
   "parse": {
-    "file_anchors": 42,
+    "file_anchors": 43,
     "files": 25,
     "messages": 34,
     "nonempty_messages": 34,
