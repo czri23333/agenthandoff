@@ -25,7 +25,7 @@
 
 ## §1 task-/quest 类会话不可达证明
 
-候选数据源（全部翻过，2026-09-03）：
+候选数据源（全部翻过，2026-09-03，共 8 处）：
 
 1. transcript（`~/.qoder-cn/projects/*/*.jsonl`）：行类型仅
    progress/session_meta/assistant/user；assistant 行如
@@ -43,6 +43,8 @@
 5. 运行日志（`Roaming/QoderCN/logs/*/main.log` 200KB）：无模型 id 字符串。
 6. `chatEditingSessions/task-*/contents/`：编辑器文件快照（代码文本），
    非对话非账单。`cache/experts/task-*/`：空 agents/inboxes + metadata.json，
+   无账单。
+7. `cache/projects/<project>-<hash>/`：空目录（两个任务缓存目录均无文件），
    无账单。
 
 结论：task- 类逐消息账单在本机磁盘不可达。UI 以“本存储不记模型”诚实标注。
