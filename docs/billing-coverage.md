@@ -82,6 +82,10 @@ workbuddy 系剩余无 tokens 构成（2026-09-04 实测）：user harness 行
 messageId/conversationRequestId 均为 None，无关联键可追）。
 后者为数据源上限，非解析遗漏。
 
+附：harness 行的 `output-file` 指向 `%TEMP%/codebuddy-<user>/<proj>/<sid>/bg-tasks/*.stdout.log`
+（实测为 cargo/test 等工具输出全文，无模型/消耗键）——可作为工具结果
+溯源（不在账单 scope，记于此防重查）。
+
 ## §4 降级验收确认（2026-09-03，用户逐项确认）
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
