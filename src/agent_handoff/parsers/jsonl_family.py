@@ -623,7 +623,7 @@ class JsonlSessionParser(Parser):
                         messages.append(
                             self.msg(
                                 "assistant",
-                                tool_line,
+                                json.dumps(tb, ensure_ascii=False),
                                 text=tool_line,
                                 at=at,
                                 model=model_tb or runtime_model or None,
