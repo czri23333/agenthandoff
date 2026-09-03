@@ -63,3 +63,12 @@
 
 dsh turn 级 usage chunk 只存在于新 roll；老 turn 只有 text 流。
 已按 turn 合并（usage 有则附，无则空），不向前虚构。
+
+## §4 降级验收确认（2026-09-03，用户逐项确认）
+
+1. quest/task 类逐消息 model+tokens：接受降级（7 处数据源穷尽，§1）。
+   UI 以“本存储不记模型”+ `model_selector` 注记展示。
+2. 桌面端 app 系逐消息 tokens：接受降级（库内无字段，§2 全扫描为证）。
+   模型已 171/171（`model_level` 继承）+ `context_fill` 水位 + 跨源跳转。
+3. workbuddy 系/dsh 老 turn 逐消息 usage：接受现状（会话级配额 + 逐消息模型）。
+   结项。
