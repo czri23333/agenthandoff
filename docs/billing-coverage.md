@@ -12,8 +12,8 @@
 | codex | 2951 | 87% | 86% | 12% | turn_context 模型 + token_count 回填/pending |
 | opencode | 560 | 68% | 68% | 0% | message/modelID + tokens（user 行无） |
 | cherrystudio | 872 | 100% | 20% | 2% | message.model/usage（usage 仅部分行有） |
-| workbuddy | 246 | 89% | 23% | 21% | providerData.model；function_call 行 usage 结算到下一条 assistant |
-| codebuddy | 1245 | 91% | 25% | 13% | 同上 |
+| workbuddy | 246 | 89% | 70% | 21% | providerData.model；function_call 行 usage 累加结算+思考行回填；剩余为 user harness 行与跨文件乱序 |
+| codebuddy | 1245 | 91% | 84% | 13% | 同上 |
 | qoderwake-cn | 51 | 100% | 0% | 3% | 会话级 model_id 继承；库无 usage 表 |
 | dsh | 957 | 48% | 20% | 22% | request/context 模型 + turn usage；老 turn 无 usage chunk |
 | qoderwork-cn | 411 | 99% | 0% | 49% | message.model（qmodel_preview）；transcript 无 usage（7 会话全扫零命中） |
