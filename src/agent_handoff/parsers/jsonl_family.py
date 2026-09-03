@@ -1419,7 +1419,78 @@ class QodercnIdeParser(JsonlSessionParser):
             selector = self._model_selector(session_id)
             if selector:
                 raw.meta.notes = [*raw.meta.notes, f"model_selector:{selector}"]
+            if not raw.meta.model:
+                anchor = self._workspace_model_anchor(session_id, raw.meta.cwd)
+                if anchor:
+                    raw.meta.notes = [*raw.meta.notes, f"workspace_model:{anchor}"]
         return raw
+
+    def _workspace_model_anchor(self, session_id: str, cwd: str) -> str | None:
+        """Same-workspace, time-overlapping sibling's runtime-config model.
+
+        task-/quest-class sessions carry no model of their own, but a uuid
+        sibling in the same cwd whose time range overlaps this session was
+        served under its runtime-config model. INFERENCE, not measurement:
+        recorded as a note (never Message.model), so the cockpit can show
+        it as a hint while the honest-absence rule stays intact.
+        """
+        try:
+            me_paths = self._resolve_group(session_id)
+        except (OSError, ValueError):
+            return None
+        me_times: list[str] = []
+        for path in me_paths:
+            for row in read_jsonl(path):
+                ts = _iso(row.get("timestamp"))
+                if ts:
+                    me_times.append(ts)
+        if not me_times or not cwd:
+            return None
+        me_start, me_end = min(me_times), max(me_times)
+        try:
+            metas = super().list_sessions()
+        except (OSError, ValueError):
+            return None
+        # Compare by the cwd recorded INSIDE the rows (project dir names
+        # differ in case/separators across the family's layouts); the meta
+        # cwd may be a project dir instead of the workdir.
+        me_cwd = cwd.casefold()
+        # Cheap cross-check first: only siblings in the same cwd whose files
+        # we already indexed are candidates; skip a full re-scan otherwise.
+        index = getattr(self, "_index", None) or {}
+        for m in metas:
+            if m.session_id == session_id:
+                continue
+            if m.session_id not in index:
+                continue
+            try:
+                sib_paths = self._resolve_group(m.session_id)
+            except (OSError, ValueError):
+                continue
+            sib_model: str | None = None
+            sib_times: list[str] = []
+            sib_cwds: set[str] = set()
+            for path in sib_paths:
+                for row in read_jsonl(path):
+                    if row.get("type") == "runtime-config" and isinstance(row.get("model"), str):
+                        sib_model = row["model"]
+                    ts = _iso(row.get("timestamp"))
+                    if ts:
+                        sib_times.append(ts)
+                    c = row.get("cwd")
+                    if isinstance(c, str) and c:
+                        sib_cwds.add(c.casefold())
+                    if sib_model and len(sib_times) > 4000:
+                        break
+                if sib_model and sib_times:
+                    break
+            if not sib_model or not sib_times:
+                continue
+            if me_cwd not in sib_cwds:
+                continue
+            if max(min(sib_times), me_start) <= min(max(sib_times), me_end):
+                return f"{sib_model}（同工作区同时段会话 {m.session_id[:8]}…，推断仅供参考）"
+        return None
 
     def _model_selector(self, session_id: str) -> str | None:
         """The IDE's per-session model routing record.
