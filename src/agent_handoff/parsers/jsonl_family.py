@@ -448,6 +448,10 @@ class JsonlSessionParser(Parser):
         # function_call rows, which never become Messages): settled onto the
         # next assistant turn, same as the codex token_count flow.
         pending_billing: dict = {}
+        # Exact attribution: usage rows and message rows share
+        # providerData.conversationRequestId — key billing by it so out-of-order
+        # files can't misattribute one request's spend to another.
+        billing_by_req: dict[str, dict] = {}
         # Session-serving model from runtime-config rows (IDE family); turns
         # without their own billing inherit it.
         runtime_model: str = ""
@@ -519,6 +523,17 @@ class JsonlSessionParser(Parser):
                             if isinstance(v, int):
                                 acc[k] = acc.get(k, 0) + v
                         pending_billing["pending"] = acc
+                        # Exact key when present: providerData.conversationRequestId
+                        # is shared by the usage row and its request's turns.
+                        pd = row.get("providerData")
+                        req = pd.get("conversationRequestId") if isinstance(pd, dict) else None
+                        if isinstance(req, str) and req:
+                            prev = billing_by_req.get(req) or {}
+                            for k in ("in", "out", "reasoning", "cache_read"):
+                                v = _t.get(k)
+                                if isinstance(v, int):
+                                    prev[k] = prev.get(k, 0) + v
+                            billing_by_req[req] = prev
                     continue
                 if rtype == "function_call_result":
                     name = str(row.get("name") or "")
@@ -582,7 +597,11 @@ class JsonlSessionParser(Parser):
                     if not model:
                         model = runtime_model
                     if role == "assistant" and tokens.get("in") is None and tokens.get("out") is None:
-                        pend = pending_billing.get("pending")
+                        # Exact first: same conversationRequestId as a usage row.
+                        pd = row.get("providerData")
+                        req = pd.get("conversationRequestId") if isinstance(pd, dict) else None
+                        exact = billing_by_req.get(req) if isinstance(req, str) else None
+                        pend = exact or pending_billing.get("pending")
                         if pend:
                             # The usage row bills the whole request: the text
                             # turn takes it, and so do the run-up thinking
@@ -598,7 +617,8 @@ class JsonlSessionParser(Parser):
                                         m.tokens_reasoning = pend.get("reasoning")
                                 elif m.text and not m.text.startswith("[思考]"):
                                     break
-                            pending_billing.pop("pending", None)
+                            if not exact:
+                                pending_billing.pop("pending", None)
                     messages.append(
                         self.msg(
                             role,
