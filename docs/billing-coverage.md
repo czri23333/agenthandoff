@@ -32,7 +32,10 @@
    `{"type":"assistant","message":{"role","content":[{"thinking","type"}]}}`——
    无 model/usage 键（全库正则扫描零命中）。
 2. quest 快照（`state.vscdb` 的 `aicoding.questTaskListSnapshot`）：任务有
-   `runtime` 键但全为 null（5 活跃 + 1 归档任务逐项检查）。
+   `runtime` 键但全为 null（5 活跃 + 1 归档任务逐项检查）；任务对象
+   根本无 `model` 键（NOKEY），`executionRequestId` 全空——无关联键可追。
+   顶层键枚举：assistant 行仅 cwd/message/sessionId/timestamp/type/uuid，
+   message 内仅 role/content（thinking/tool_use/text 三型）。
 3. `state.vscdb` 其余 382 键：`aicoding-chat-*.state.hidden` 仅视图标记
    （`{id,isHidden}`），无账单。
 4. `.qoder-cn/.models/<uuid>/catalog-v5/v6`：加密二进制（VISX 头），内容不透明；
