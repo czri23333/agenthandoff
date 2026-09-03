@@ -43,6 +43,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const [searchError, setSearchError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [bundleStale, setBundleStale] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     // Refresh-safe: domain fold state survives a reload within the tab.
     try {
@@ -120,9 +121,32 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     load();
     const poll = setInterval(() => pollDelta(), POLL_MS);
     const clock = setInterval(() => tick((n) => n + 1), 1000);
+    // Stale-bundle guard: a tab left open across a server upgrade keeps
+    // rendering (and requesting) with the old JS. When index.html points at
+    // a different entry chunk, tell the user a reload picks it up instead of
+    // silently showing yesterday's UI against today's API.
+    let stopped = false;
+    const guard = setInterval(async () => {
+      try {
+        const r = await fetch("/", { cache: "no-store" });
+        const html = await r.text();
+        const m = html.match(/\/assets\/(index-[^"]+\.js)/);
+        const current = m?.[1] ?? "";
+        const boot = (window as unknown as { __ahEntry?: string }).__ahEntry ?? "";
+        if (!boot && current) {
+          (window as unknown as { __ahEntry?: string }).__ahEntry = current;
+        } else if (boot && current && boot !== current && !stopped) {
+          stopped = true;
+          setBundleStale(true);
+        }
+      } catch {
+        /* offline/transient: next tick retries */
+      }
+    }, POLL_MS * 4);
     return () => {
       clearInterval(poll);
       clearInterval(clock);
+      clearInterval(guard);
     };
   }, [load, pollDelta]);
 
@@ -262,6 +286,14 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
 
   return (
     <div className="flex h-full flex-col">
+      {bundleStale && (
+        <button
+          onClick={() => location.reload()}
+          className="ah-warn w-full py-1.5 text-center font-mono text-[12px]"
+        >
+          {t("bundleStale")}
+        </button>
+      )}
       <div className="ah-bar ah-toolbar px-4 py-2.5">
         <Segmented
           size="small"
