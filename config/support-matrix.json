@@ -154,7 +154,7 @@
       "reader": true,
       "fixtures": 4,
       "fixture_sessions": 3,
-      "fixture_messages": 7,
+      "fixture_messages": 52,
       "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,

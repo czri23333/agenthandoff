@@ -251,7 +251,7 @@ class JsonlSessionParser(Parser):
                 ai_title = ai_title or str(r["aiTitle"])[:80]
             if r.get("type") == "summary" and r.get("summary"):
                 title = title or str(r["summary"])[:80]
-            role, text, _tools = self._row_content(r)
+            role, text, _raw, _tools = self._row_content(r)
             if role == "user" and text and not self.is_noise(text):
                 started = _iso(r.get("timestamp")) or started
                 if not title:
@@ -339,7 +339,7 @@ class JsonlSessionParser(Parser):
         head = self._group_files(paths, session_id)[0]
         rows = _tail_rows(head, max_bytes=16384)
         for r in reversed(rows):
-            role, text, _tools = self._row_content(r)
+            role, text, _raw, _tools = self._row_content(r)
             if role in ("user", "assistant") and text and not self.is_noise(text):
                 return role == "user"
         return None
@@ -370,16 +370,16 @@ class JsonlSessionParser(Parser):
 
     # -- extraction ---------------------------------------------------------
 
-    def _row_content(self, row: dict) -> tuple[str, str, list[dict]]:
-        """Return (role, plain_text, tool_blocks) for one JSONL row."""
+    def _row_content(self, row: dict) -> tuple[str, str, str, list[dict]]:
+        """Return (role, plain_text, raw_text, tool_blocks) for one JSONL row."""
         rtype = row.get("type")
         if rtype not in (None, "message", "user", "assistant"):
-            return "", "", []
+            return "", "", "", []
         inner = row.get("message") if isinstance(row.get("message"), dict) else {}
         role = row.get("role") or inner.get("role") or ""
         content = row.get("content") if row.get("content") is not None else inner.get("content")
         text, tools = as_text_blocks(content)
-        return role, self.clean_text(text), tools
+        return role, self.clean_text(text), text, tools
 
     @staticmethod
     def _row_billing(row: dict) -> tuple[str, dict]:
@@ -474,12 +474,13 @@ class JsonlSessionParser(Parser):
                 if rtype == "reasoning":
                     # The model's own thinking. rawContent carries the text;
                     # content is usually empty.
-                    rtext = self._reasoning_text(row)
+                    rtext, rraw = self._reasoning_text(row)
                     if rtext:
                         model = self._row_billing(row)[0]
                         messages.append(
-                            Message(
-                                role="assistant",
+                            self.msg(
+                                "assistant",
+                                f"[思考] {rraw}",
                                 text=f"[思考] {rtext}",
                                 at=at,
                                 model=model or None,
@@ -512,10 +513,12 @@ class JsonlSessionParser(Parser):
                             otext = out[:300]
                         if status and status != "completed":
                             tool_failures.append(f"{name}:{status}")
+                            disp = f"[工具{name} {status}] {self.clean_text(otext)[:300]}"
                             messages.append(
-                                Message(
-                                    role="assistant",
-                                    text=f"[工具{name} {status}] {self.clean_text(otext)[:300]}",
+                                self.msg(
+                                    "assistant",
+                                    f"[工具{name} {status}] {otext}",
+                                    text=disp,
                                     at=at,
                                     subagent=sub_label,
                                 )
@@ -526,7 +529,7 @@ class JsonlSessionParser(Parser):
                         files[fp] += 1
                     continue
 
-                role, text, tool_blocks = self._row_content(row)
+                role, text, raw_text, tool_blocks = self._row_content(row)
                 if not role:
                     continue
                 for tb in tool_blocks:
@@ -555,8 +558,9 @@ class JsonlSessionParser(Parser):
                         title = text[:80]
                     model, tokens = self._row_billing(row)
                     messages.append(
-                        Message(
-                            role=role,
+                        self.msg(
+                            role,
+                            raw_text,
                             text=text,
                             at=at,
                             model=model or None,
@@ -610,8 +614,12 @@ class JsonlSessionParser(Parser):
                 errors.append(msg[:160])
 
     @staticmethod
-    def _reasoning_text(row: dict) -> str:
-        """The model's thinking: rawContent[].text (content is usually empty)."""
+    def _reasoning_text(row: dict) -> tuple[str, str]:
+        """The model's thinking: rawContent[].text (content is usually empty).
+
+        Returns (cleaned, raw): the 2000-char cap and cleaning apply to the
+        display form only; the raw form stays whole for the 原文 view.
+        """
         for key in ("rawContent", "content"):
             blocks = row.get(key) or []
             if not isinstance(blocks, list):
@@ -621,10 +629,10 @@ class JsonlSessionParser(Parser):
                 for b in blocks
                 if isinstance(b, dict) and b.get("type") in ("reasoning_text", "text")
             ]
-            text = "\n".join(p for p in parts if p).strip()
-            if text:
-                return text[:2000]
-        return ""
+            raw = "\n".join(p for p in parts if p).strip()
+            if raw:
+                return raw[:2000], raw
+        return "", ""
 
     @staticmethod
     def _tool_args(row: dict) -> dict:
@@ -811,7 +819,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                     ai_title = ai_title or str(r["aiTitle"])[:80]
                 if r.get("type") == "summary" and r.get("summary"):
                     title = title or str(r["summary"])[:80]
-                role, text, _tools = self._row_content(r)
+                role, text, _raw, _tools = self._row_content(r)
                 if role == "user" and text and not self.is_noise(text):
                     if not title:
                         if text.startswith("<conversation_history_summary"):
@@ -1269,7 +1277,7 @@ class QodercnIdeParser(JsonlSessionParser):
         """The single user message of an add_user_message fragment file."""
         for path in self._resolve_group(session_id):
             for r in read_jsonl(path, limit=8):
-                role, text, _tools = self._row_content(r)
+                role, text, _raw, _tools = self._row_content(r)
                 if role == "user" and text:
                     return text.strip()
         return ""
@@ -1317,7 +1325,7 @@ class QodercnIdeParser(JsonlSessionParser):
                 for row in read_jsonl(path):
                     if row.get("type") != "user":
                         continue
-                    role, text, _tools = self._row_content(row)
+                    role, text, _raw, _tools = self._row_content(row)
                     if role == "user" and text and text.strip() in wanted:
                         wanted.discard(text.strip())
                         if not wanted:

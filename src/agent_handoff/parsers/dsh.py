@@ -179,6 +179,10 @@ class DshParser(Parser):
         req_model: str | None = None
         context_window: int | None = None
         turn_end: dict | None = None
+        turns_text: dict = {}
+        turns_usage: dict = {}
+        turns_reason: dict = {}
+        turns_seen_index: dict = {}
 
         for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -198,15 +202,14 @@ class DshParser(Parser):
             elif t == "session/title":
                 title = (row.get("data") or {}).get("title") or title
             elif t == "user/message":
-                text = self.clean_text(
-                    "\n".join(
-                        b.get("text") or ""
-                        for b in (row.get("data") or {}).get("content") or []
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    )
+                praw = "\n".join(
+                    b.get("text") or ""
+                    for b in (row.get("data") or {}).get("content") or []
+                    if isinstance(b, dict) and b.get("type") == "text"
                 )
+                text = self.clean_text(praw)
                 if text and not self.is_noise(text):
-                    messages.append(Message(role="user", text=text, at=ts_to_iso(row.get("time"))))
+                    messages.append(self.msg("user", praw, text=text, at=ts_to_iso(row.get("time"))))
             elif t == "subagent/descriptor":
                 data = row.get("data") or {}
                 agent_label = str(data.get("label") or "") or agent_label
@@ -225,13 +228,75 @@ class DshParser(Parser):
             elif t == "turn/end":
                 turn_end = row.get("data") or turn_end
             elif t == "assistant/chunk":
-                chunk = ((row.get("data") or {}).get("chunk")) or {}
-                if chunk.get("type") == "text":
-                    text = self.clean_text(chunk.get("text") or chunk.get("delta") or "")
+                data = row.get("data") or {}
+                chunk = data.get("chunk") or {}
+                turn = data.get("turn")
+                ctype = chunk.get("type")
+                if ctype == "usage":
+                    u = chunk.get("usage") or {}
+                    turns_usage[turn] = u
+                elif ctype in ("text", "text-delta"):
+                    praw = chunk.get("text") or chunk.get("delta") or ""
+                    text = self.clean_text(praw)
                     if text:
-                        messages.append(
-                            Message(role="assistant", text=text, at=ts_to_iso(row.get("time")))
-                        )
+                        turns_text.setdefault(turn, []).append((ts_to_iso(row.get("time")), text, praw))
+                        turns_seen_index[turn, chunk.get("index")] = True
+                elif ctype == "reasoning-delta":
+                    praw = chunk.get("text") or ""
+                    text = self.clean_text(praw)
+                    if text:
+                        turns_reason.setdefault(turn, []).append((text, praw))
+                elif ctype == "block-end":
+                    block = chunk.get("block") or {}
+                    btype = block.get("type")
+                    if btype == "text" and not turns_seen_index.get((turn, chunk.get("index"))):
+                        praw = block.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_text.setdefault(turn, []).append((ts_to_iso(row.get("time")), text, praw))
+                    elif btype == "reasoning" and not turns_seen_index.get((turn, chunk.get("index"))):
+                        praw = block.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_reason.setdefault(turn, []).append((text, praw))
+
+        # One assistant turn = one message: the product streams a reply as
+        # many text chunks plus a usage chunk keyed by the same turn number.
+        # Merging both fixes chunk fragmentation AND attributes per-message
+        # billing (input/output/reasoning) plus the request model. Reasoning
+        # deltas ride along as [思考] turns, the same convention as the
+        # CherryStudio parser.
+        for turn in sorted(set(list(turns_text) + list(turns_reason)), key=lambda k: (k is None, k)):
+            parts = turns_text.get(turn, [])
+            at = next((a for a, _, _ in parts if a), None)
+            u = turns_usage.get(turn) or {}
+            msg_in = u.get("inputTokens")
+            msg_out = u.get("outputTokens")
+            msg_reason = u.get("reasoningTokens")
+            model = req_model or agent_model or None
+            if parts:
+                messages.append(
+                    self.msg(
+                        "assistant",
+                        "\n".join(r for _, _, r in parts),
+                        text="\n".join(t for _, t, _ in parts),
+                        at=at,
+                        model=model,
+                        tokens_in=msg_in if isinstance(msg_in, int) else None,
+                        tokens_out=msg_out if isinstance(msg_out, int) else None,
+                        tokens_reasoning=msg_reason if isinstance(msg_reason, int) else None,
+                    )
+                )
+            reason_pairs = turns_reason.get(turn, [])
+            reason_text = "".join(t for t, _ in reason_pairs).strip()
+            if reason_text:
+                messages.append(
+                    self.msg(
+                        "assistant",
+                        f"[思考] {''.join(r for _, r in reason_pairs).strip()}",
+                        text=f"[思考] {reason_text}", at=at, model=model,
+                    )
+                )
 
         meta = SessionMeta(
             cli=self.cli,

@@ -270,7 +270,10 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
     stream: list[dict] = [
         {
             "role": m.role,
-            "text": m.text[:2000],
+            # Verbatim: the cockpit must show exactly what the store holds.
+            # Truncation is a display decision and belongs to the frontend
+            # (TranscriptRow expands to the full text on click).
+            "text": m.text,
             "at": m.at,
             # per-turn billing: which model answered, what it cost in tokens
             **({"model": m.model} if m.model else {}),
@@ -278,6 +281,9 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
             **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
             **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
             **({"subagent": m.subagent} if m.subagent else {}),
+            # Verbatim source beside the cleaned text (None = cleaning
+            # changed nothing); the cockpit offers a 原文 view off this.
+            **({"raw_text": m.raw_text} if m.raw_text else {}),
         }
         for m in raw.messages
     ]
@@ -292,7 +298,10 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         for n, c in enumerate(raw.compactions, 1)
     ]
     if markers:
-        stream = sorted(stream + markers, key=lambda x: x["at"] or "")[-400:]
+        # Verbatim like the turns: a 1000-turn session must read as 1000
+        # turns, not the last 400. Paging/virtualization is the frontend's
+        # job; the API must not silently drop history.
+        stream = sorted(stream + markers, key=lambda x: x["at"] or "")
 
     # The same measurement `handoff watch` ladder-steps, read-only: the UI must
     # not show a fuller or emptier session than the snapshots claim.

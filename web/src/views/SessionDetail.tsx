@@ -38,10 +38,12 @@ function graphemeSlice(text: string, maxGraphemes: number): string {
   return [...text].slice(0, maxGraphemes).join("");
 }
 
-function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: string; assistant: string; expand: string; collapse: string } }) {
+function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: string; assistant: string; expand: string; collapse: string; raw: string; clean: string } }) {
   const [open, setOpen] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const long = m.text.length > 500;
   const who = m.role === "user" ? labels.user : labels.assistant;
+  const shown = showRaw && m.raw_text ? m.raw_text : m.text;
   return (
     <div
       className="ah-inset cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] leading-[1.65]"
@@ -76,18 +78,30 @@ function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: st
           )}
         </span>
       )}
+      {m.raw_text && (
+        <button
+          className="ah-faint mr-1.5 font-mono text-[11px]"
+          title={showRaw ? labels.clean : labels.raw}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowRaw(!showRaw);
+          }}
+        >
+          {showRaw ? labels.clean : labels.raw}
+        </button>
+      )}
       {m.role === "assistant" && (open || !long) ? (
         <div dir="auto" className="tx-user min-w-0 break-words text-[var(--ah-text-1)]">
-          <Markdown text={m.text} />
+          <Markdown text={showRaw && m.raw_text ? m.raw_text : m.text} />
         </div>
       ) : (
         <span dir="auto" className="tx-user whitespace-pre-wrap break-words text-[var(--ah-text-1)]">
-          {open || !long ? m.text : `${graphemeSlice(m.text, 500)}…`}
+          {open || !long ? shown : `${graphemeSlice(shown, 500)}…`}
         </span>
       )}
       {long && (
         <span className="ah-accent ml-1.5 select-none text-[12px]">
-          {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${m.text.length})`}
+          {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${shown.length})`}
         </span>
       )}
     </div>
@@ -388,6 +402,8 @@ export default function SessionDetail({
                             assistant: t("assistant"),
                             expand: t("expand"),
                             collapse: t("collapse"),
+                            raw: t("viewRaw"),
+                            clean: t("viewClean"),
                           }}
                         />
                       </li>

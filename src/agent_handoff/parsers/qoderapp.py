@@ -153,6 +153,11 @@ class _QoderAppSharedMixin:
             updated_at=ts_to_iso(_epoch(chat["updated_at"])),
             source_path=str(self.db_path),
         )
+        # The store records no model or usage: Message.model/tokens stay
+        # empty (honest absence). messages[].metadata.sessionId links the
+        # desktop Task chat to the CLI JSONL session of the same work —
+        # surfaced as a note so the cockpit can cross-link the two faces.
+        linked: list[str] = []
         messages: list[Message] = []
         files: Counter[str] = Counter()
         tools: Counter[str] = Counter()
@@ -164,6 +169,9 @@ class _QoderAppSharedMixin:
                 meta_json = json.loads(row["metadata"] or "{}")
             except ValueError:
                 meta_json = {}
+            link = meta_json.get("sessionId")
+            if isinstance(link, str) and link and link not in linked:
+                linked.append(link)
             at = ts_to_iso(_epoch(row["created_at"]))
             try:
                 parts = json.loads(row["parts"] or "[]")
@@ -172,32 +180,40 @@ class _QoderAppSharedMixin:
             if not isinstance(parts, list):
                 parts = []
             if not parts and row["searchable_text"]:
-                text = self.clean_text(row["searchable_text"])
+                praw = row["searchable_text"]
+                text = self.clean_text(praw)
                 if text and not self.is_noise(text):
-                    messages.append(Message(role=role, text=text, at=at))
+                    messages.append(self.msg(role, praw, text=text, at=at))
                 continue
             for part in parts:
                 if not isinstance(part, dict):
                     continue
                 ptype = str(part.get("type") or "")
                 if ptype == "text":
-                    text = self.clean_text(str(part.get("text") or ""))
+                    praw = str(part.get("text") or "")
+                    text = self.clean_text(praw)
                     if text and not self.is_noise(text):
-                        messages.append(Message(role=role, text=text, at=at))
+                        messages.append(self.msg(role, praw, text=text, at=at))
                 elif ptype.startswith("tool-"):
                     name = str(part.get("toolName") or ptype[5:] or "tool")
                     if name == "Thinking":
-                        text = self.clean_text(str((part.get("input") or {}).get("text") or ""))
+                        praw = str((part.get("input") or {}).get("text") or "")
+                        text = self.clean_text(praw)
                         if text and not self.is_noise(text):
-                            messages.append(Message(role="assistant", text=f"[思考] {text}", at=at))
+                            messages.append(self.msg("assistant", f"[思考] {praw}",
+                                                     text=f"[思考] {text}", at=at))
                     else:
                         tools[name] += 1
                         for p in self.extract_paths(part.get("input") or {}):
                             files[p] += 1
                 elif ptype == "error":
-                    text = self.clean_text(str(part.get("text") or ""))
+                    praw = str(part.get("text") or "")
+                    text = self.clean_text(praw)
                     if text:
-                        messages.append(Message(role="assistant", text=f"[工具error] {text[:500]}", at=at))
+                        messages.append(self.msg("assistant", f"[工具error] {praw}",
+                                                 text=f"[工具error] {text[:500]}", at=at))
+        if linked:
+            meta.notes = [*meta.notes, f"linked_cli_sessions:{','.join(linked[:8])}"]
         return self.build_raw(meta, messages, [], files, tools)
 
 

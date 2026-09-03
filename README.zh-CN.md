@@ -37,7 +37,7 @@
 | `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qwenwork` | JSONL 目录 | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 7 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 52 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ 仅形态（源存档无对话内容） |
 | `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `opencode` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |

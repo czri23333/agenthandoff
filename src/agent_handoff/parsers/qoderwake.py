@@ -189,6 +189,11 @@ class QoderwakeParser(Parser):
             notes=([f"team: {group_id}"] if group_id else []),
         )
 
+        # The store records the model per conversation, not per message or
+        # with usage: every turn inherits the conversation model, tokens stay
+        # empty (honest absence, not a parse miss).
+        convo_model = str(model_id) if model_id else None
+
         messages: list[Message] = []
         for sender_type, _kind, pj, created_at in mrows:
             role = _ROLE.get(str(sender_type))
@@ -199,11 +204,12 @@ class QoderwakeParser(Parser):
             except (ValueError, TypeError):
                 continue
             body = p.get("body")
-            text = body.get("text") if isinstance(body, dict) else body
-            text = self.clean_text(str(text or ""))
+            btext = body.get("text") if isinstance(body, dict) else body
+            praw = str(btext or "")
+            text = self.clean_text(praw)
             if not text or self.is_noise(text):
                 continue
-            messages.append(Message(role=role, text=text, at=_norm_ts(created_at)))
+            messages.append(self.msg(role, praw, text=text, at=_norm_ts(created_at), model=convo_model))
 
         return self.build_raw(meta, messages, [], Counter(), Counter())
 

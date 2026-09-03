@@ -54,7 +54,7 @@ class ZcodeParser(Parser):
         out: list[SessionMeta] = []
         with self._connect() as con:
             rows = con.execute(
-                "SELECT id, title, directory, time_created, time_updated, "
+                "SELECT id, title, directory, time_created, time_updated, parent_id, "
                 "task_type, title_source, permission "
                 "FROM session ORDER BY time_updated DESC"
             ).fetchall()
@@ -68,6 +68,7 @@ class ZcodeParser(Parser):
                     started_at=ts_to_iso(r["time_created"]),
                     updated_at=ts_to_iso(r["time_updated"]),
                     source_path=str(self.db_path),
+                    parent_session_id=r["parent_id"] or None,
                     task_type=r["task_type"] or None,
                     title_source=r["title_source"] or None,
                     permission=_permission_mode(r["permission"]),
@@ -152,12 +153,15 @@ class ZcodeParser(Parser):
                     continue
 
                 texts: list[str] = []
+                raws: list[str] = []
                 for pdata in parts_by_msg.get(m["id"], []):
                     ptype = pdata.get("type")
                     if ptype == "text":
-                        t = self.clean_text(pdata.get("text") or "")
+                        praw = pdata.get("text") or ""
+                        t = self.clean_text(praw)
                         if t and not self.is_noise(t):
                             texts.append(t)
+                            raws.append(praw)
                     elif ptype == "compaction":
                         if pdata.get("timelineStatus") not in (None, "completed"):
                             continue  # failed/aborted attempts are noise
@@ -211,13 +215,26 @@ class ZcodeParser(Parser):
                 if role == "assistant" and mdata.get("modelID"):
                     model = mdata["modelID"]
                 tok = mdata.get("tokens")
+                msg_in = msg_out = msg_reason = None
                 if isinstance(tok, dict):
                     tokens_in += int(tok.get("input") or tok.get("inputTokens") or 0)
                     tokens_out += int(tok.get("output") or tok.get("outputTokens") or 0)
+                    msg_in = tok.get("input") or tok.get("inputTokens") or None
+                    msg_out = tok.get("output") or tok.get("outputTokens") or None
+                    msg_reason = tok.get("reasoning") or tok.get("reasoningTokens") or None
 
                 if texts:
                     messages.append(
-                        Message(role=role, text="\n".join(texts), at=ts_to_iso(m["time_created"]))
+                        self.msg(
+                            role,
+                            "\n".join(raws),
+                            text="\n".join(texts),
+                            at=ts_to_iso(m["time_created"]),
+                            model=mdata.get("modelID") or None,
+                            tokens_in=msg_in,
+                            tokens_out=msg_out,
+                            tokens_reasoning=msg_reason,
+                        )
                     )
 
             todos = [

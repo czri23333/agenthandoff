@@ -102,6 +102,11 @@ class Message:
     # None for the main conversation. Lets the UI nest sub-agent work under the
     # parent session instead of interleaving it flat.
     subagent: str | None = None
+    # The turn exactly as the store holds it, before clean_text/is_noise
+    # trimming. None means the parser kept everything (nothing was trimmed)
+    # or the dialect has no trimmable wrappers — either way text IS verbatim.
+    # Lets the cockpit offer a 原文 view without re-reading the store.
+    raw_text: str | None = None
 
 
 @dataclass

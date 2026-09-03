@@ -59,6 +59,8 @@ export interface TranscriptMessage {
   tokens_reasoning?: number;
   /** Sub-agent that produced this turn (absent = main conversation). */
   subagent?: string;
+  /** Verbatim source before cleaning (absent = cleaning changed nothing). */
+  raw_text?: string;
 }
 
 export interface StoreInfo {

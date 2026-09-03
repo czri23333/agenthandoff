@@ -202,6 +202,18 @@ class Parser(ABC):
             text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", text, flags=re.S)
         return text.strip()
 
+    def msg(self, role: str, raw: str, **kw) -> Message:
+        """Build a turn keeping the verbatim source beside the cleaned text.
+
+        ``raw`` is the turn exactly as the store holds it; ``text`` (in kw)
+        is the cleaned display form. When cleaning changed nothing, raw_text
+        stays None — text IS verbatim. Callers that synthesize prefixes
+        ([思考]/[工具]) pass the assembled string as both.
+        """
+        text = kw.get("text", "")
+        kw["raw_text"] = raw if raw != text else None
+        return Message(role=role, **kw)
+
     @staticmethod
     def build_raw(
         meta: SessionMeta,

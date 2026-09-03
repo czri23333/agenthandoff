@@ -39,7 +39,7 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 7 msg | ✓ | ✅ stable (fixture-proven) |
+| `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 52 msg | ✓ | ✅ stable (fixture-proven) |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |
 | `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ stable (fixture-proven) |
 | `opencode` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |

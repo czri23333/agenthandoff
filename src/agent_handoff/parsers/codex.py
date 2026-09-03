@@ -255,6 +255,7 @@ class CodexParser(Parser):
         requests = 0
         saw_completion = False
         model: str | None = None
+        pending_tokens: dict = {}
         # Non-null only: the store's own quota truth, collaboration state and
         # the permissions the run was fenced with.
         rate_limits: dict | None = None
@@ -267,13 +268,16 @@ class CodexParser(Parser):
             ptype = str(payload.get("type") or "")
             when = ts_to_iso(row.get("timestamp"))
 
-            def push(role: str, text: str, at: str | None) -> None:
+            def push(role: str, text: str, at: str | None, raw: str | None = None) -> None:
                 """Append, dropping the duplicate an event stream always has.
 
                 Codex writes an assistant turn twice — once as ``response_item``
                 (the API-visible message) and once as ``event_msg`` (the UI
                 notification). Taking both doubles every reply, which quietly
                 doubles the weight of assistant prose in any downstream summary.
+                A pending per-request billing (from the preceding token_count
+                event) settles onto the next assistant turn; the product emits
+                usage after the request it measures.
                 """
                 if not text:
                     return
@@ -281,7 +285,16 @@ class CodexParser(Parser):
                 same = bool(last) and last.role == "assistant" and last.text.strip() == text.strip()
                 if role == "assistant" and same:
                     return
-                messages.append(Message(role=role, text=text, at=at))
+                msg = self.msg(role, raw if raw is not None else text, text=text, at=at)
+                if role == "assistant":
+                    if model:
+                        msg.model = model
+                    pending = pending_tokens.get("pending")
+                    if pending:
+                        msg.tokens_in = pending.get("in")
+                        msg.tokens_out = pending.get("out")
+                        pending_tokens.pop("pending", None)
+                messages.append(msg)
 
             if rtype == "event_msg":
                 if ptype == "task_started":
@@ -304,6 +317,26 @@ class CodexParser(Parser):
                     recent = info.get("last_token_usage")
                     if isinstance(recent, dict):
                         last_tokens.update({k: v for k, v in recent.items() if isinstance(v, int)})
+                        bill = {
+                            "in": recent.get("input_tokens"),
+                            "out": recent.get("output_tokens"),
+                        }
+                        if isinstance(bill["in"], int) or isinstance(bill["out"], int):
+                            # Settle onto the latest assistant turn that still
+                            # has no billing; otherwise the next one takes it.
+                            settled = False
+                            for m in reversed(messages):
+                                if m.role == "assistant" and m.tokens_in is None and m.tokens_out is None:
+                                    m.tokens_in = bill["in"] if isinstance(bill["in"], int) else None
+                                    m.tokens_out = bill["out"] if isinstance(bill["out"], int) else None
+                                    if model and not m.model:
+                                        m.model = model
+                                    settled = True
+                                    break
+                                if m.role == "assistant":
+                                    break
+                            if not settled:
+                                pending_tokens["pending"] = bill
                     cumulative = info.get("total_token_usage")
                     if isinstance(cumulative, dict):
                         total_tokens.update(
@@ -349,13 +382,14 @@ class CodexParser(Parser):
                 if role not in ("user", "assistant"):
                     continue  # developer/system rows are harness injections
                 text, tool_blocks = as_text_blocks(payload.get("content"))
+                raw = text
                 text = self.clean_text(text)
                 if text.startswith(_INJECTED_PREFIXES):
                     for instruction in _instruction_paths(text):
                         files[instruction] += 1
                     continue
                 if text and not self.is_noise(text):
-                    push(str(role), text, when)
+                    push(str(role), text, when, raw)
                 for tb in tool_blocks:
                     name = str(tb.get("name") or "tool")
                     tools[name] += 1

@@ -218,12 +218,15 @@ class OpenCodeParser(Parser):
                 updated_ms = time_created
 
             texts: list[str] = []
+            raws: list[str] = []
             for p in parts_by_msg.get(str(mid), []):
                 ptype = p.get("type")
                 if ptype == "text":
-                    t = self.clean_text(p.get("text") or "")
+                    praw = p.get("text") or ""
+                    t = self.clean_text(praw)
                     if t and not self.is_noise(t):
                         texts.append(t)
+                        raws.append(praw)
                 elif ptype == "tool":
                     name = str(p.get("tool") or "tool")
                     tools[name] = tools.get(name, 0) + 1
@@ -238,8 +241,9 @@ class OpenCodeParser(Parser):
             tokens = d.get("tokens") if isinstance(d.get("tokens"), dict) else {}
             model = d.get("modelID") or ""
             messages.append(
-                Message(
-                    role=str(role),
+                self.msg(
+                    str(role),
+                    "\n".join(raws),
                     text=text,
                     at=when,
                     model=str(model) if model and role == "assistant" else None,

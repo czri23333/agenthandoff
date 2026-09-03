@@ -173,18 +173,20 @@ class CherryStudioParser(Parser):
                     continue
                 btype = block.get("type")
                 if btype == "thinking":
-                    text = self.clean_text(_text(block.get("content")))
+                    praw = _text(block.get("content"))
+                    text = self.clean_text(praw)
                     if text and not self.is_noise(text):
                         messages.append(
-                            Message(role="assistant", text=f"[思考] {text}", at=at,
-                                    model=model_name or None)
+                            self.msg("assistant", f"[思考] {praw}", text=f"[思考] {text}", at=at,
+                                     model=model_name or None)
                         )
                 elif btype == "main_text":
-                    text = self.clean_text(_text(block.get("content")))
+                    praw = _text(block.get("content"))
+                    text = self.clean_text(praw)
                     if text and not self.is_noise(text):
                         messages.append(
-                            Message(
-                                role=role, text=text, at=at, model=model_name or None,
+                            self.msg(
+                                role, praw, text=text, at=at, model=model_name or None,
                                 tokens_in=usage.get("prompt_tokens"),
                                 tokens_out=usage.get("completion_tokens"),
                             )
@@ -193,8 +195,10 @@ class CherryStudioParser(Parser):
                     tools["tool"] += 1
                     for p in self.extract_paths(block.get("metadata") or {}):
                         files[p] += 1
-                    text = self.clean_text(_text(block.get("content"))[:500])
+                    praw = _text(block.get("content"))[:500]
+                    text = self.clean_text(praw)
                     if text and not self.is_noise(text):
-                        messages.append(Message(role="assistant", text=f"[工具] {text}", at=at,
-                                                model=model_name or None))
+                        messages.append(self.msg("assistant", f"[工具] {praw}",
+                                                 text=f"[工具] {text}", at=at,
+                                                 model=model_name or None))
         return self.build_raw(meta, messages, [], files, tools)

@@ -109,9 +109,10 @@ class KimiParser(Parser):
                 if role not in ("user", "assistant"):
                     continue
                 text, tool_blocks = as_text_blocks(inner.get("content"))
+                raw = text
                 text = self.clean_text(text)
                 if text and not self.is_noise(text):
-                    messages.append(Message(role=role, text=text))
+                    messages.append(self.msg(role, raw, text=text))
                 for tb in tool_blocks:
                     name = str(tb.get("name") or tb.get("tool") or "tool")
                     tools[name] = tools.get(name, 0) + 1
