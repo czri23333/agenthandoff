@@ -1380,7 +1380,43 @@ class QodercnIdeParser(JsonlSessionParser):
                 for pth, n in tele.items():
                     raw.files_touched[pth] = raw.files_touched.get(pth, 0) + n
                 raw.meta.notes = [*raw.meta.notes, f"aistats_files:{len(tele)}"]
+            selector = self._model_selector(session_id)
+            if selector:
+                raw.meta.notes = [*raw.meta.notes, f"model_selector:{selector}"]
         return raw
+
+    def _model_selector(self, session_id: str) -> str | None:
+        """The IDE's per-session model routing record.
+
+        Each workspace's ``state.vscdb`` keeps
+        ``chat.modelMapSession.<sessionId>`` (e.g. ``auto`` = IDE-routed).
+        It names the routing, not the serving model — recorded as a note,
+        never as Message.model.
+        """
+        import os
+        import sqlite3
+
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return None
+        base = Path(appdata) / self.appdata_product / "User" / "workspaceStorage"
+        if not base.is_dir():
+            return None
+        for db in sorted(base.rglob("state.vscdb")):
+            try:
+                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+                try:
+                    row = con.execute(
+                        "SELECT value FROM ItemTable WHERE key=?",
+                        (f"chat.modelMapSession.{session_id}",),
+                    ).fetchone()
+                finally:
+                    con.close()
+            except (sqlite3.Error, OSError):
+                continue
+            if row and row[0]:
+                return str(row[0])[:60]
+        return None
 
     def telemetry_anchors(
         self, session_id: str, stats_dir: Path | None = None

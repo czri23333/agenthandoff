@@ -141,8 +141,37 @@ class _QoderAppSharedMixin:
                     "FROM messages WHERE chat_id=? ORDER BY sequence",
                     (session_id,),
                 ).fetchall()
+                try:
+                    subs = con.execute(
+                        "SELECT model_level, ext FROM sub_chats WHERE chat_id=?",
+                        (session_id,),
+                    ).fetchall()
+                except sqlite3.Error:
+                    subs = []
             except sqlite3.Error:
                 return None
+
+        # Conversation-level billing the store does keep: sub_chats.model_level
+        # (e.g. qmodel_preview) plus the context-usage snapshot in ext.
+        # No per-message usage exists — every turn inherits the chat model,
+        # tokens stay empty (honest absence, not a parse miss).
+        chat_model: str | None = None
+        quota_note: str | None = None
+        for sub in subs:
+            try:
+                level = sub["model_level"]
+            except (KeyError, IndexError, TypeError):
+                level = None
+            if not chat_model and isinstance(level, str) and level:
+                chat_model = level
+            try:
+                snap = (json.loads(sub["ext"] or "{}") or {}).get("contextUsageSnapshot") or {}
+            except ValueError:
+                snap = {}
+            if isinstance(snap, dict) and snap.get("percentage") is not None and quota_note is None:
+                quota_note = (
+                    f"context_fill:{float(snap.get('percentage', 0)):.1%}@{snap.get('model') or chat_model or '?'}"
+                )
 
         meta = SessionMeta(
             cli=self.cli,  # type: ignore[attr-defined]
@@ -152,6 +181,7 @@ class _QoderAppSharedMixin:
             started_at=ts_to_iso(_epoch(chat["created_at"])),
             updated_at=ts_to_iso(_epoch(chat["updated_at"])),
             source_path=str(self.db_path),
+            model=chat_model,
         )
         # The store records no model or usage: Message.model/tokens stay
         # empty (honest absence). messages[].metadata.sessionId links the
@@ -183,7 +213,7 @@ class _QoderAppSharedMixin:
                 praw = row["searchable_text"]
                 text = self.clean_text(praw)
                 if text and not self.is_noise(text):
-                    messages.append(self.msg(role, praw, text=text, at=at))
+                    messages.append(self.msg(role, praw, text=text, at=at, model=chat_model))
                 continue
             for part in parts:
                 if not isinstance(part, dict):
@@ -193,7 +223,7 @@ class _QoderAppSharedMixin:
                     praw = str(part.get("text") or "")
                     text = self.clean_text(praw)
                     if text and not self.is_noise(text):
-                        messages.append(self.msg(role, praw, text=text, at=at))
+                        messages.append(self.msg(role, praw, text=text, at=at, model=chat_model))
                 elif ptype.startswith("tool-"):
                     name = str(part.get("toolName") or ptype[5:] or "tool")
                     if name == "Thinking":
@@ -201,7 +231,7 @@ class _QoderAppSharedMixin:
                         text = self.clean_text(praw)
                         if text and not self.is_noise(text):
                             messages.append(self.msg("assistant", f"[思考] {praw}",
-                                                     text=f"[思考] {text}", at=at))
+                                                     text=f"[思考] {text}", at=at, model=chat_model))
                     else:
                         tools[name] += 1
                         for p in self.extract_paths(part.get("input") or {}):
@@ -211,9 +241,11 @@ class _QoderAppSharedMixin:
                     text = self.clean_text(praw)
                     if text:
                         messages.append(self.msg("assistant", f"[工具error] {praw}",
-                                                 text=f"[工具error] {text[:500]}", at=at))
+                                                 text=f"[工具error] {text[:500]}", at=at, model=chat_model))
         if linked:
             meta.notes = [*meta.notes, f"linked_cli_sessions:{','.join(linked[:8])}"]
+        if quota_note:
+            meta.notes = [*meta.notes, quota_note]
         return self.build_raw(meta, messages, [], files, tools)
 
 
