@@ -6,8 +6,8 @@
   "parse": {
     "file_anchors": 43,
     "files": 25,
-    "messages": 34,
-    "nonempty_messages": 34,
+    "messages": 126,
+    "nonempty_messages": 126,
     "proven": true,
     "sampled": true,
     "sessions": 2,

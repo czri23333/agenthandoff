@@ -33,11 +33,11 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `claude` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `codebuddy` | JSONL dir | ✓ | 25 | 15 ses / 301 msg | ✓ | ✅ stable (fixture-proven) |
 | `codebuddy-cn` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
-| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ stable (fixture-proven) |
-| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 31 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 4 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 126 msg | ✓ | ✅ stable (fixture-proven) |
+| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 117 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
+| `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 52 msg | ✓ | ✅ stable (fixture-proven) |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |

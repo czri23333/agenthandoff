@@ -263,7 +263,12 @@ def read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
 
 
 def as_text_blocks(content) -> tuple[str, list[dict]]:
-    """Split an assistant/user content payload into (plain_text, tool_blocks)."""
+    """Split an assistant/user content payload into (plain_text, tool_blocks).
+
+    `thinking` blocks (IDE task transcripts) fold into the text with a
+    [思考] prefix — the product timeline shows them, dropping them loses
+    turns. Same convention as the jsonl_family reasoning rows.
+    """
     if isinstance(content, str):
         return content, []
     texts: list[str] = []
@@ -276,6 +281,10 @@ def as_text_blocks(content) -> tuple[str, list[dict]]:
             t = block.get("text") or block.get("content") or ""
             if isinstance(t, str):
                 texts.append(t)
+        elif btype == "thinking":
+            t = block.get("thinking") or block.get("text") or block.get("content") or ""
+            if isinstance(t, str) and t.strip():
+                texts.append(f"[思考] {t}")
         elif btype in ("tool_use", "toolCall", "tool-call", "tool"):
             tools.append(block)
     return "\n".join(t for t in texts if t), tools
