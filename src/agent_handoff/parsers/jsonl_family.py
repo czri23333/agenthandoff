@@ -1356,7 +1356,56 @@ class QodercnIdeParser(JsonlSessionParser):
         official = self._load_quest_titles().get(session_id) or self._wake_titles().get(session_id)
         if official:
             raw.meta.title = official
+        # The CLI's per-file telemetry (.qoder-cli/ai-stats) names the exact
+        # files this session's agent touched, keyed by the same session id.
+        # File-only supplement like the qodersec anchors — never dialogue.
+        # Fixture trees never merge (evidence must measure the transcript).
+        try:
+            rooted = self.root.resolve().is_relative_to(home().resolve())
+        except (OSError, ValueError):
+            rooted = False
+        if rooted:
+            tele = self.telemetry_anchors(session_id)
+            if tele:
+                for pth, n in tele.items():
+                    raw.files_touched[pth] = raw.files_touched.get(pth, 0) + n
+                raw.meta.notes = [*raw.meta.notes, f"aistats_files:{len(tele)}"]
         return raw
+
+    def telemetry_anchors(
+        self, session_id: str, stats_dir: Path | None = None
+    ) -> Counter[str]:
+        """Per-session file telemetry from the CLI's own ai-stats store.
+
+        ``~/.qoder-cli/ai-stats/projects/*/*.jsonl`` rows carry ``filePath``
+        plus ``lineDetails[].sessionId`` — the same id space as this parser's
+        sessions. Only the international ``qoder-ide`` variant keeps this
+        store; the CN twin has none (returns empty there).
+        """
+        from agent_handoff.locations import home
+
+        out: Counter[str] = Counter()
+        base = stats_dir or home() / ".qoder-cli" / "ai-stats" / "projects"
+        if not base.is_dir():
+            return out
+        for path in base.rglob("*.jsonl"):
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                fp = row.get("filePath")
+                if not isinstance(fp, str) or not fp.strip():
+                    continue
+                for ld in row.get("lineDetails") or []:
+                    if isinstance(ld, dict) and ld.get("sessionId") == session_id:
+                        out[fp] += 1
+                        break
+        return out
 
     def _wake_titles(self) -> dict[str, str]:
         """qs_* session titles from the QoderWake board projection (read-only)."""

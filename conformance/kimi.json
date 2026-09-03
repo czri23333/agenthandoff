@@ -13,6 +13,7 @@
     "sessions": 1,
     "shape_only": true,
     "source_messages": 0,
+    "supplement_files": 0,
     "tool_calls": 0,
     "unusable": false
   },

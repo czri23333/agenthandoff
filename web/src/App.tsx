@@ -185,7 +185,12 @@ export default function App() {
             <Dashboard onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })} />
           )}
           {view.name === "detail" && (
-            <SessionDetail cli={view.cli} sid={view.sid} onBack={goBack} />
+            <SessionDetail
+              cli={view.cli}
+              sid={view.sid}
+              onBack={goBack}
+              onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })}
+            />
           )}
           {view.name === "threads" && <Threads />}
           {view.name === "inbox" && <Inbox />}

@@ -43,7 +43,22 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const [searchError, setSearchError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    // Refresh-safe: domain fold state survives a reload within the tab.
+    try {
+      const raw = sessionStorage.getItem("ah-collapsed");
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("ah-collapsed", JSON.stringify([...collapsed]));
+    } catch {
+      /* storage full/blocked: fold state just won't survive */
+    }
+  }, [collapsed]);
   const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
   const [, tick] = useState(0);
   const inputRef = useRef<GetRef<typeof Input.Search>>(null);
@@ -163,6 +178,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     () => (sessions ?? []).filter((s) => s.needs_reply === true).length,
     [sessions],
   );
+  const needsReplyHint = useMemo(() => {
+    const waiting = (sessions ?? []).filter((s) => s.needs_reply === true).slice(0, 8);
+    if (!waiting.length) return t("needsReplyHint");
+    return `${t("needsReplyHint")}：${waiting.map((s) => s.title).join(" / ")}${needsReplyCount > 8 ? " …" : ""}`;
+  }, [sessions, needsReplyCount, t]);
   const visible = titleFiltered.filter(
     (s) =>
       (!domainFilter || s.domain === domainFilter) &&
@@ -245,7 +265,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             }))}
           />
         </Tooltip>
-        <Tooltip title={t("needsReplyHint")}>
+        <Tooltip title={needsReplyHint}>
           <Button
             size="small"
             type={needsReplyOnly ? "primary" : "default"}
@@ -381,7 +401,25 @@ function SessionRow({
   depth?: number;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const openKey = `ah-open:${s.cli}:${s.session_id}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return sessionStorage.getItem(openKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleOpen = () => {
+    setOpen((v) => {
+      try {
+        if (v) sessionStorage.removeItem(openKey);
+        else sessionStorage.setItem(openKey, "1");
+      } catch {
+        /* ignore */
+      }
+      return !v;
+    });
+  };
   const kids = s.children ?? [];
   return (
     <li className="row-enter">
@@ -389,7 +427,7 @@ function SessionRow({
         {depth > 0 && <span className="ah-faint w-4 shrink-0 select-none self-center">└</span>}
         {kids.length > 0 && (
           <button
-            onClick={() => setOpen(!open)}
+            onClick={toggleOpen}
             className="ah-faint w-7 shrink-0 select-none self-center"
             title={open ? t("collapseSubs") : t("expandSubs")}
           >
@@ -428,7 +466,10 @@ function SessionRow({
               </span>
             </Tooltip>
           )}
-          <span className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden">
+          <span
+            className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden"
+            title={s.updated_at ?? undefined}
+          >
             {relTime(s.updated_at)}
           </span>
           {s.needs_reply === true && (
@@ -498,7 +539,12 @@ function HitList({
                   <Highlight text={h.title} query={query} />
                 </span>
                 <span className="ah-faint shrink-0 font-mono">{h.score}</span>
-                <span className="ah-faint w-16 shrink-0 text-right font-mono">{relTime(h.updated_at)}</span>
+                <span
+                  className="ah-faint w-16 shrink-0 text-right font-mono"
+                  title={h.updated_at ?? undefined}
+                >
+                  {relTime(h.updated_at)}
+                </span>
               </span>
               <span className="flex w-full items-center gap-2">
                 {h.matched && (

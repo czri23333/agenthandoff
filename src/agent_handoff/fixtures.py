@@ -38,6 +38,11 @@ class Evidence:
     nonempty: int = 0
     tools: int = 0
     files_touched: int = 0
+    # File anchors merged from supplement sources (qodersec execution traces,
+    # CLI ai-stats telemetry), counted apart in notes like
+    # `qodersec_anchors:407`. Native transcript anchors = files_touched minus
+    # this, so drift reports stay interpretable when a supplement grows.
+    supplement_files: int = 0
     source_messages: int = 0
     sampled: bool = False
     codec_missing: bool = False
@@ -143,6 +148,13 @@ def measure(parser, limit_sessions: int = 6) -> Evidence:
             evidence.nonempty += sum(1 for m in raw.messages if m.text.strip())
             evidence.tools += sum(raw.tool_counts.values())
             evidence.files_touched += len(raw.files_touched)
+            for note in raw.meta.notes:
+                for prefix in ("qodersec_anchors:", "aistats_files:"):
+                    if note.startswith(prefix):
+                        try:
+                            evidence.supplement_files += int(note[len(prefix):])
+                        except ValueError:
+                            pass
     except (OSError, ValueError) as exc:
         evidence.error = f"{type(exc).__name__}: {exc}"
     return evidence

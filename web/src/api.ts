@@ -25,6 +25,8 @@ export interface SessionMeta {
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
+  /** Provenance notes (supplement counts, linked sessions, tool failures…). */
+  notes?: string[];
 }
 
 export interface UsageModel {

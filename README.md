@@ -47,7 +47,7 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwork-app` | unknown | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoderwork-cn-app` | unknown | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ stable (fixture-proven) |
-| `qwenwork-app` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `qwenwork-app` | unknown | ✓ | — | — | — | ⬜ empty store (verified: zero sessions) |
 | `cherrystudio` | unknown | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ stable (fixture-proven) |
 | `trae` | IDE SQLite; read-only only, never written | — | — | — | — | 🔜 roadmap |
 

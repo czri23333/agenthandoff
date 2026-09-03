@@ -91,6 +91,9 @@ class Row:
     shape_only: bool = False
     codec_missing: bool = False
     conformance: bool = False
+    # The live store exists and reads fine but holds zero sessions: verified
+    # emptiness, distinct from unverified (no fixture evidence either way).
+    empty_store: bool = False
     status: str = "unverified"
     notes: list[str] = field(default_factory=list)
 
@@ -104,6 +107,8 @@ def derive_status(row: Row) -> str:
     """Status is a function of evidence, so it cannot be inflated."""
     if not row.reader:
         return "roadmap"
+    if row.empty_store:
+        return "empty"
     if not row.fixtures:
         return "unverified"
     if row.codec_missing:
@@ -137,6 +142,14 @@ def build_rows() -> list[Row]:
         row.fixture_ok = evidence.proven
         row.shape_only = evidence.shape_only
         row.codec_missing = evidence.codec_missing
+        if not evidence.present:
+            try:
+                live = parser.list_sessions() if parser.available() else None
+                if live is not None and len(live) == 0:
+                    row.empty_store = True
+                    row.notes.append("live store reads fine but holds zero sessions")
+            except (OSError, ValueError):
+                pass
         if evidence.error:
             row.notes.append(evidence.error)
         if evidence.sampled:
@@ -158,6 +171,7 @@ ASCII_CELL = {
     "experimental": "[exp] experimental",
     "shape-only": "[--] shape only (source store held no dialogue)",
     "unverified": "[gap] unverified (no fixture)",
+    "empty": "[--] empty store (verified: zero sessions)",
     "fixture-fails": "[!!] fixture fails to parse",
     "unavailable": "[env] needs an optional codec here",
     "roadmap": "[next] roadmap",
@@ -173,6 +187,7 @@ def _cell(status: str, lang: str, ascii_cell: bool = False) -> str:
         "unavailable": "❓ 本机缺少可选解码器（`pip install '.[zstd]'`）",
         "experimental": "🧪 实验性",
         "unverified": "⚠️ 未验证（缺脱敏夹具）",
+        "empty": "⬜ 空库（已验证：零会话）",
         "fixture-fails": "❌ 夹具解析失败",
         "roadmap": "🔜 路线图",
     }
@@ -182,6 +197,7 @@ def _cell(status: str, lang: str, ascii_cell: bool = False) -> str:
         "unavailable": "❓ needs an optional codec (`pip install '.[zstd]'`)",
         "experimental": "🧪 experimental",
         "unverified": "⚠️ unverified (no fixture)",
+        "empty": "⬜ empty store (verified: zero sessions)",
         "fixture-fails": "❌ fixture fails to parse",
         "roadmap": "🔜 roadmap",
     }
@@ -251,7 +267,12 @@ def write_baselines(rows: list[Row] | None = None) -> int:
 
 
 def unproven(rows: list[Row] | None = None) -> list[str]:
-    """CLIs that claim a reader but have no fixture evidence."""
+    """CLIs that claim a reader but have no fixture evidence.
+
+    `empty` (verified zero-session store) joins the gap list: it has no
+    fixture either, but keeps its own status cell so the table still tells
+    verified-emptiness apart from never-verified.
+    """
     rows = rows if rows is not None else build_rows()
-    missing = ("unverified", "fixture-fails")
+    missing = ("unverified", "fixture-fails", "empty")
     return [r.cli for r in rows if r.reader and r.status in missing]

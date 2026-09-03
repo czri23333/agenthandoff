@@ -38,6 +38,14 @@ function graphemeSlice(text: string, maxGraphemes: number): string {
   return [...text].slice(0, maxGraphemes).join("");
 }
 
+/** Desktop Task chats link to the CLI session of the same work. */
+function guessLinkedCli(_id: string, fromCli: string): string {
+  if (fromCli === "qoderwork-cn-app") return "qoderwork-cn";
+  if (fromCli === "qoderwork-app") return "qoderwork";
+  if (fromCli === "qwenwork-app") return "qwenwork";
+  return fromCli;
+}
+
 function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: string; assistant: string; expand: string; collapse: string; raw: string; clean: string } }) {
   const [open, setOpen] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
@@ -112,10 +120,12 @@ export default function SessionDetail({
   cli,
   sid,
   onBack,
+  onOpen,
 }: {
   cli: string;
   sid: string;
   onBack: () => void;
+  onOpen?: (cli: string, sid: string) => void;
 }) {
   const t = useT();
   const charts: ChartLabels = {
@@ -634,7 +644,13 @@ export default function SessionDetail({
                 <span className="font-mono text-[12px] break-all">{meta.cwd}</span>
               </Descriptions.Item>
               <Descriptions.Item label={t("model")}>
-                <span className="font-mono text-[12px]">{meta.model ?? "—"}</span>
+                {meta.model ? (
+                  <span className="font-mono text-[12px]">{meta.model}</span>
+                ) : (
+                  <Tooltip title={t("noModelHint")}>
+                    <span className="ah-faint font-mono text-[12px]">{t("noModel")}</span>
+                  </Tooltip>
+                )}
               </Descriptions.Item>
               <Descriptions.Item label={t("provider")}>
                 <span className="font-mono text-[12px]">{meta.provider ?? "—"}</span>
@@ -666,6 +682,28 @@ export default function SessionDetail({
               {meta.parent_session_id && (
                 <Descriptions.Item label={t("subSession")}>
                   <span className="font-mono text-[12px] break-all">{meta.parent_session_id}</span>
+                </Descriptions.Item>
+              )}
+              {meta.notes?.some((n) => n.startsWith("linked_cli_sessions:")) && (
+                <Descriptions.Item label={t("linkedSessions")}>
+                  <span className="flex flex-wrap gap-1">
+                    {(meta.notes.find((n) => n.startsWith("linked_cli_sessions:")) ?? "")
+                      .replace("linked_cli_sessions:", "")
+                      .split(",")
+                      .filter(Boolean)
+                      .map((id) => (
+                        <Button
+                          key={id}
+                          size="small"
+                          type="link"
+                          className="font-mono! text-[12px]"
+                          onClick={() => onOpen?.(guessLinkedCli(id, meta.cli), id)}
+                          title={t("linkedSessionsHint")}
+                        >
+                          {id.slice(0, 8)}
+                        </Button>
+                      ))}
+                  </span>
                 </Descriptions.Item>
               )}
               {meta.tokens_in != null && (

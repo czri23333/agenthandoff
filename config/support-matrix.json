@@ -13,6 +13,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": []
     },
@@ -27,6 +28,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -41,6 +43,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": [
         "record-sampled"
@@ -57,6 +60,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -71,6 +75,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": []
     },
@@ -85,6 +90,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": [
         "record-sampled"
@@ -101,6 +107,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": [
         "record-sampled"
@@ -117,6 +124,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -131,6 +139,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": []
     },
@@ -145,6 +154,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -159,6 +169,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": [
         "record-sampled"
@@ -175,6 +186,7 @@
       "shape_only": true,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "shape-only",
       "notes": []
     },
@@ -189,6 +201,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": [
         "record-sampled"
@@ -205,6 +218,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -219,6 +233,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -233,6 +248,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "unverified",
       "notes": []
     },
@@ -247,6 +263,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": []
     },
@@ -261,6 +278,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": []
     },
@@ -275,8 +293,11 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
-      "status": "unverified",
-      "notes": []
+      "empty_store": true,
+      "status": "empty",
+      "notes": [
+        "live store reads fine but holds zero sessions"
+      ]
     },
     {
       "cli": "cherrystudio",
@@ -289,6 +310,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": true,
+      "empty_store": false,
       "status": "stable",
       "notes": []
     },
@@ -303,6 +325,7 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
+      "empty_store": false,
       "status": "roadmap",
       "notes": []
     }
