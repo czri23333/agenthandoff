@@ -335,6 +335,28 @@ class DshParser(Parser):
         # billing (input/output/reasoning) plus the request model. Reasoning
         # deltas ride along as [思考] turns, the same convention as the
         # CherryStudio parser.
+        # Turn keys vary (int in finished rows, str in chunks, None when
+        # absent): normalize everything through str for lookup consistency.
+        def _tkey(t):
+            return None if t is None else str(t)
+
+        _text2 = {}
+        for t, v in turns_text.items():
+            _text2.setdefault(_tkey(t), []).extend(v)
+        turns_text = _text2
+        _reason2 = {}
+        for t, v in turns_reason.items():
+            _reason2.setdefault(_tkey(t), []).extend(v)
+        turns_reason = _reason2
+        _tools2 = {}
+        for t, v in turns_tools.items():
+            _tools2.setdefault(_tkey(t), []).extend(v)
+        turns_tools = _tools2
+        _usage2 = {}
+        for t, v in turns_usage.items():
+            _usage2.setdefault(_tkey(t), v)
+        turns_usage = _usage2
+        has_finished = {str(t) for t in has_finished}
         for turn in sorted(set(list(turns_text) + list(turns_reason) + list(turns_tools)), key=lambda k: (k is None, k)):
             parts = turns_text.get(turn, [])
             at = next((a for a, _, _ in parts if a), None)
