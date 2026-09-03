@@ -636,6 +636,34 @@ class JsonlSessionParser(Parser):
         if len({m.at for m in messages if m.at}) > 1 and all(m.at for m in messages):
             messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
 
+        # Second pass after the chronological sort: thinking turns stranded by
+        # cross-file disorder inherit the billing of the nearest settled
+        # assistant turn at or after their own timestamp (same request's spend).
+        # Only [思考] turns qualify — text turns without billing mean the store
+        # recorded no usage row for that request (honest absence).
+        settled: list = []
+        for m in messages:
+            if m.role == "assistant" and (m.tokens_in is not None or m.tokens_out is not None):
+                settled.append(m)
+        if settled:
+            for m in messages:
+                if (
+                    m.role == "assistant"
+                    and m.tokens_in is None
+                    and m.tokens_out is None
+                    and (m.text or "").startswith("[思考]")
+                    and m.at
+                ):
+                    nxt = next((s for s in settled if (s.at or "") >= (m.at or "")), None)
+                    if nxt is None:
+                        continue
+                    m.tokens_in = nxt.tokens_in
+                    m.tokens_out = nxt.tokens_out
+                    if m.tokens_reasoning is None:
+                        m.tokens_reasoning = nxt.tokens_reasoning
+                    if not m.model:
+                        m.model = nxt.model
+
         notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
         if agent_surfaces:
             notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
