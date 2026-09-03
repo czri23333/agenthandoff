@@ -290,13 +290,42 @@ class DshParser(Parser):
             reason_pairs = turns_reason.get(turn, [])
             reason_text = "".join(t for t, _ in reason_pairs).strip()
             if reason_text:
+                # Same-request billing when this turn has its own usage;
+                # otherwise the second pass below backfills from the nearest
+                # settled turn (old turns carry no usage chunk).
                 messages.append(
                     self.msg(
                         "assistant",
                         f"[思考] {''.join(r for _, r in reason_pairs).strip()}",
                         text=f"[思考] {reason_text}", at=at, model=model,
+                        tokens_in=msg_in if isinstance(msg_in, int) else None,
+                        tokens_out=msg_out if isinstance(msg_out, int) else None,
+                        tokens_reasoning=msg_reason if isinstance(msg_reason, int) else None,
                     )
                 )
+
+        # Second pass (same rule as the jsonl family): tokenless [思考] turns
+        # inherit the nearest settled assistant turn at/after their timestamp.
+        messages.sort(key=lambda m: m.at or "")
+        settled = [m for m in messages if m.role == "assistant" and (m.tokens_in is not None or m.tokens_out is not None)]
+        if settled:
+            for m in messages:
+                if (
+                    m.role == "assistant"
+                    and m.tokens_in is None
+                    and m.tokens_out is None
+                    and (m.text or "").startswith("[思考]")
+                    and m.at
+                ):
+                    nxt = next((s for s in settled if (s.at or "") >= (m.at or "")), None)
+                    if nxt is None:
+                        continue
+                    m.tokens_in = nxt.tokens_in
+                    m.tokens_out = nxt.tokens_out
+                    if m.tokens_reasoning is None:
+                        m.tokens_reasoning = nxt.tokens_reasoning
+                    if not m.model:
+                        m.model = nxt.model
 
         meta = SessionMeta(
             cli=self.cli,
