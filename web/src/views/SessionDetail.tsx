@@ -190,8 +190,11 @@ export default function SessionDetail({
 
   if (err)
     return (
-      <div className="p-5">
+      <div className="space-y-3 p-5">
         <Alert type="error" showIcon message={t("loading")} description={err} />
+        <Button size="small" onClick={onBack}>
+          ← {t("back")}
+        </Button>
       </div>
     );
   if (!data)
