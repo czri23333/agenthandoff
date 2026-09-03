@@ -319,6 +319,43 @@ def test_cherrystudio_happy(cherrystudio_store):
     assert p.load("nope") is None
 
 
+def test_cherrystudio_usage(cherrystudio_store):
+    """usage() aggregates per-model tokens + TTFT from message rows."""
+    import json as _json
+    import sqlite3
+
+    from agent_handoff.parsers.cherrystudio import CherryStudioParser
+
+    db = cherrystudio_store / "agents.db"
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO session_messages VALUES ('r3','sess_cs','assistant',?,"
+        " '2026-07-05T08:19:50.000Z')",
+        (
+            _json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "model": {"name": "glm-5.2"},
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                        "metrics": {"time_first_token_millsec": 2000},
+                    },
+                    "blocks": [{"type": "main_text", "content": "and more"}],
+                }
+            ),
+        ),
+    )
+    con.commit()
+    con.close()
+    p = CherryStudioParser(db)
+    u = p.usage("sess_cs")
+    assert u is not None
+    assert u["totals"] == {"calls": 1, "tokens_in": 100, "tokens_out": 50}
+    assert u["models"][0]["model"] == "glm-5.2"
+    assert u["models"][0]["avg_ttft_ms"] == 2000
+    assert p.usage("nope") is None
+
+
 def test_qoderapp_happy(qoderapp_store):
     from agent_handoff.parsers.qoderapp import (
         QoderworkAppParser,

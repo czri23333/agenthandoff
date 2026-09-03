@@ -122,6 +122,79 @@ class CherryStudioParser(Parser):
             return None
         return [json_records_entry(f"cherrystudio/{session_id}.records.jsonl", records)]
 
+    def usage(self, session_id: str) -> dict | None:
+        """Per-model tokens + TTFT from the message rows.
+
+        Each assistant message carries ``usage`` (prompt/completion tokens)
+        and ``metrics.time_first_token_millsec``. Aggregated here so the
+        cockpit usage card shows the same numbers the app's own billing
+        surface would.
+        """
+        if not self.available():
+            return None
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT content FROM session_messages WHERE session_id=? AND role='assistant'",
+                    (session_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return None
+        agg: dict[str, dict] = {}
+        for (content,) in rows:
+            try:
+                payload = json.loads(content or "{}")
+            except ValueError:
+                continue
+            msg = payload.get("message") if isinstance(payload, dict) else None
+            if not isinstance(msg, dict):
+                continue
+            model = msg.get("model")
+            name = model.get("name") if isinstance(model, dict) else None
+            usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+            metrics = msg.get("metrics") if isinstance(msg.get("metrics"), dict) else {}
+            ti = usage.get("prompt_tokens")
+            to = usage.get("completion_tokens")
+            if not isinstance(ti, int) and not isinstance(to, int):
+                continue
+            a = agg.setdefault(
+                str(name or "unknown"),
+                {"calls": 0, "tokens_in": 0, "tokens_out": 0, "ttft": [], "reasoning": 0,
+                 "cache_write": 0, "cache_read": 0},
+            )
+            a["calls"] += 1
+            a["tokens_in"] += ti if isinstance(ti, int) else 0
+            a["tokens_out"] += to if isinstance(to, int) else 0
+            ttft = metrics.get("time_first_token_millsec")
+            if isinstance(ttft, (int, float)):
+                a["ttft"].append(ttft)
+        if not agg:
+            return None
+        models = []
+        tot_in = tot_out = tot_calls = 0
+        for model, a in sorted(agg.items(), key=lambda kv: -kv[1]["tokens_out"]):
+            ttft_list = a.pop("ttft")
+            models.append(
+                {
+                    "model": model,
+                    "calls": a["calls"],
+                    "tokens_in": a["tokens_in"],
+                    "tokens_out": a["tokens_out"],
+                    "reasoning": a["reasoning"],
+                    "cache_write": a["cache_write"],
+                    "cache_read": a["cache_read"],
+                    "avg_ttft_ms": round(sum(ttft_list) / len(ttft_list)) if ttft_list else None,
+                    "tok_per_s": None,
+                }
+            )
+            tot_in += a["tokens_in"]
+            tot_out += a["tokens_out"]
+            tot_calls += a["calls"]
+        return {
+            "models": models,
+            "totals": {"calls": tot_calls, "tokens_in": tot_in, "tokens_out": tot_out},
+        }
+
     def load(self, session_id: str) -> RawSession | None:
         if not self.available():
             return None
