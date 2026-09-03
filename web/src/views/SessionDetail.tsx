@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Segmented, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Segmented, Table, Tag, Tooltip, Typography } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import {
   api,
@@ -399,7 +399,28 @@ export default function SessionDetail({
           </SectionCard>
 
           <div className="grid grid-cols-2 gap-3">
-            <SectionCard title={t("filesTouched")}>
+            <SectionCard
+              title={t("filesTouched")}
+              extra={
+                meta.attachments?.length ? (
+                  <Tooltip title={t("attachmentsHint")}>
+                    <span className="ah-label">📎 {meta.attachments.length}</span>
+                  </Tooltip>
+                ) : undefined
+              }
+            >
+              {meta.attachments?.length ? (
+                <ul className="m-0 mb-2 list-none space-y-1 border-b border-[var(--ah-line)] p-0 pb-2 font-mono text-[12px]">
+                  {meta.attachments.map((a) => (
+                    <li key={a} className="flex items-baseline gap-2">
+                      <span title={t("attachment")}>📎</span>
+                      <span className="min-w-0 flex-1 truncate text-[var(--ah-text-1)]" title={a}>
+                        {a}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {b.files_touched.length === 0 ? (
                 <Typography.Text className="ah-meta italic">{t("noRecord")}</Typography.Text>
               ) : (
@@ -421,7 +442,16 @@ export default function SessionDetail({
           </div>
 
           {b.tool_summary.length > 0 && (
-            <SectionCard title={t("calls")}>
+            <SectionCard
+              title={t("calls")}
+              extra={
+                data.tool_detail?.length ? (
+                  <span className="ah-faint font-mono text-[12px]">
+                    {data.tool_detail.length} {t("callRows")}
+                  </span>
+                ) : undefined
+              }
+            >
               <div className="flex flex-wrap gap-1.5">
                 {b.tool_summary.map((tl) => (
                   <span key={tl.tool} className="ah-inset px-2 py-0.5 font-mono text-[12px]">
@@ -429,6 +459,68 @@ export default function SessionDetail({
                   </span>
                 ))}
               </div>
+              {data.tool_detail?.length ? (
+                <Table
+                  size="small"
+                  className="mt-2"
+                  pagination={{ pageSize: 8, size: "small", showSizeChanger: false }}
+                  rowKey={(_, i) => String(i)}
+                  dataSource={data.tool_detail}
+                  columns={[
+                    { title: t("tool"), dataIndex: "tool", ellipsis: true },
+                    {
+                      title: t("status"),
+                      dataIndex: "status",
+                      width: 90,
+                      render: (v: string | null, r) =>
+                        r.error ? (
+                          <Tooltip title={r.error}>
+                            <Tag color="red" className="mr-0!">
+                              {v ?? "error"}
+                            </Tag>
+                          </Tooltip>
+                        ) : (
+                          <Tag color={v === "completed" ? "green" : undefined} className="mr-0!">
+                            {v ?? "—"}
+                          </Tag>
+                        ),
+                    },
+                    {
+                      title: "ms",
+                      dataIndex: "duration_ms",
+                      align: "right" as const,
+                      width: 70,
+                      render: (v: number | null) => (v != null ? v.toLocaleString() : "—"),
+                    },
+                    {
+                      title: "exit",
+                      dataIndex: "exit_code",
+                      align: "right" as const,
+                      width: 60,
+                      render: (v: number | null) =>
+                        v == null || v === 0 ? (
+                          <span className="ah-faint">{v ?? "—"}</span>
+                        ) : (
+                          <Tag color="red" className="mr-0!">
+                            {v}
+                          </Tag>
+                        ),
+                    },
+                    {
+                      title: "out",
+                      dataIndex: "output_bytes",
+                      align: "right" as const,
+                      width: 80,
+                      render: (v: number | null, r) => (
+                        <span>
+                          {v != null ? formatNum(v) : "—"}
+                          {r.truncated ? <span className="ah-warn"> ✂</span> : null}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              ) : null}
             </SectionCard>
           )}
         </div>
@@ -534,6 +626,25 @@ export default function SessionDetail({
               {meta.origin && (
                 <Descriptions.Item label="origin">
                   <span className="font-mono text-[12px]">{meta.origin}</span>
+                </Descriptions.Item>
+              )}
+              {meta.task_type && (
+                <Descriptions.Item label={t("taskKind")}>
+                  <span className="font-mono text-[12px]">{meta.task_type}</span>
+                </Descriptions.Item>
+              )}
+              {meta.title_source && (
+                <Descriptions.Item label={t("titleSource")}>
+                  <Tooltip title={t("titleSourceHint")}>
+                    <span className="font-mono text-[12px]">{meta.title_source}</span>
+                  </Tooltip>
+                </Descriptions.Item>
+              )}
+              {meta.permission && (
+                <Descriptions.Item label={t("permission")}>
+                  <Tag color={meta.permission === "yolo" ? "red" : "blue"} className="mr-0 font-mono!">
+                    {meta.permission}
+                  </Tag>
                 </Descriptions.Item>
               )}
               {meta.parent_session_id && (

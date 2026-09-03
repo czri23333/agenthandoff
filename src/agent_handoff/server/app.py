@@ -68,6 +68,19 @@ def _raw_or_404(cli: str, sid: str):
     return raw
 
 
+def _tool_detail_or_none(cli: str, sid: str) -> list[dict] | None:
+    """Per-call tool ledger when the parser keeps one (zcode tool_usage)."""
+    parser = _parser_or_404(cli)
+    fn = getattr(parser, "tool_detail", None)
+    if fn is None:
+        return None
+    try:
+        rows = fn(sid)
+    except Exception:
+        return None
+    return rows or None
+
+
 # -- read APIs ----------------------------------------------------------------
 
 @app.get("/api/stores")
@@ -296,6 +309,7 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         "usage": _parser_or_404(cli).usage(sid),
         "compactions": len(raw.compactions),
         "messages": stream[::-1],
+        "tool_detail": _tool_detail_or_none(cli, sid),
     }
 
 

@@ -11,6 +11,10 @@ export interface SessionMeta {
   provider: string | null;
   origin: string | null;
   parent_session_id: string | null;
+  task_type?: string | null; // interactive | subagent_child … (zcode)
+  title_source?: string | null; // generated | first_input … (zcode)
+  permission?: string | null; // yolo | plan … (zcode/opencode)
+  attachments?: string[]; // files the user attached (zcode file parts)
   status: string | null; // proven end-state, null = unknown
   needs_reply?: boolean | null; // ends on an un-answered user message (null = unknown)
   domain: string; // config-driven project grouping (ADR-009)
@@ -94,8 +98,23 @@ export interface Budget {
   last_snapshot: string;
 }
 
+export interface ToolCallRow {
+  tool: string;
+  status: string | null;
+  duration_ms: number | null;
+  exit_code: number | null;
+  output_bytes: number | null;
+  truncated: boolean;
+  retries: number | null;
+  approval: string | null;
+  read_only: boolean;
+  destructive: boolean;
+  error: string | null;
+}
+
 export interface SessionDetail {
   bundle: BundleData;
+  tool_detail?: ToolCallRow[] | null;
   markdown: string;
   brief: string;
   interruption: Interruption;
