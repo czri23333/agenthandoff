@@ -444,6 +444,9 @@ class JsonlSessionParser(Parser):
         seen_ids: set[tuple[str, str]] = set()
         # callId -> claimed tool name, so result rows join back to the call.
         pending_calls: dict[str, str] = {}
+        # Session-serving model from runtime-config rows (IDE family); turns
+        # without their own billing inherit it.
+        runtime_model: str = ""
         # Row-level provider signals that never surface as turns: compacted
         # summaries, errors, and the agent surface (cli vs IDE).
         row_errors: list[str] = []
@@ -466,6 +469,11 @@ class JsonlSessionParser(Parser):
                 if at and (newest_at is None or at > newest_at):
                     newest_at = at
                 self._collect_row_signals(row, agent_surfaces, row_errors)
+                if rtype == "runtime-config" and isinstance(row.get("model"), str) and row["model"]:
+                    # The IDE records the serving model per session here
+                    # (e.g. qmodel_38max); transcripts carry no per-turn
+                    # billing, so assistant turns inherit this below.
+                    runtime_model = row["model"]
                 if row.get("isCompacted") or row.get("isSummary"):
                     # A turn the product already replaced with a summary: count
                     # it, count its text only if there is real prose in it.
@@ -557,6 +565,8 @@ class JsonlSessionParser(Parser):
                     if role == "user" and not title:
                         title = text[:80]
                     model, tokens = self._row_billing(row)
+                    if not model:
+                        model = runtime_model
                     messages.append(
                         self.msg(
                             role,
