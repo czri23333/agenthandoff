@@ -12,8 +12,8 @@ from dataclasses import asdict
 from importlib import resources
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -186,13 +186,57 @@ def _git_info(cwd: str) -> dict:
 
 
 @app.get("/api/sessions")
-def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = None):
+def sessions(
+    request: Request,
+    cli: str | None = None,
+    cwd: str | None = None,
+    q: str | None = None,
+    since: str | None = None,
+):
+    """Full list, or the delta when `since` (an updated_at ISO string) is given.
+
+    The 30s poll ships `since=<newest updated_at it has>` and gets back only
+    sessions changed after that point (`{changed, snapshot}`); unchanged polls
+    cost bytes, not 344KB. Conditional GET via `If-None-Match` returns 304
+    when the full-list fingerprint is unchanged.
+    """
+    import hashlib
+    import json as _json
+
     cache_key = f"{cli}|{cwd}|{q}"
     now = time.monotonic()
     hit = _sessions_cache.get(cache_key)
     if hit and now - hit[0] < _CACHE_TTL:
-        return hit[1]
+        roots = hit[1]
+    else:
+        roots = _build_session_roots(cli, cwd, q)
+        _sessions_cache[cache_key] = (now, roots)
+    fingerprint = hashlib.sha1(
+        _json.dumps([(s.get("cli"), s.get("session_id"), s.get("updated_at")) for s in roots]).encode()
+    ).hexdigest()
+    if request.headers.get("if-none-match") == fingerprint:
+        return Response(status_code=304)
+    if since:
+        changed = [s for s in roots if (s.get("updated_at") or "") > since]
+        # Children nest under parents; a changed child must arrive with its
+        # parent shell so the frontend can mount it without a full reload.
+        wanted: dict[tuple[str, str], dict] = {}
+        for s in changed:
+            wanted[(s["cli"], s["session_id"])] = s
+            parent = s.get("parent_session_id")
+            host = next((h for h in roots if h["cli"] == s["cli"] and h["session_id"] == parent), None)
+            if host is not None:
+                wanted[(host["cli"], host["session_id"])] = host
+        payload: dict = {"changed": list(wanted.values()), "snapshot": fingerprint}
+        resp = JSONResponse(payload)
+        resp.headers["ETag"] = fingerprint
+        return resp
+    resp = JSONResponse(roots)
+    resp.headers["ETag"] = fingerprint
+    return resp
 
+
+def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
     out = []
     for p in all_parsers():
         if cli and p.cli != cli:
@@ -255,7 +299,6 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
         if kids:
             kids.sort(key=lambda k: k.get("updated_at") or "")
             host["child_count"] = len(kids)
-    _sessions_cache[cache_key] = (now, roots)
     return roots
 
 

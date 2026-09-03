@@ -220,3 +220,39 @@ def test_raw_zip_endpoint_carries_verbatim_files(client, monkeypatch):
     # unsupported (archive None) is a 404, not a silent empty zip
     assert client.get("/api/sessions/qodercn-ide/nope/raw").status_code == 404
 
+
+
+def test_sessions_delta_and_etag(client, monkeypatch):
+    """Incremental poll: full list carries ETag; since= returns only changes."""
+    from agent_handoff import model as M
+
+    metas = [
+        M.SessionMeta(cli="zcode", session_id="s-old", title="old", cwd="D:/d",
+                      updated_at="2026-01-01T00:00:00+00:00"),
+        M.SessionMeta(cli="zcode", session_id="s-new", title="new", cwd="D:/d",
+                      updated_at="2026-09-03T00:00:00+00:00"),
+    ]
+
+    class FakeParser:
+        cli = "zcode"
+
+        def list_sessions(self):
+            return metas
+
+        def peek_status(self, sid):
+            return None
+
+        def peek_needs_reply(self, sid):
+            return None
+
+    monkeypatch.setattr("agent_handoff.server.app.all_parsers", lambda: [FakeParser()])
+    monkeypatch.setattr("agent_handoff.server.app._git_info", lambda cwd: {})
+    r = client.get("/api/sessions")
+    assert r.status_code == 200
+    assert r.headers.get("etag")
+    assert isinstance(r.json(), list) and len(r.json()) == 2
+    r304 = client.get("/api/sessions", headers={"If-None-Match": r.headers["etag"]})
+    assert r304.status_code == 304
+    d = client.get("/api/sessions", params={"since": "2026-06-01T00:00:00+00:00"}).json()
+    assert sorted(d.keys()) == ["changed", "snapshot"]
+    assert [s["session_id"] for s in d["changed"]] == ["s-new"]

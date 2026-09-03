@@ -78,15 +78,53 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     [cliFilter],
   );
 
+  // Incremental poll (§4-3): ask only for sessions changed since the newest
+  // updated_at we hold, then merge. A changed child arrives with its parent
+  // shell so the tree mounts without a full reload.
+  const pollDelta = useCallback(async () => {
+    setSessions((prev) => {
+      if (!prev) {
+        void load();
+        return prev;
+      }
+      const newest = prev.reduce<string>(
+        (acc, s) => ((s.updated_at ?? "") > acc ? (s.updated_at ?? acc) : acc),
+        "",
+      );
+      if (!newest) {
+        void load();
+        return prev;
+      }
+      void api
+        .sessionsDelta(newest, { cli: cliFilter || undefined })
+        .then(({ changed }) => {
+          if (!changed.length) return;
+          setSessions((cur) => {
+            if (!cur) return cur;
+            const byId = new Map(cur.map((s) => [`${s.cli}:${s.session_id}`, s]));
+            for (const s of changed) byId.set(`${s.cli}:${s.session_id}`, s);
+            return [...byId.values()].sort((a, b) =>
+              (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+            );
+          });
+          setUpdatedAt(Date.now());
+        })
+        .catch(() => {
+          /* transient: the next tick retries, manual refresh reloads */
+        });
+      return prev;
+    });
+  }, [cliFilter, load]);
+
   useEffect(() => {
     load();
-    const poll = setInterval(() => load(), POLL_MS);
+    const poll = setInterval(() => pollDelta(), POLL_MS);
     const clock = setInterval(() => tick((n) => n + 1), 1000);
     return () => {
       clearInterval(poll);
       clearInterval(clock);
     };
-  }, [load]);
+  }, [load, pollDelta]);
 
   /* keyboard "/" from App.tsx */
   useEffect(() => {

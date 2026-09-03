@@ -248,6 +248,14 @@ export const api = {
     const p = new URLSearchParams(Object.entries(filters).filter(([, v]) => v) as [string, string][]);
     return get<SessionMeta[]>(`/api/sessions?${p}`);
   },
+  /** Incremental poll: sessions changed after `since` (+ snapshot ETag). */
+  sessionsDelta: (since: string, filters: { cli?: string; cwd?: string; q?: string } = {}) => {
+    const p = new URLSearchParams({
+      ...(Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) as Record<string, string>),
+      since,
+    });
+    return get<{ changed: SessionMeta[]; snapshot: string }>(`/api/sessions?${p}`);
+  },
   detail: (cli: string, sid: string, lang = "en", maxChars = 12000) =>
     get<SessionDetail>(
       `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/detail?lang=${lang}&max_chars=${maxChars}`,
