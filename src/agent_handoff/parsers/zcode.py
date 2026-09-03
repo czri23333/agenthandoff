@@ -211,6 +211,14 @@ class ZcodeParser(Parser):
                         if verdict:
                             mark = "✓" if passed else "✗"
                             texts.append(f"[目标核验 {mark}] {self.clean_text(verdict)[:400]}")
+                        elif pdata.get("timelineType") == "model_change":
+                            # Model-switch separators are visible in the
+                            # product timeline; without them the handoff
+                            # misattributes turns across the switch.
+                            frm = (pdata.get("fromModel") or {}).get("modelID") or "?"
+                            to = (pdata.get("toModel") or {}).get("modelID") or "?"
+                            if frm != to:
+                                texts.append(f"[模型切换] {frm} → {to}")
 
                 if role == "assistant" and mdata.get("modelID"):
                     model = mdata["modelID"]
