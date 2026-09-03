@@ -25,7 +25,7 @@
 
 ## §1 task-/quest 类会话不可达证明
 
-候选数据源（全部翻过，2026-09-03，共 9 处）：
+候选数据源（全部翻过，2026-09-03/04，共 10 处）：
 
 1. transcript（`~/.qoder-cn/projects/*/*.jsonl`）：行类型仅
    progress/session_meta/assistant/user；assistant 行如
@@ -48,6 +48,8 @@
    无账单。
 8. `chatEditingSessions/task-*/state.json` 的 `timeline`：536 个 textEdit
    文件操作 + 7 个 checkpoint，纯编辑时间线，无模型/消耗键。
+9. task 行全部顶层键（cwd/message/sessionId/timestamp/type/uuid）与
+   entrypoint/userType（全为 None）：无模型/用量键。
 
 结论：task- 类逐消息账单在本机磁盘不可达。UI 以“本存储不记模型”诚实标注。
 
