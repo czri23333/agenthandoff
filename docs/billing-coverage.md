@@ -73,6 +73,12 @@
 dsh turn 级 usage chunk 只存在于新 roll；老 turn 只有 text 流。
 已按 turn 合并（usage 有则附，无则空），不向前虚构。
 
+workbuddy 系剩余无 tokens 构成（2026-09-04 实测）：user harness 行
+（`<task-notification>` 等，天生无账单）+ `Interrupted by user` 中断 turn
+（`status: incomplete`，请求未完成故无 usage 行；且其 providerData 的
+messageId/conversationRequestId 均为 None，无关联键可追）。
+后者为数据源上限，非解析遗漏。
+
 ## §4 降级验收确认（2026-09-03，用户逐项确认）
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
