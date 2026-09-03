@@ -460,6 +460,24 @@ class JsonlSessionParser(Parser):
         row_errors: list[str] = []
         compacted_summaries = 0
         agent_surfaces: set[str] = set()
+        # Session-level pre-scan: does ANY row carry real text? A session of
+        # pure tool_use/tool_result rows is an internal tool loop — its tool
+        # rows stay dropped so load() is honestly empty. Byte-capped.
+        _has_text = False
+        _scanned = 0
+        for _path in paths:
+            if _has_text or _scanned > 1_000_000:
+                break
+            try:
+                _raw = _path.read_bytes()[:200_000] if _path.is_file() else b""
+            except OSError:
+                continue
+            _scanned += len(_raw)
+            for _row in read_jsonl(_path, limit=400):
+                _role, _text, _, _ = self._row_content(_row)
+                if _role in ("user", "assistant") and _text and not self.is_noise(_text):
+                    _has_text = True
+                    break
 
         for path in paths:
             try:
@@ -586,6 +604,32 @@ class JsonlSessionParser(Parser):
                                         priority=str(t.get("priority") or ""),
                                     )
                                 )
+                    # IDE task transcripts carry tool calls as their own rows
+                    # (the product timeline shows them as collapsible cards).
+                    # Fold each into a one-line [工具 name] turn — unless the
+                    # WHOLE session has no real text at all, in which case it
+                    # is an internal tool loop that stays honestly empty
+                    # (see test_qoder_tool_loop_hidden_but_loadable).
+                    if isinstance(tb, dict) and tb.get("type") == "tool_use" and _has_text:
+                        arg = ""
+                        if isinstance(tool_input, dict):
+                            for k in ("file_path", "path", "command", "pattern", "query"):
+                                v = tool_input.get(k)
+                                if isinstance(v, str) and v.strip():
+                                    arg = f" {v.strip()[:80]}"
+                                    break
+                        tool_line = f"[工具 {name}]{arg}"
+                        model_tb, _ = self._row_billing(row)
+                        messages.append(
+                            self.msg(
+                                "assistant",
+                                tool_line,
+                                text=tool_line,
+                                at=at,
+                                model=model_tb or runtime_model or None,
+                                subagent=sub_label,
+                            )
+                        )
                 if text and not self.is_noise(text):
                     key = (role, text)
                     if key in seen_ids:

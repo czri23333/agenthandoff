@@ -34,8 +34,8 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `codebuddy` | JSONL dir | ✓ | 25 | 15 ses / 301 msg | ✓ | ✅ stable (fixture-proven) |
 | `codebuddy-cn` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 4 msg | ✓ | ✅ stable (fixture-proven) |
-| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 126 msg | ✓ | ✅ stable (fixture-proven) |
-| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 117 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 295 msg | ✓ | ✅ stable (fixture-proven) |
+| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 262 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |

@@ -32,8 +32,8 @@
 | `codebuddy` | JSONL 目录 | ✓ | 25 | 15 ses / 301 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `codebuddy-cn` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwork` | JSONL 目录 | ✓ | 4 | 2 ses / 4 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `qoderwork-cn` | JSONL 目录 | ✓ | 25 | 2 ses / 126 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `qodercn-ide` | JSONL 目录 | ✓ | 25 | 3 ses / 117 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qoderwork-cn` | JSONL 目录 | ✓ | 25 | 2 ses / 295 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qodercn-ide` | JSONL 目录 | ✓ | 25 | 3 ses / 262 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qwenwork` | JSONL 目录 | ✓ | 3 | 1 ses / 3 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
