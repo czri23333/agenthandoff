@@ -12,13 +12,13 @@
 | codex | 2951 | 87% | 86% | 12% | turn_context 模型 + token_count 回填/pending |
 | opencode | 560 | 68% | 68% | 0% | message/modelID + tokens（user 行无） |
 | cherrystudio | 872 | 100% | 20% | 2% | message.model/usage（usage 仅部分行有） |
-| workbuddy | 246 | 89% | 93% | 21% | providerData.model；function_call 行 usage 累加结算+思考行回填；剩余为 user harness 行与跨文件乱序 |
-| codebuddy | 1245 | 91% | 93% | 13% | 同上 |
+| workbuddy | 708 | 94% | 96% | 21% | providerData.model；function_call 行 usage 累加结算+思考行回填；剩余为 user harness 行与跨文件乱序 |
+| codebuddy | 1403 | 92% | 92% | 13% | 同上 |
 | qoderwake-cn | 51 | 100% | 0% | 3% | 会话级 model_id 继承；库无 usage 表 |
 | dsh | 957 | 48% | 43% | 22% | request/context 模型 + turn usage；老 turn 无 usage chunk |
-| qoderwork-cn | 411 | 99% | 0% | 49% | message.model（qmodel_preview）；transcript 无 usage（7 会话全扫零命中） |
+| qoderwork-cn | 807 | 99% | 0% | 49% | message.model（qmodel_preview）；transcript 无 usage（7 会话全扫零命中） |
 | qodercn-ide(uuid) | 981 | 77% | 0% | 89%→ | runtime-config 模型继承；老会话无该行 |
-| qodercn-ide(task-) | 8790 | 0% | 0% | — | thinking 已折入正文（5863 条恢复）；模型/tokens 不可达（见 §1） |
+| qodercn-ide(task-) | 11490 | 12% | 1% | — | thinking+tool_use 已折入；同文件 runtime-config 模型继承；tokens 不可达（见 §1） |
 | qoderwork-app/cn-app | 171 | 100% | 0% | 45% | sub_chats.model_level 继承；库无 usage（见 §2）；linked 注记+水位 |
 | qwenwork-app | 0 | — | — | — | 空库（matrix empty 状态） |
 | kimi | 0 | — | — | — | wire 无对话行（empty_wire 注记） |
