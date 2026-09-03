@@ -50,6 +50,9 @@
    文件操作 + 7 个 checkpoint，纯编辑时间线，无模型/消耗键。
 9. task 行全部顶层键（cwd/message/sessionId/timestamp/type/uuid）与
    entrypoint/userType（全为 None）：无模型/用量键。
+10. `progress` 行 1501 条全为 hook 命令（post-activity-checkpoint 930、
+    qodersec review 486、session-stop-checkpoint 84、ensure-deps 1）：
+    任务执行钩子记录，无模型/消耗键。
 
 结论：task- 类逐消息账单在本机磁盘不可达。UI 以“本存储不记模型”诚实标注。
 
