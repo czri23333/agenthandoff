@@ -785,6 +785,10 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             if jt:
                 m.title = jt
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
+        # Pure tool loops (edit-and-resend orphans: zero real user messages)
+        # are not conversations — the product UI never lists them, so neither
+        # do we. Still loadable by id for debugging.
+        metas = [m for m in metas if m.title != _TOOLLOOP_TITLE]
         return metas
 
     def _job_titles(self) -> dict[str, str]:

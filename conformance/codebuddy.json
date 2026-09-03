@@ -4,17 +4,17 @@
     "zstandard": true
   },
   "parse": {
-    "file_anchors": 158,
+    "file_anchors": 191,
     "files": 25,
-    "messages": 250,
-    "nonempty_messages": 250,
+    "messages": 301,
+    "nonempty_messages": 301,
     "proven": true,
     "sampled": true,
-    "sessions": 23,
+    "sessions": 15,
     "shape_only": false,
     "source_messages": 322,
     "supplement_files": 0,
-    "tool_calls": 312,
+    "tool_calls": 373,
     "unusable": false
   },
   "store": {
