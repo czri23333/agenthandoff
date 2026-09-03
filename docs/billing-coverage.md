@@ -18,7 +18,7 @@
 | dsh | 4476 | 48% | 9%逐消息/100%会话级 | 22% | 成品 assistant/message（reasoning/tool-call/text）+用量卡按turn去重求和 |
 | qoderwork-cn | 807 | 99% | 0% | 49% | message.model（qmodel_preview）；transcript 无 usage（7 会话全扫零命中） |
 | qodercn-ide(uuid) | 981 | 77% | 0% | 89%→ | runtime-config 模型继承；老会话无该行 |
-| qodercn-ide(task-) | 11490 | 12% | 1% | — | thinking+tool_use 已折入；同文件 runtime-config 模型继承；tokens 不可达（见 §1） |
+| qodercn-ide(task-) | 13278 | 0% | 0% | — | thinking+tool_use 已折入正文；全机仅 2 个 modelMap 映射（auto）；quest/行内/workspace 均无模型，tokens 不可达（见 §1，9 处穷尽） |
 | qoderwork-app/cn-app | 171 | 100% | 0% | 45% | sub_chats.model_level 继承；库无 usage（见 §2）；linked 注记+水位 |
 | qwenwork-app | 0 | — | — | — | 空库（matrix empty 状态） |
 | kimi | 0 | — | — | — | wire 无对话行（empty_wire 注记） |
