@@ -130,6 +130,7 @@ def _family_of_path(root: Path, path: str) -> str | None:
                 return family
     return None
 
+
 # Cache of absorbed add_user_message fragments per store, keyed by the store
 # root and invalidated by the newest file mtime, so repeated dashboard loads do
 # not rescan every real session just to de-duplicate a handful of turn fragments.
@@ -361,9 +362,7 @@ class JsonlSessionParser(Parser):
             if cached:
                 return self._group_files(cached, session_id)
         found = [
-            p
-            for p in self._iter_jsonl()
-            if p.stem == session_id or p.parent.name == session_id
+            p for p in self._iter_jsonl() if p.stem == session_id or p.parent.name == session_id
         ]
         if found:
             return self._group_files(found, session_id)
@@ -436,12 +435,20 @@ class JsonlSessionParser(Parser):
         files: Counter[str] = Counter()
         tools: Counter[str] = Counter()
         todos: list[TodoItem] = []
+        tool_failures: list[str] = []
         cwd = ""
         title = ""
         started = None
         newest_at: str | None = None
         newest_mtime = 0.0
         seen_ids: set[tuple[str, str]] = set()
+        # callId -> claimed tool name, so result rows join back to the call.
+        pending_calls: dict[str, str] = {}
+        # Row-level provider signals that never surface as turns: compacted
+        # summaries, errors, and the agent surface (cli vs IDE).
+        row_errors: list[str] = []
+        compacted_summaries = 0
+        agent_surfaces: set[str] = set()
 
         for path in paths:
             try:
@@ -450,13 +457,74 @@ class JsonlSessionParser(Parser):
                 continue
             sub_label = self._subagent_label(path)
             for row in read_jsonl(path):
-                if row.get("type") == "summary":
+                rtype = row.get("type")
+                if rtype == "summary":
                     continue
                 cwd = cwd or (row.get("cwd") or "")
                 at = _iso(row.get("timestamp"))
                 started = started or at
                 if at and (newest_at is None or at > newest_at):
                     newest_at = at
+                self._collect_row_signals(row, agent_surfaces, row_errors)
+                if row.get("isCompacted") or row.get("isSummary"):
+                    # A turn the product already replaced with a summary: count
+                    # it, count its text only if there is real prose in it.
+                    compacted_summaries += 1
+
+                if rtype == "reasoning":
+                    # The model's own thinking. rawContent carries the text;
+                    # content is usually empty.
+                    rtext = self._reasoning_text(row)
+                    if rtext:
+                        model = self._row_billing(row)[0]
+                        messages.append(
+                            Message(
+                                role="assistant",
+                                text=f"[思考] {rtext}",
+                                at=at,
+                                model=model or None,
+                                subagent=sub_label,
+                            )
+                        )
+                    continue
+                if rtype == "function_call":
+                    name = str(row.get("name") or "tool")
+                    call_id = str(row.get("callId") or "")
+                    if call_id:
+                        pending_calls[call_id] = name
+                    tools[name] += 1
+                    args = self._tool_args(row)
+                    for p in self.extract_paths(args):
+                        files[p] += 1
+                    continue
+                if rtype == "function_call_result":
+                    name = str(row.get("name") or "")
+                    call_id = str(row.get("callId") or "")
+                    if not name and call_id:
+                        name = pending_calls.get(call_id, "tool")
+                    if name:
+                        status = str(row.get("status") or "")
+                        out = row.get("output")
+                        otext = ""
+                        if isinstance(out, dict):
+                            otext = str(out.get("text") or "")[:300]
+                        elif isinstance(out, str):
+                            otext = out[:300]
+                        if status and status != "completed":
+                            tool_failures.append(f"{name}:{status}")
+                            messages.append(
+                                Message(
+                                    role="assistant",
+                                    text=f"[工具{name} {status}] {self.clean_text(otext)[:300]}",
+                                    at=at,
+                                    subagent=sub_label,
+                                )
+                            )
+                    continue
+                if rtype == "file-history-snapshot":
+                    for fp in self._snapshot_files(row):
+                        files[fp] += 1
+                    continue
 
                 role, text, tool_blocks = self._row_content(row)
                 if not role:
@@ -502,6 +570,12 @@ class JsonlSessionParser(Parser):
         if len({m.at for m in messages if m.at}) > 1 and all(m.at for m in messages):
             messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
 
+        notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
+        if agent_surfaces:
+            notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
+        if compacted_summaries:
+            notes.append(f"compacted_turns:{compacted_summaries}")
+        notes.extend(f"row_error:{e}" for e in row_errors[:5])
         meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,
@@ -511,9 +585,67 @@ class JsonlSessionParser(Parser):
             updated_at=newest_at or _mtime_iso(newest_mtime),
             source_path=str(paths[0]),
             origin=self._origin(),
+            notes=notes,
         )
         return self.build_raw(meta, messages, todos, files, tools)
 
+    @staticmethod
+    def _collect_row_signals(row: dict, surfaces: set[str], errors: list[str]) -> None:
+        """providerData side-channels that never become turns.
+
+        ``agent`` (cli vs IDE) names the product surface; ``error`` records
+        why a turn died (e.g. Interrupted by user); usage doubles
+        (rawUsage + usage) are left to _row_billing.
+        """
+        pd = row.get("providerData")
+        if not isinstance(pd, dict):
+            return
+        agent = pd.get("agent")
+        if isinstance(agent, str) and agent.strip():
+            surfaces.add(agent.strip())
+        err = pd.get("error")
+        if isinstance(err, dict):
+            msg = str(err.get("message") or "").strip()
+            if msg and msg not in errors:
+                errors.append(msg[:160])
+
+    @staticmethod
+    def _reasoning_text(row: dict) -> str:
+        """The model's thinking: rawContent[].text (content is usually empty)."""
+        for key in ("rawContent", "content"):
+            blocks = row.get(key) or []
+            if not isinstance(blocks, list):
+                continue
+            parts = [
+                str(b.get("text") or "")
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") in ("reasoning_text", "text")
+            ]
+            text = "\n".join(p for p in parts if p).strip()
+            if text:
+                return text[:2000]
+        return ""
+
+    @staticmethod
+    def _tool_args(row: dict) -> dict:
+        """function_call carries input as arguments (dict or JSON string)."""
+        args = row.get("arguments")
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+                return parsed if isinstance(parsed, dict) else {}
+            except ValueError:
+                return {}
+        return row.get("input") if isinstance(row.get("input"), dict) else {}
+
+    @staticmethod
+    def _snapshot_files(row: dict) -> list[str]:
+        """trackedFileBackups maps a path to its backup — keys ARE the paths."""
+        snap = row.get("snapshot") or {}
+        backups = snap.get("trackedFileBackups") or {}
+        return [str(k) for k in backups if isinstance(k, str) and k.strip()]
 
     def usage(self, session_id: str) -> dict | None:
         """Per-model token accounting aggregated from the turns themselves.
@@ -671,7 +803,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         ai_title = ""
         started = updated = None
         stamp_files: list[Path] = []
-        for path in (scan_files or agent_files):
+        for path in scan_files or agent_files:
             stamp_files.append(path)
             for r in read_jsonl(path, limit=800):
                 cwd = cwd or (r.get("cwd") or "")
@@ -1062,11 +1194,7 @@ class QodercnIdeParser(JsonlSessionParser):
     def list_sessions(self) -> list[SessionMeta]:
         """The IDE's own chats only: wake/work families leave the shared store
         for their own CLI entries (still deep-linkable by id via load())."""
-        out = [
-            m
-            for m in self._list_all()
-            if _family_of_path(self.root, m.source_path) is None
-        ]
+        out = [m for m in self._list_all() if _family_of_path(self.root, m.source_path) is None]
         return out
 
     def _within_gap(self, a: SessionMeta, b: SessionMeta) -> bool:

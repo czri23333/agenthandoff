@@ -26,6 +26,28 @@ from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_t
 from agent_handoff.parsers.base import Parser
 
 
+def _opencode_model(raw) -> str | None:
+    """model is a JSON blob {"id","providerID","variant"}; render the id."""
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        return str(raw.get("id") or "") or None
+    try:
+        d = json.loads(raw)
+        return str(d.get("id") or "") or None
+    except (ValueError, TypeError):
+        s = str(raw).strip()
+        return s or None
+
+
+def _opencode_permission(raw) -> str | None:
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        return str(raw.get("mode") or raw) or None
+    return str(raw).strip() or None
+
+
 class OpenCodeParser(Parser):
     cli = "opencode"
 
@@ -54,13 +76,14 @@ class OpenCodeParser(Parser):
         try:
             with self._connect() as con:
                 rows = con.execute(
-                    "SELECT s.id, s.title, s.directory, s.parent_id, MAX(m.time_created) "
+                    "SELECT s.id, s.title, s.directory, s.parent_id, s.agent, s.model, "
+                    "MAX(m.time_created) "
                     "FROM session s LEFT JOIN message m ON m.session_id = s.id "
                     "GROUP BY s.id"
                 ).fetchall()
         except sqlite3.Error:
             return []
-        for sid, title, directory, parent_id, last_ms in rows:
+        for sid, title, directory, parent_id, agent, model, last_ms in rows:
             metas.append(
                 SessionMeta(
                     cli=self.cli,
@@ -70,6 +93,8 @@ class OpenCodeParser(Parser):
                     updated_at=ts_to_iso(last_ms) if last_ms else None,
                     source_path=str(self._db()),
                     parent_session_id=str(parent_id) if parent_id else None,
+                    model=_opencode_model(model),
+                    notes=([f"agent:{agent}"] if agent else []),
                 )
             )
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
@@ -88,9 +113,7 @@ class OpenCodeParser(Parser):
                 for table in ("session", "message", "part", "todo"):
                     idcol = "id" if table == "session" else "session_id"
                     try:
-                        cur = con.execute(
-                            f"SELECT * FROM {table} WHERE {idcol}=?", (session_id,)
-                        )
+                        cur = con.execute(f"SELECT * FROM {table} WHERE {idcol}=?", (session_id,))
                         cols = [d[0] for d in cur.description]
                         for row in cur.fetchall():
                             records.append((table, dict(zip(cols, row, strict=True))))
@@ -108,12 +131,32 @@ class OpenCodeParser(Parser):
         try:
             with self._connect() as con:
                 srow = con.execute(
-                    "SELECT id, title, directory, parent_id FROM session WHERE id=?",
+                    "SELECT id, title, directory, parent_id, agent, model, "
+                    "tokens_input, tokens_output, tokens_reasoning, "
+                    "tokens_cache_read, tokens_cache_write, cost, permission, "
+                    "time_compacting, version "
+                    "FROM session WHERE id=?",
                     (session_id,),
                 ).fetchone()
                 if srow is None:
                     return None
-                sid, title, directory, parent_id = srow
+                (
+                    sid,
+                    title,
+                    directory,
+                    parent_id,
+                    agent,
+                    model,
+                    t_in,
+                    t_out,
+                    t_reas,
+                    t_cr,
+                    t_cw,
+                    cost,
+                    permission,
+                    compacting,
+                    version,
+                ) = srow
                 mrows = con.execute(
                     "SELECT id, time_created, data FROM message "
                     "WHERE session_id=? ORDER BY time_created",
@@ -121,8 +164,7 @@ class OpenCodeParser(Parser):
                 ).fetchall()
                 parts_by_msg: dict[str, list[dict]] = {}
                 for p_mid, pdata in con.execute(
-                    "SELECT message_id, data FROM part WHERE session_id=? "
-                    "ORDER BY time_created",
+                    "SELECT message_id, data FROM part WHERE session_id=? ORDER BY time_created",
                     (session_id,),
                 ):
                     try:
@@ -146,7 +188,18 @@ class OpenCodeParser(Parser):
             cwd=str(directory or ""),
             source_path=str(self._db()),
             parent_session_id=str(parent_id) if parent_id else None,
+            model=_opencode_model(model),
+            tokens_in=int(t_in or 0) or None,
+            tokens_out=int(t_out or 0) or None,
+            permission=_opencode_permission(permission),
+            notes=([f"agent:{agent}"] if agent else []),
         )
+        if version and version != "local":
+            meta.notes = [*meta.notes, f"version:{version}"]
+        if compacting:
+            meta.notes = [*meta.notes, f"compacted_at:{ts_to_iso(compacting)}"]
+        if cost:
+            meta.notes = [*meta.notes, f"session_cost_usd:{cost}"]
 
         messages: list[Message] = []
         files: dict[str, int] = {}
@@ -207,7 +260,13 @@ class OpenCodeParser(Parser):
     # -- billing ------------------------------------------------------------
 
     def usage(self, session_id: str) -> dict | None:
-        """Per-model tokens + real USD cost from the message rows."""
+        """Per-model tokens + real USD cost from the message rows, checked
+        against the session row's own ledger (tokens_input/output/…, cost).
+
+        The message stream is per-turn truth; the session row is the product's
+        own accounting. When they disagree the session row wins for totals —
+        it is what the app's billing surface shows.
+        """
         if not self.available():
             return None
         try:
@@ -215,6 +274,12 @@ class OpenCodeParser(Parser):
                 rows = con.execute(
                     "SELECT data FROM message WHERE session_id=?", (session_id,)
                 ).fetchall()
+                ledger = con.execute(
+                    "SELECT tokens_input, tokens_output, tokens_reasoning, "
+                    "tokens_cache_read, tokens_cache_write, cost "
+                    "FROM session WHERE id=?",
+                    (session_id,),
+                ).fetchone()
         except sqlite3.Error:
             return None
         agg: dict[str, dict] = {}
@@ -232,8 +297,14 @@ class OpenCodeParser(Parser):
                 continue
             a = agg.setdefault(
                 model,
-                {"calls": 0, "tokens_in": 0, "tokens_out": 0, "reasoning": 0,
-                 "cache_write": 0, "cache_read": 0},
+                {
+                    "calls": 0,
+                    "tokens_in": 0,
+                    "tokens_out": 0,
+                    "reasoning": 0,
+                    "cache_write": 0,
+                    "cache_read": 0,
+                },
             )
             a["calls"] += 1
             a["tokens_in"] += int(tokens.get("input") or 0)
@@ -265,12 +336,25 @@ class OpenCodeParser(Parser):
             tot_in += a["tokens_in"]
             tot_out += a["tokens_out"]
             tot_calls += a["calls"]
-        return {
-            "models": models,
-            "totals": {
-                "calls": tot_calls,
-                "tokens_in": tot_in,
-                "tokens_out": tot_out,
-                "cost_usd": round(cost_total, 6),
-            },
+        totals: dict = {
+            "calls": tot_calls,
+            "tokens_in": tot_in,
+            "tokens_out": tot_out,
+            "cost_usd": round(cost_total, 6),
         }
+        if ledger and any(v for v in ledger):
+            # The product's own ledger overrules the summed turns.
+            (l_in, l_out, l_reas, l_cr, l_cw, l_cost) = ledger
+            totals.update(
+                {
+                    "calls": tot_calls,
+                    "tokens_in": int(l_in or tot_in),
+                    "tokens_out": int(l_out or tot_out),
+                    "reasoning": int(l_reas or 0),
+                    "cache_read": int(l_cr or 0),
+                    "cache_write": int(l_cw or 0),
+                    "cost_usd": round(float(l_cost or cost_total), 6),
+                    "source": "session_ledger",
+                }
+            )
+        return {"models": models, "totals": totals}

@@ -24,6 +24,16 @@ from agent_handoff.model import (
 from agent_handoff.parsers.base import Parser
 
 
+def _permission_mode(raw) -> str | None:
+    """The mode the session ran under (yolo | plan …), from the JSON blob."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw).get("mode") or None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 class ZcodeParser(Parser):
     cli = "zcode"
 
@@ -44,7 +54,8 @@ class ZcodeParser(Parser):
         out: list[SessionMeta] = []
         with self._connect() as con:
             rows = con.execute(
-                "SELECT id, title, directory, time_created, time_updated "
+                "SELECT id, title, directory, time_created, time_updated, "
+                "task_type, title_source, permission "
                 "FROM session ORDER BY time_updated DESC"
             ).fetchall()
         for r in rows:
@@ -57,6 +68,9 @@ class ZcodeParser(Parser):
                     started_at=ts_to_iso(r["time_created"]),
                     updated_at=ts_to_iso(r["time_updated"]),
                     source_path=str(self.db_path),
+                    task_type=r["task_type"] or None,
+                    title_source=r["title_source"] or None,
+                    permission=_permission_mode(r["permission"]),
                 )
             )
         return out
@@ -94,7 +108,8 @@ class ZcodeParser(Parser):
             return None
         with self._connect() as con:
             sess = con.execute(
-                "SELECT id, title, directory, time_created, time_updated, parent_id "
+                "SELECT id, title, directory, time_created, time_updated, parent_id, "
+                "task_type, title_source, permission "
                 "FROM session WHERE id=?",
                 (session_id,),
             ).fetchone()
@@ -105,6 +120,7 @@ class ZcodeParser(Parser):
             files: Counter[str] = Counter()
             tools: Counter[str] = Counter()
             compactions: list[CompactionEvent] = []
+            attachments: list[str] = []
             model: str | None = None
             tokens_in = tokens_out = 0
 
@@ -166,6 +182,31 @@ class ZcodeParser(Parser):
                         if isinstance(tool_input, dict):
                             for path in self.extract_paths(tool_input):
                                 files[path] += 1
+                    elif ptype == "file":
+                        # A file the user attached: filename + path are both on
+                        # the row. Record it as an attachment (not a tool touch).
+                        src = pdata.get("source") or {}
+                        for cand in (
+                            pdata.get("url"),
+                            pdata.get("filename"),
+                            src.get("path") if isinstance(src, dict) else None,
+                        ):
+                            if isinstance(cand, str) and cand.strip():
+                                if cand not in attachments:
+                                    attachments.append(cand)
+                                files[cand] += 1
+                                break
+                    elif ptype == "timeline":
+                        # Goal-verification separators carry the product's own
+                        # verdict on its target (passed/nextAction). Fold the
+                        # verdict into the message flow so the handoff keeps
+                        # what the app itself concluded.
+                        gv = pdata.get("verification") or {}
+                        passed = gv.get("passed")
+                        verdict = str(gv.get("nextAction") or gv.get("reason") or "").strip()
+                        if verdict:
+                            mark = "✓" if passed else "✗"
+                            texts.append(f"[目标核验 {mark}] {self.clean_text(verdict)[:400]}")
 
                 if role == "assistant" and mdata.get("modelID"):
                     model = mdata["modelID"]
@@ -215,10 +256,51 @@ class ZcodeParser(Parser):
             source_path=str(self.db_path),
             provider=provider_row[0] if provider_row else None,
             parent_session_id=sess["parent_id"],
+            task_type=sess["task_type"] or None,
+            title_source=sess["title_source"] or None,
+            permission=_permission_mode(sess["permission"]),
+            attachments=attachments,
         )
         raw = self.build_raw(meta, messages, todos, files, tools, interruption)
         raw.compactions = compactions
         return raw
+
+    def tool_detail(self, session_id: str) -> list[dict] | None:
+        """Per-call tool ledger from the product's own tool_usage table.
+
+        Each row carries what the transcript cannot: duration, exit code,
+        bytes in/out, truncation, retries, approval and side-effect scope —
+        the same numbers the product's UI shows for a tool call.
+        """
+        if not self.available():
+            return None
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT tool_name, status, duration_ms, exit_code, "
+                    "output_bytes, truncated, retry_count, approval_status, "
+                    "read_only, destructive, error_type "
+                    "FROM tool_usage WHERE session_id=? ORDER BY started_at",
+                    (session_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return None
+        return [
+            {
+                "tool": r[0],
+                "status": r[1],
+                "duration_ms": r[2],
+                "exit_code": r[3],
+                "output_bytes": r[4],
+                "truncated": bool(r[5]),
+                "retries": r[6],
+                "approval": r[7],
+                "read_only": bool(r[8]),
+                "destructive": bool(r[9]),
+                "error": r[10],
+            }
+            for r in rows
+        ]
 
     def usage(self, session_id: str) -> dict | None:
         """Aggregate the store's model_usage table: tokens, cache, latency.
@@ -247,8 +329,19 @@ class ZcodeParser(Parser):
 
         models = []
         tot_in = tot_out = tot_calls = 0
-        for (model, calls, tin, tout, reasoning, cw, cr, avg_dur, avg_ttft,
-             sum_out, sum_decode_ms) in rows:
+        for (
+            model,
+            calls,
+            tin,
+            tout,
+            reasoning,
+            cw,
+            cr,
+            avg_dur,
+            avg_ttft,
+            sum_out,
+            sum_decode_ms,
+        ) in rows:
             models.append(
                 {
                     "model": model,

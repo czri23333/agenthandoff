@@ -171,6 +171,14 @@ class DshParser(Parser):
         cwd = ""
         created = updated = None
         parent = None
+        # Non-null only: agent identity (who ran), model + window (what ran),
+        # the turn-end verdict (why it stopped — e.g. a 429 quota death).
+        agent_label: str | None = None
+        agent_provider: str | None = None
+        agent_model: str | None = None
+        req_model: str | None = None
+        context_window: int | None = None
+        turn_end: dict | None = None
 
         for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -199,6 +207,23 @@ class DshParser(Parser):
                 )
                 if text and not self.is_noise(text):
                     messages.append(Message(role="user", text=text, at=ts_to_iso(row.get("time"))))
+            elif t == "subagent/descriptor":
+                data = row.get("data") or {}
+                agent_label = str(data.get("label") or "") or agent_label
+                agent_provider = str(data.get("agentProvider") or "") or agent_provider
+                agent_model = str(data.get("agentModel") or "") or agent_model
+            elif t == "request/header":
+                header = (row.get("data") or {}).get("header") or {}
+                cfg = header.get("config") or {}
+                req_model = str(cfg.get("model") or "") or req_model
+            elif t == "request/context":
+                data = row.get("data") or {}
+                req_model = str(data.get("model") or "") or req_model
+                window = data.get("contextWindow")
+                if isinstance(window, int):
+                    context_window = window
+            elif t == "turn/end":
+                turn_end = row.get("data") or turn_end
             elif t == "assistant/chunk":
                 chunk = ((row.get("data") or {}).get("chunk")) or {}
                 if chunk.get("type") == "text":
@@ -217,9 +242,56 @@ class DshParser(Parser):
             updated_at=updated,
             source_path=str(path),
             parent_session_id=parent,
+            model=req_model or agent_model or None,
+            notes=_dsh_notes(agent_label, agent_provider, agent_model, req_model, context_window),
         )
-        return self.build_raw(meta, messages, [], files, tools)
+        raw = self.build_raw(meta, messages, [], files, tools)
+        raw.interruption = _dsh_interruption(turn_end)
+        return raw
 
     def _resolve(self, session_id: str) -> Path | None:
         hits = list(self.root.rglob(f"{session_id}/session.jsonl.zstd"))
         return hits[0] if hits else None
+
+
+def _dsh_notes(
+    label: str | None,
+    provider: str | None,
+    agent_model: str | None,
+    req_model: str | None,
+    window: int | None,
+) -> list[str]:
+    """Agent identity + model + window the roll declares about itself."""
+    notes: list[str] = []
+    if label:
+        notes.append(f"agent:{label}")
+    if provider:
+        notes.append(f"agent_provider:{provider}")
+    if agent_model and agent_model != req_model:
+        notes.append(f"agent_model:{agent_model}")
+    if window:
+        notes.append(f"context_window:{window}")
+    return notes
+
+
+def _dsh_interruption(turn_end: dict | None):
+    """The turn-end verdict is the store's own account of why a run stopped —
+    including quota deaths (e.g. GoUsageLimitError) that no row count reveals.
+    """
+    from agent_handoff.model import Interruption
+
+    if not turn_end:
+        return Interruption()
+    reason = turn_end.get("reason") or {}
+    kind = str(reason.get("kind") or "")
+    if kind == "error":
+        err = reason.get("error") or {}
+        msg = str(err.get("message") or "")[:300]
+        if " sage " in f" {msg} ".lower() or "limit" in msg.lower() or "429" in msg:
+            return Interruption(kind="error", detail=f"quota/limit: {msg[:200]}")
+        return Interruption(kind="error", detail=msg[:200])
+    if kind in ("complete", "completed", "done", "finished"):
+        return Interruption(kind="clean")
+    if kind:
+        return Interruption(kind="unknown", detail=f"turn_end:{kind}")
+    return Interruption()

@@ -18,7 +18,8 @@ def zcode_store(tmp_path: Path) -> Path:
     con.executescript(
         """
         CREATE TABLE session (id TEXT, project_id TEXT, title TEXT, directory TEXT,
-            time_created INTEGER, time_updated INTEGER, parent_id TEXT);
+            time_created INTEGER, time_updated INTEGER, parent_id TEXT,
+            task_type TEXT, title_source TEXT, permission TEXT);
         CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER,
             data TEXT, sequence INTEGER);
         CREATE TABLE part (id TEXT, message_id TEXT, session_id TEXT,
@@ -29,20 +30,43 @@ def zcode_store(tmp_path: Path) -> Path:
         """
     )
     con.execute(
-        "INSERT INTO session VALUES ('sess_a','p','Fix login loop','D:/demo',"
-        "1756500000000,1756503600000,NULL)"
+        "INSERT INTO session (id, project_id, title, directory, time_created,"
+        " time_updated, parent_id, task_type, title_source, permission)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            "sess_a",
+            "p",
+            "Fix login loop",
+            "D:/demo",
+            1756500000000,
+            1756503600000,
+            None,
+            "interactive",
+            "first_input",
+            json.dumps({"mode": "yolo"}),
+        ),
     )
     msgs = [
-        ("m1", "user", 1756500001000,
-         [("text", "Fix the login redirect loop. 不要引入新的依赖")], 0),
+        (
+            "m1",
+            "user",
+            1756500001000,
+            [("text", "Fix the login redirect loop. 不要引入新的依赖")],
+            0,
+        ),
         ("m2", "assistant", 1756500002000, [("text", "Root cause: middleware order.")], 1),
         ("m3", "assistant", 1756500003000, [("text", "Patched auth middleware.")], 2),
     ]
     for mid, role, ts, parts, seq in msgs:
         con.execute(
             "INSERT INTO message VALUES (?,?,?,?,?)",
-            (mid, "sess_a", ts,
-             json.dumps({"role": role, "tokens": {"input": 10, "output": 5}}), seq),
+            (
+                mid,
+                "sess_a",
+                ts,
+                json.dumps({"role": role, "tokens": {"input": 10, "output": 5}}),
+                seq,
+            ),
         )
         for pi, (ptype, text) in enumerate(parts):
             con.execute(
@@ -107,10 +131,24 @@ def claude_store(tmp_path: Path) -> Path:
                     "content": [
                         {"type": "text", "text": "Working on it."},
                         {"type": "tool_use", "name": "Read", "input": {"file_path": "src/main.py"}},
-                        {"type": "tool_use", "name": "TodoWrite", "input": {"todos": [
-                            {"content": "step one", "status": "completed", "priority": "high"},
-                            {"content": "step two", "status": "in_progress", "priority": "high"},
-                        ]}},
+                        {
+                            "type": "tool_use",
+                            "name": "TodoWrite",
+                            "input": {
+                                "todos": [
+                                    {
+                                        "content": "step one",
+                                        "status": "completed",
+                                        "priority": "high",
+                                    },
+                                    {
+                                        "content": "step two",
+                                        "status": "in_progress",
+                                        "priority": "high",
+                                    },
+                                ]
+                            },
+                        },
                     ],
                 },
             },
@@ -159,12 +197,24 @@ def dsh_store(tmp_path: Path) -> Path:
     rows = [
         {"type": "session", "id": "11112222", "createdAt": 1756548000000, "cwd": "D:/demo"},
         {"type": "session/title", "data": {"title": "dsh demo task"}},
-        {"type": "user/message", "seq": 1, "time": 1756548001000,
-         "data": {"content": [{"type": "text", "text": "dsh user ask"}]}},
-        {"type": "assistant/chunk", "seq": 2, "time": 1756548002000,
-         "data": {"chunk": {"type": "text", "text": "dsh reply"}}},
-        {"type": "assistant/chunk", "seq": 3, "time": 1756548002500,
-         "data": {"chunk": {"type": "usage", "usage": {"inputTokens": 5}}}},
+        {
+            "type": "user/message",
+            "seq": 1,
+            "time": 1756548001000,
+            "data": {"content": [{"type": "text", "text": "dsh user ask"}]},
+        },
+        {
+            "type": "assistant/chunk",
+            "seq": 2,
+            "time": 1756548002000,
+            "data": {"chunk": {"type": "text", "text": "dsh reply"}},
+        },
+        {
+            "type": "assistant/chunk",
+            "seq": 3,
+            "time": 1756548002500,
+            "data": {"chunk": {"type": "usage", "usage": {"inputTokens": 5}}},
+        },
         {"type": "turn/start", "seq": 4},
     ]
     data = ("\n".join(json.dumps(r, ensure_ascii=False) for r in rows)).encode("utf-8")
@@ -186,12 +236,30 @@ def codex_store(tmp_path: Path) -> Path:
                     "cwd": "D:/demo",
                 },
             },
-            {"type": "response_item", "payload": {"type": "message", "role": "developer",
-                "content": [{"type": "input_text", "text": "<app-context> injected"}]}},
-            {"type": "response_item", "payload": {"type": "message", "role": "user",
-                "content": [{"type": "input_text", "text": "codex ask"}]}},
-            {"type": "response_item", "payload": {"type": "message", "role": "assistant",
-                "content": [{"type": "output_text", "text": "codex answer"}]}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "<app-context> injected"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "codex ask"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "codex answer"}],
+                },
+            },
         ],
     )
     return tmp_path

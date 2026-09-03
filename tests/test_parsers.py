@@ -1,4 +1,4 @@
-'''Parser tests against synthetic stores (see CONTRIBUTING: happy path + corrupt input).'''
+"""Parser tests against synthetic stores (see CONTRIBUTING: happy path + corrupt input)."""
 
 from __future__ import annotations
 
@@ -22,6 +22,9 @@ def test_zcode_happy(zcode_store):
     metas = p.list_sessions()
     assert [m.session_id for m in metas] == ["sess_a"]
     assert metas[0].title == "Fix login loop"
+    assert metas[0].task_type == "interactive"
+    assert metas[0].title_source == "first_input"
+    assert metas[0].permission == "yolo"
     raw = p.load("sess_a")
     assert raw is not None
     roles = [(m.role, m.text) for m in raw.messages]
@@ -30,6 +33,49 @@ def test_zcode_happy(zcode_store):
     assert raw.tool_counts["Edit"] == 1
     assert [t.content for t in raw.todos if t.status == "in_progress"] == ["patch middleware"]
     assert raw.meta.tokens_in == 30 and raw.meta.tokens_out == 15  # summed across turns
+    assert raw.meta.task_type == "interactive"
+    assert raw.meta.attachments == []
+
+
+def test_zcode_attachments_and_goal_verdict(zcode_store):
+    """file parts land in attachments; goal_verification folds its verdict in."""
+    import json
+    import sqlite3
+
+    db = zcode_store / "zcode" / "cli" / "db" / "db.sqlite"
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO part VALUES ('m1file','m1','sess_a',?,4)",
+        (
+            json.dumps(
+                {
+                    "type": "file",
+                    "filename": "spec.html",
+                    "url": "C:/dl/spec.html",
+                    "source": {"path": "C:/dl/spec.html"},
+                }
+            ),
+        ),
+    )
+    con.execute(
+        "INSERT INTO part VALUES ('m2goal','m2','sess_a',?,5)",
+        (
+            json.dumps(
+                {
+                    "type": "timeline",
+                    "timelineType": "goal_verification",
+                    "verification": {"passed": True, "nextAction": "Ship it"},
+                }
+            ),
+        ),
+    )
+    con.commit()
+    con.close()
+    p = ZcodeParser(db)
+    raw = p.load("sess_a")
+    assert raw is not None
+    assert raw.meta.attachments == ["C:/dl/spec.html"]
+    assert any("[目标核验 ✓] Ship it" in m.text for m in raw.messages)
 
 
 def test_zcode_missing_session(zcode_store):
@@ -71,8 +117,11 @@ def test_qoder_and_qwen_share_dialect(tmp_path):
         root.mkdir(parents=True)
         rows = [
             {"type": "runtime-config", "sessionId": "s1", "timestamp": 1},
-            {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
-             "message": {"role": "user", "content": [{"type": "text", "text": text}]}},
+            {
+                "type": "user",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            },
         ]
         with open(root / "s1.jsonl", "w", encoding="utf-8") as f:
             for r in rows:
@@ -96,10 +145,19 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     root.mkdir(parents=True)
     turn = [
         {"type": "runtime-config", "sessionId": "aaa111", "timestamp": 1},
-        {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
-         "message": {"role": "user", "content": [{"type": "text", "text": "fix the login loop"}]}},
-        {"type": "assistant", "timestamp": "2026-08-30T10:00:01Z",
-         "message": {"role": "assistant", "content": [{"type": "text", "text": "found it"}]}},
+        {
+            "type": "user",
+            "timestamp": "2026-08-30T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": "fix the login loop"}],
+            },
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-08-30T10:00:01Z",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "found it"}]},
+        },
     ]
     with open(root / "aaa111.jsonl", "w", encoding="utf-8") as fh:
         for r in turn:
@@ -109,14 +167,36 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     # a tool_use - the exact shape qoder writes for a browser/automation run.
     loop = [
         {"type": "runtime-config", "sessionId": "bbb222", "timestamp": 1},
-        {"type": "user", "timestamp": "2026-08-30T10:01:00Z",
-         "message": {"role": "user", "content": [
-             {"content": "browser said no", "is_error": False,
-              "tool_use_id": "t1", "type": "tool_result"}]}},
-        {"type": "assistant", "timestamp": "2026-08-30T10:01:01Z",
-         "message": {"role": "assistant", "content": [
-             {"id": "c1", "input": {"url": "https://example.test"},
-              "name": "browser_open", "type": "tool_use"}]}},
+        {
+            "type": "user",
+            "timestamp": "2026-08-30T10:01:00Z",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "content": "browser said no",
+                        "is_error": False,
+                        "tool_use_id": "t1",
+                        "type": "tool_result",
+                    }
+                ],
+            },
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-08-30T10:01:01Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "id": "c1",
+                        "input": {"url": "https://example.test"},
+                        "name": "browser_open",
+                        "type": "tool_use",
+                    }
+                ],
+            },
+        },
     ]
     with open(root / "bbb222.jsonl", "w", encoding="utf-8") as fh:
         for r in loop:
@@ -144,10 +224,16 @@ def test_qoder_shared_store_splits_families(tmp_path):
         rootdir.mkdir(parents=True, exist_ok=True)
         rows = [
             {"type": "runtime-config", "sessionId": sid, "timestamp": 1},
-            {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
-             "message": {"role": "user", "content": [{"type": "text", "text": text}]}},
-            {"type": "assistant", "timestamp": "2026-08-30T10:00:01Z",
-             "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}},
+            {
+                "type": "user",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-08-30T10:00:01Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+            },
         ]
         with open(rootdir / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for row in rows:
@@ -161,9 +247,7 @@ def test_qoder_shared_store_splits_families(tmp_path):
         "bbb222",
         "wake group ask",
     )
-    write_session(
-        store / "C--u--qoderworkcn-workspace-m1", "ccc333", "ccc333", "work ask"
-    )
+    write_session(store / "C--u--qoderworkcn-workspace-m1", "ccc333", "ccc333", "work ask")
 
     from agent_handoff.parsers.qoderwake import _WakeShared
 

@@ -69,6 +69,17 @@ class SessionMeta:
     origin: str | None = None
     parent_session_id: str | None = None
     notes: list[str] = field(default_factory=list)
+    # Task kind as the store reports it (zcode: interactive | subagent_child …).
+    # Drives grouping: the app itself separates child runs from conversations.
+    task_type: str | None = None
+    # How the title was produced (zcode: generated | first_input …). A
+    # first_input title is the user's own words; generated is the model's.
+    title_source: str | None = None
+    # Permission mode the session ran under (zcode: {"mode":"yolo"|"plan"…}).
+    permission: str | None = None
+    # Files the user attached to the conversation (zcode file parts:
+    # filename + path). Distinct from files a tool touched mid-run.
+    attachments: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -228,6 +239,10 @@ class HandoffBundle:
                 "origin": self.meta.origin,
                 "parent_session_id": self.meta.parent_session_id,
                 "notes": self.meta.notes,
+                "task_type": self.meta.task_type,
+                "title_source": self.meta.title_source,
+                "permission": self.meta.permission,
+                "attachments": list(self.meta.attachments),
             },
             "objective": self.objective,
             "state": {
