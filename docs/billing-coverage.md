@@ -15,7 +15,7 @@
 | workbuddy | 708 | 94% | 96% | 21% | providerData.model；function_call 行 usage 累加结算+思考行回填；剩余为 user harness 行与跨文件乱序 |
 | codebuddy | 1403 | 92% | 92% | 13% | 同上 |
 | qoderwake-cn | 51 | 100% | 0% | 3% | 会话级 model_id 继承；库无 usage 表 |
-| dsh | 957 | 48% | 43% | 22% | request/context 模型 + turn usage；老 turn 无 usage chunk |
+| dsh | 4476 | 48% | 9%逐消息/100%会话级 | 22% | 成品 assistant/message（reasoning/tool-call/text）+用量卡按turn去重求和 |
 | qoderwork-cn | 807 | 99% | 0% | 49% | message.model（qmodel_preview）；transcript 无 usage（7 会话全扫零命中） |
 | qodercn-ide(uuid) | 981 | 77% | 0% | 89%→ | runtime-config 模型继承；老会话无该行 |
 | qodercn-ide(task-) | 11490 | 12% | 1% | — | thinking+tool_use 已折入；同文件 runtime-config 模型继承；tokens 不可达（见 §1） |

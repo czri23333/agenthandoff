@@ -183,6 +183,7 @@ class DshParser(Parser):
         turns_usage: dict = {}
         turns_reason: dict = {}
         turns_seen_index: dict = {}
+        turns_tools: dict = {}
 
         for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -227,6 +228,48 @@ class DshParser(Parser):
                     context_window = window
             elif t == "turn/end":
                 turn_end = row.get("data") or turn_end
+            elif t == "assistant/message":
+                # Finished message blocks: the product's own assembled turns
+                # (reasoning/tool-call/text). Prefer these over the chunk
+                # stream; chunks remain as fallback for sessions without them.
+                data = row.get("data") or {}
+                turn = data.get("turn")
+                msg = data.get("message") or {}
+                for b in msg.get("content") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    btype = b.get("type")
+                    if btype == "reasoning":
+                        praw = b.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_reason.setdefault(turn, []).append((text, praw))
+                    elif btype == "tool-call":
+                        name = str(b.get("name") or "tool")
+                        tools[name] += 1
+                        args = b.get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except ValueError:
+                                args = {}
+                        if isinstance(args, dict):
+                            for pth in self.extract_paths(args):
+                                files[pth] += 1
+                        arg = ""
+                        if isinstance(args, dict):
+                            for k in ("file_path", "path", "command", "description"):
+                                v = args.get(k)
+                                if isinstance(v, str) and v.strip():
+                                    arg = f" {v.strip()[:80]}"
+                                    break
+                        turns_tools.setdefault(turn, []).append(f"[工具 {name}]{arg}")
+                    elif btype == "text":
+                        praw = b.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_text.setdefault(turn, []).append((ts_to_iso(row.get("time")), text, praw))
+                            turns_seen_index[turn, len(turns_text[turn])] = True
             elif t == "assistant/chunk":
                 data = row.get("data") or {}
                 chunk = data.get("chunk") or {}
@@ -266,7 +309,7 @@ class DshParser(Parser):
         # billing (input/output/reasoning) plus the request model. Reasoning
         # deltas ride along as [思考] turns, the same convention as the
         # CherryStudio parser.
-        for turn in sorted(set(list(turns_text) + list(turns_reason)), key=lambda k: (k is None, k)):
+        for turn in sorted(set(list(turns_text) + list(turns_reason) + list(turns_tools)), key=lambda k: (k is None, k)):
             parts = turns_text.get(turn, [])
             at = next((a for a, _, _ in parts if a), None)
             u = turns_usage.get(turn) or {}
@@ -285,6 +328,19 @@ class DshParser(Parser):
                         tokens_in=msg_in if isinstance(msg_in, int) else None,
                         tokens_out=msg_out if isinstance(msg_out, int) else None,
                         tokens_reasoning=msg_reason if isinstance(msg_reason, int) else None,
+                    )
+                )
+            for tool_line in turns_tools.get(turn, []):
+                # Tool rows carry no billing of their own: the turn's usage
+                # lives on the text/thinking turns (else usage() would sum
+                # one request N times for N tool calls).
+                messages.append(
+                    self.msg(
+                        "assistant",
+                        tool_line,
+                        text=tool_line,
+                        at=at,
+                        model=model,
                     )
                 )
             reason_pairs = turns_reason.get(turn, [])
@@ -342,6 +398,73 @@ class DshParser(Parser):
         raw = self.build_raw(meta, messages, [], files, tools)
         raw.interruption = _dsh_interruption(turn_end)
         return raw
+
+    def usage(self, session_id: str) -> dict | None:
+        """Per-model tokens summed once per turn (not per message).
+
+        A turn fans out into text/thinking/tool rows sharing one usage
+        chunk — summing messages would bill one request N times. Aggregate
+        the turn-level usage rows instead.
+        """
+        if not self.available() or not self.codec_ok():
+            return None
+        path = self._resolve(session_id)
+        if path is None:
+            return None
+        import json
+
+        from collections import Counter
+
+        seen: dict = {}
+        model: str | None = None
+        for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = row.get("type")
+            if t == "request/context":
+                data = row.get("data") or {}
+                if isinstance(data.get("model"), str) and data["model"]:
+                    model = data["model"]
+            data = row.get("data") or {}
+            chunk = data.get("chunk") or {}
+            if row.get("type") == "assistant/chunk" and chunk.get("type") == "usage":
+                u = chunk.get("usage") or {}
+                if data.get("turn") not in seen:
+                    seen[data.get("turn")] = u
+        if not seen:
+            return None
+        tot_in = tot_out = tot_reason = calls = 0
+        for u in seen.values():
+            i, o, r = u.get("inputTokens"), u.get("outputTokens"), u.get("reasoningTokens")
+            if isinstance(i, int):
+                tot_in += i
+            if isinstance(o, int):
+                tot_out += o
+            if isinstance(r, int):
+                tot_reason += r
+            calls += 1
+        name = model or "unknown"
+        return {
+            "models": [
+                {
+                    "model": name,
+                    "calls": calls,
+                    "tokens_in": tot_in,
+                    "tokens_out": tot_out,
+                    "reasoning": tot_reason,
+                    "cache_write": 0,
+                    "cache_read": 0,
+                    "avg_ttft_ms": None,
+                    "tok_per_s": None,
+                }
+            ],
+            "totals": {"calls": calls, "tokens_in": tot_in, "tokens_out": tot_out},
+        }
 
     def _resolve(self, session_id: str) -> Path | None:
         hits = list(self.root.rglob(f"{session_id}/session.jsonl.zstd"))

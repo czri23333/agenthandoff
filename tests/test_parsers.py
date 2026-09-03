@@ -275,6 +275,18 @@ def test_dsh_roll(dsh_store):
     assert len(raw.messages) == 2
 
 
+def test_dsh_usage_sums_once_per_turn(dsh_store):
+    """usage() sums turn-level usage rows, not fanned-out messages."""
+    from agent_handoff.parsers.dsh import DshParser
+
+    p = DshParser(dsh_store / "dsh" / "sessions")
+    u = p.usage("11112222")
+    assert u is not None
+    assert u["totals"] == {"calls": 1, "tokens_in": 5, "tokens_out": 0}
+    assert u["models"][0]["calls"] == 1
+    assert p.usage("nope") is None
+
+
 def test_codex_rollout(codex_store):
     p = CodexParser(codex_store / "codex" / "sessions")
     metas = p.list_sessions()
