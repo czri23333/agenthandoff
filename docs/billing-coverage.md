@@ -25,7 +25,7 @@
 
 ## §1 task-/quest 类会话不可达证明
 
-候选数据源（全部翻过，2026-09-03/04，共 10 处）：
+候选数据源（全部翻过，2026-09-03/04，共 11 处，含官方本体逆向）：
 
 1. transcript（`~/.qoder-cn/projects/*/*.jsonl`）：行类型仅
    progress/session_meta/assistant/user；assistant 行如
@@ -53,6 +53,13 @@
 10. `progress` 行 1501 条全为 hook 命令（post-activity-checkpoint 930、
     qodersec review 486、session-stop-checkpoint 84、ensure-deps 1）：
     任务执行钩子记录，无模型/消耗键。
+11. 官方本体逆向（`D:/Qoder CN/resources/app.asar` 解包验证）：
+    任务面板经 `executionSessionId` 关联会话文件（缺失则标“会话已归档或删除”）；
+    用量模型为 `{categories[].tokens, totalTokens, maxTokens, percentage,
+    apiUsage}` ——**上下文水位**（内存运行时值），非逐消息账单；
+    `chatSessionProjectionService` 从事件流读 `usage ?? metadata`，
+    落盘 transcript 无此字段。证实：官方逐消息账单同样不落盘，
+    磁盘逆向到顶。
 
 结论：task- 类逐消息账单在本机磁盘不可达。UI 以“本存储不记模型”诚实标注。
 
