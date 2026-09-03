@@ -444,6 +444,10 @@ class JsonlSessionParser(Parser):
         seen_ids: set[tuple[str, str]] = set()
         # callId -> claimed tool name, so result rows join back to the call.
         pending_calls: dict[str, str] = {}
+        # Billing that rides on non-message rows (workbuddy puts usage on
+        # function_call rows, which never become Messages): settled onto the
+        # next assistant turn, same as the codex token_count flow.
+        pending_billing: dict = {}
         # Session-serving model from runtime-config rows (IDE family); turns
         # without their own billing inherit it.
         runtime_model: str = ""
@@ -505,6 +509,16 @@ class JsonlSessionParser(Parser):
                     args = self._tool_args(row)
                     for p in self.extract_paths(args):
                         files[p] += 1
+                    _m, _t = self._row_billing(row)
+                    if _t.get("in") is not None or _t.get("out") is not None:
+                        # usage rows often come in runs (tool-loop tails):
+                        # accumulate, the next assistant turn takes the sum.
+                        acc = pending_billing.get("pending") or {}
+                        for k in ("in", "out", "reasoning", "cache_read"):
+                            v = _t.get(k)
+                            if isinstance(v, int):
+                                acc[k] = acc.get(k, 0) + v
+                        pending_billing["pending"] = acc
                     continue
                 if rtype == "function_call_result":
                     name = str(row.get("name") or "")
@@ -567,6 +581,10 @@ class JsonlSessionParser(Parser):
                     model, tokens = self._row_billing(row)
                     if not model:
                         model = runtime_model
+                    if role == "assistant" and tokens.get("in") is None and tokens.get("out") is None:
+                        pend = pending_billing.pop("pending", None)
+                        if pend:
+                            tokens = {**tokens, **{k: v for k, v in pend.items() if tokens.get(k) is None}}
                     messages.append(
                         self.msg(
                             role,
