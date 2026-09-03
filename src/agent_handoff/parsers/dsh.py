@@ -184,8 +184,29 @@ class DshParser(Parser):
         turns_reason: dict = {}
         turns_seen_index: dict = {}
         turns_tools: dict = {}
+        # Turns carrying a finished assistant/message row: their chunk rows
+        # are streaming pre-images of the same content — drop the chunks.
+        # Pre-scan first: chunks usually arrive BEFORE the finished row.
+        # Single decompression shared with the main loop below.
+        try:
+            _all = _decompress(path).decode("utf-8", errors="replace").splitlines()
+        except (OSError, ValueError):
+            _all = []
+        has_finished: set[str] = set()
+        for _line in _all:
+            _line = _line.strip()
+            if not _line:
+                continue
+            try:
+                _row = json.loads(_line)
+            except json.JSONDecodeError:
+                continue
+            if _row.get("type") == "assistant/message":
+                _data = _row.get("data") or {}
+                if _data.get("turn") is not None:
+                    has_finished.add(str(_data.get("turn")))
 
-        for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
+        for line in _all:
             line = line.strip()
             if not line:
                 continue
@@ -232,8 +253,11 @@ class DshParser(Parser):
                 # Finished message blocks: the product's own assembled turns
                 # (reasoning/tool-call/text). Prefer these over the chunk
                 # stream; chunks remain as fallback for sessions without them.
+                # Turn keys vary (int in messages, str in chunks): normalize.
                 data = row.get("data") or {}
                 turn = data.get("turn")
+                if turn is not None:
+                    has_finished.add(str(turn))
                 msg = data.get("message") or {}
                 for b in msg.get("content") or []:
                     if not isinstance(b, dict):
@@ -274,6 +298,8 @@ class DshParser(Parser):
                 data = row.get("data") or {}
                 chunk = data.get("chunk") or {}
                 turn = data.get("turn")
+                if turn is not None and str(turn) in has_finished and (chunk.get("type") or "") != "usage":
+                    continue  # finished row already covers this turn's content
                 ctype = chunk.get("type")
                 if ctype == "usage":
                     u = chunk.get("usage") or {}
