@@ -120,23 +120,15 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 
 ## §5 降级验收确认（2026-09-03，用户逐项确认）
 
-12. `~/.qoderwake-cn/data/store/qoderwake.sqlite` 全 75 表扫描：
-    `session_events`（65 行，仅 2 个 7 月残留 qs 会话）`assistant` 事件确有
-    `usage{input_tokens,output_tokens,cache_*,server_tool_use,context_usage_ratio}`
-    + `model` 结构，但全零值、无非零行；`team_group_messages_v3`（36 行）
-    payload 零 usage/token 命中；`leader_model_invocations`（7）、
-    `leader_sdk_messages`（65）、`missions`、`role_runs` 零用量命中。
-    parser 读的 team_group 表本身无用量列——不是解析遗漏。
-13. `~/.qoderworkcn/logs/runs/*/qodercli.log`：进程/HTTP/环境日志，
-    无 usage/token 字符串（全目录 grep 零命中）。
-14. `~/.qoderworkcn/projects/<sid>/state.json`：`items` 为加密 blob
-    （base64 非 JSON），内容不透明；维持不解密。
-15. 云端凭证边界：`credit/usage` 是 daemon→云 RPC（插件包逆向证实），
-    需用户账号凭证调用。cockpit 只读本地、不碰账号凭证——云端复现
-    在此止步。替代证据 `dur_ms` 已全量上线（本文件头注）。
+> §4 第 12–15 处见上（qoder/wake 本地扫荡）。本 §16 为官方本体最终确认：
 
-结论：qoder 系逐消息 token 本地穷尽（§1 的 11 处 + 本 §4 处 = 15 处），
-云端是唯一真相源但需用户凭证，不属 cockpit 只读 scope。
+16. 官方本体最终确认（2026-09-04，aicoding-agent/extension.js 全量正则）：
+    `credit/usage` 为无参 LSP RPC（`sendRequest("credit/usage")`），返回订阅
+    总额，无 per-request 参数；全包零 `perMessageUsage/turnUsage/requestUsage`
+    概念。官方用量模型 = 订阅总额 + 上下文水位（`{totalTokens,maxTokens,
+    percentage,apiUsage}`），官方 IDE 消息区本身无逐消息 token 显示。
+    逐消息 token 只存在服务端计费流水，客户端（含官方应用）不可见。
+    cockpit 的 dur_ms 逐消息耗时已超越官方可见维度。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
