@@ -243,6 +243,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     wiki 命令配置——无用量数据。
 52. OAuth 与知识库表（2026-09-04）：mcp_oauth_tokens/knowledge_bases
     全空表——无凭证可用、无用量。
+53. 小表普查（2026-09-04）：voice_input/channel_pairings/scheduled_tasks
+    空表；nudge/skill_evolution 为技能建议文本——无用量。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
