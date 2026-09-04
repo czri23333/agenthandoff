@@ -133,6 +133,10 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     `awareness/` 为记忆索引、`compression-v2/state.json` 为压缩状态机，
     均无用量；`workspace/modelMap` 仅 2 映射（auto，已回填）。
     cockpit 的 dur_ms 逐消息耗时已超越官方可见维度。
+18. Electron 存储面全扫（2026-09-04）：Local Storage leveldb（3.5KB，
+    无 aicoding 键）、Session Storage（1.9KB）、WebStorage CacheStorage
+    19 文件（1MB，用量键零命中）、Preferences（仅 electron/spellcheck）。
+    解密后的用量无本地缓存。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
