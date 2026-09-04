@@ -225,6 +225,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     非零 token 零命中；端点为 api1/center/openapi.qoder.sh 系（与 CN 不同域）。
 43. 国际版 creditUsage 解密（2026-09-04，同 DPAPI 链，材料已清盘）：339 字节
     账户总额（personal_standard，配额 0）——同样无逐消息明细。双版本一致。
+44. codebuddy jobs（2026-09-04）：state.json 命中全系文档 URL 误报
+    （小米 TTS usage-guide），无用量字段。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
