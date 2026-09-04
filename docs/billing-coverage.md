@@ -227,6 +227,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     账户总额（personal_standard，配额 0）——同样无逐消息明细。双版本一致。
 44. codebuddy jobs（2026-09-04）：state.json 命中全系文档 URL 误报
     （小米 TTS usage-guide），无用量字段。
+45. 诊断与二进制（2026-09-04）：codebuddy diagnostics（堆报告）、
+    blobs（图片）、qoderworkcn tmp（空壳）——用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
