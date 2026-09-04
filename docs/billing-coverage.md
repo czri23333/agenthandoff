@@ -195,6 +195,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     对话文本），非用量数据。
 32. 网络与 JS 缓存（2026-09-04）：Cookies 空表；CachedData 144 文件 9MB
     （JS bundle 缓存）用量键零命中。
+33. 移动端壳与空目录（2026-09-04）：com.qodercn.app.stable Cache/Code Cache
+    共 110 文件 26MB 零命中；session-env 为空目录壳（0 文件）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
