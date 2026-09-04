@@ -144,6 +144,12 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     21 transcript 会话零重叠——日志记 headless run id，transcript 记 chat id，
     两套 id 空间隔离，IDE 侧归因命中率为 0；CLI 侧目录名即 transcript sid，
     时间重叠已验证。token 在两边均为零占位（服务端计费）。
+20. creditUsage 解密实证（2026-09-04，本机只读 DPAPI 解 os_crypt 主 key →
+    AES-256-GCM 解 v10A 密文，材料已清盘）：内容为账户总额——Pro 账户
+    userQuota 2000/2000 + addOnQuota 4500/4500 全耗尽（isQuotaExceeded:true）
+    + Qwen 专属包明细，**无逐消息明细**。实证官方用量模型 = 订阅总额，
+    与 §5-16 的逆向结论一致。解密方法：Local State.os_crypt.encrypted_key
+   （DPAPI）→ v10 + 12B nonce GCM。key 材料已删除，不留盘。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
