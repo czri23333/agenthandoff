@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_handoff.locations import home
-from agent_handoff.model import Message, RawSession, SessionMeta, ts_to_iso
+from agent_handoff.model import CompactionEvent, Message, RawSession, SessionMeta, ts_to_iso
 from agent_handoff.parsers.base import Parser
 
 try:  # optional extra
@@ -184,6 +184,7 @@ class DshParser(Parser):
         turns_reason: dict = {}
         turns_seen_index: dict = {}
         turns_tools: dict = {}
+        compactions: list[CompactionEvent] = []
         # Turns carrying a finished assistant/message row: their chunk rows
         # are streaming pre-images of the same content — drop the chunks.
         # Pre-scan first: chunks usually arrive BEFORE the finished row.
@@ -249,6 +250,20 @@ class DshParser(Parser):
                     context_window = window
             elif t == "turn/end":
                 turn_end = row.get("data") or turn_end
+            elif t == "compaction/prune":
+                # Tokens the compaction shadowed away: real measured cost
+                # of what context management discarded.
+                data = row.get("data") or {}
+                shadowed = data.get("shadowedTokenCount")
+                if isinstance(shadowed, int) and shadowed > 0:
+                    compactions.append(
+                        CompactionEvent(
+                            at=ts_to_iso(row.get("time")),
+                            reason="prune",
+                            pre_tokens=shadowed,
+                            auto=True,
+                        )
+                    )
             elif t == "assistant/message":
                 # Finished message blocks: the product's own assembled turns
                 # (reasoning/tool-call/text). Prefer these over the chunk
@@ -443,6 +458,7 @@ class DshParser(Parser):
         )
         raw = self.build_raw(meta, messages, [], files, tools)
         raw.interruption = _dsh_interruption(turn_end)
+        raw.compactions = compactions
         return raw
 
     def usage(self, session_id: str) -> dict | None:
