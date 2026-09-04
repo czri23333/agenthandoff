@@ -161,6 +161,11 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     的 segment 模型（qmodel_38max）与 transcript runtime-config 一致，
     证实 `_apply_log_models` 归因值正确；workers 下全为记忆/版本事件
     （memory-created-sources/events.jsonl），无用量。
+22. 压缩/fork 事件（2026-09-04）：`compression.progress`（starting/
+    summarizing/post_processing/done 全零占位）+ `fork.agent.completed`
+   （duration_ms 179525 真实，input/output 零占位）。压缩耗时真实但
+    transcript 无 CompactionEvent 载体（仅 compacted_turns 计数），
+    不接入；token 维度再次零证实。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
