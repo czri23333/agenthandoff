@@ -187,6 +187,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     workbuddy usage-log.json 为技能使用记录，非 token。
 29. wake 日志 + runs 非零普查（2026-09-04）：wake logs 76KB 零命中；
     4 store runs 日志 329 文件 19MB 非零 token 值零命中（§26 复核）。
+30. 杂项位置（2026-09-04）：shell-snapshots（shell 快照脚本）、
+    workbuddy blobs（68MB 二进制）、qimei-cache.json（设备指纹）——
+    196 文件 70MB 用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
