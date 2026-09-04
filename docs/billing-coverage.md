@@ -185,6 +185,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     skills/file-history/shell-snapshots/security-resources 共 984 文件 23MB——
     命中全系误报（自家诚实报告规范文档 + bundler 解析脚本代码）。另：
     workbuddy usage-log.json 为技能使用记录，非 token。
+29. wake 日志 + runs 非零普查（2026-09-04）：wake logs 76KB 零命中；
+    4 store runs 日志 329 文件 19MB 非零 token 值零命中（§26 复核）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
