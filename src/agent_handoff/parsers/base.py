@@ -221,6 +221,66 @@ class Parser(ABC):
         return Message(role=role, **kw)
 
     @staticmethod
+    def apply_cloud_overlay(messages: list, session_id: str) -> int:
+        """Attribute user-exported cloud billing to turns by timestamp.
+
+        Reads ``~/.agenthandoff/cloud-usage/<sid>.json`` (see
+        ``_cloud_overlay`` contract in jsonl_family); each cloud turn fills
+        model/tokens of the nearest unattributed assistant message within
+        ±2s. Returns the number of attributed messages. Absent file = 0,
+        zero impact.
+        """
+        try:
+            from agent_handoff.locations import home as _home
+            import json as _json
+            from datetime import datetime as _dt
+        except ImportError:
+            return 0
+        try:
+            path = _home() / ".agenthandoff" / "cloud-usage" / f"{session_id}.json"
+            if not path.is_file():
+                return 0
+            data = _json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            turns = data.get("turns") if isinstance(data, dict) else None
+            if not isinstance(turns, list):
+                return 0
+        except (OSError, ValueError):
+            return 0
+        hit = 0
+        for t in turns:
+            if not isinstance(t, dict):
+                continue
+            try:
+                tat = _dt.fromisoformat(str(t.get("at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            best = None
+            best_d = 2.0
+            for m in messages:
+                if m.role != "assistant" or not m.at:
+                    continue
+                if m.tokens_in is not None or m.tokens_out is not None:
+                    continue
+                try:
+                    mat = _dt.fromisoformat(str(m.at).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                d = abs((mat - tat).total_seconds())
+                if d < best_d:
+                    best, best_d = m, d
+            if best is None:
+                continue
+            if t.get("model"):
+                best.model = best.model or str(t["model"])
+            for k, f in (("tokens_in", "tokens_in"), ("tokens_out", "tokens_out"),
+                         ("reasoning", "tokens_reasoning")):
+                v = t.get(k)
+                if isinstance(v, int) and getattr(best, f) is None:
+                    setattr(best, f, v)
+            hit += 1
+        return hit
+
+    @staticmethod
     def build_raw(
         meta: SessionMeta,
         messages: list[Message],

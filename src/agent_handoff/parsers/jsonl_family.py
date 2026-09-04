@@ -728,6 +728,12 @@ class JsonlSessionParser(Parser):
                         continue
                     m.model = nxt.model
 
+        # Cloud-billing overlay (user-supplied): qoder-family per-turn billing
+        # lives in the cloud; after the user exports it to
+        # ~/.agenthandoff/cloud-usage/<sid>.json it is attributed here by
+        # timestamp (±2s). Absent file = zero impact.
+        self.apply_cloud_overlay(messages, session_id)
+
         notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
         if agent_surfaces:
             notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
