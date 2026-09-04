@@ -2070,12 +2070,16 @@ class QodercnIdeParser(JsonlSessionParser):
         except (OSError, ValueError):
             return None
         me_times: list[str] = []
+        me_cwds: set[str] = set()
         for path in me_paths:
             for row in read_jsonl(path):
                 ts = _iso(row.get("timestamp"))
                 if ts:
                     me_times.append(ts)
-        if not me_times or not cwd:
+                c = row.get("cwd")
+                if isinstance(c, str) and c:
+                    me_cwds.add(c.casefold())
+        if not me_times:
             return None
         me_start, me_end = min(me_times), max(me_times)
         try:
@@ -2085,7 +2089,6 @@ class QodercnIdeParser(JsonlSessionParser):
         # Compare by the cwd recorded INSIDE the rows (project dir names
         # differ in case/separators across the family's layouts); the meta
         # cwd may be a project dir instead of the workdir.
-        me_cwd = cwd.casefold()
         # Cheap cross-check first: only siblings in the same cwd whose files
         # we already indexed are candidates; skip a full re-scan otherwise.
         index = getattr(self, "_index", None) or {}
@@ -2117,7 +2120,7 @@ class QodercnIdeParser(JsonlSessionParser):
                     break
             if not sib_model or not sib_times:
                 continue
-            if me_cwd not in sib_cwds:
+            if not (me_cwds & sib_cwds):
                 continue
             if max(min(sib_times), me_start) <= min(max(sib_times), me_end):
                 return f"{sib_model}（同工作区同时段会话 {m.session_id[:8]}…，推断仅供参考）"
