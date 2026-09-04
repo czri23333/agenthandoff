@@ -166,6 +166,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
    （duration_ms 179525 真实，input/output 零占位）。压缩耗时真实但
     transcript 无 CompactionEvent 载体（仅 compacted_turns 计数），
     不接入；token 维度再次零证实。
+23. 残留目录全扫（2026-09-04）：`cache/experts`（agent 输出文本 +
+    metadata.json，model 为空）、`tasks/`（Todo JSON）、`session-env/`
+    （空目录）——225 文件 0.9MB 用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
