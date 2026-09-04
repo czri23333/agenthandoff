@@ -217,6 +217,10 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     的已登录 CLI——云端调用无执行主体。
 40. 安装附带资源（2026-09-04）：resources/bin（native 模块）、
     bundled-resources、dynamic-text（i18n 文案）——用量键零命中。
+41. 全量覆盖终表（2026-09-04，非抽样）：qoderwork-cn 782 asst/model
+    782/est 782/dur 355；qodercn-ide 16477 asst/model 5726/est 16473
+    （4 空文本行无消耗可言）/tok 4（零值行）；qoderwake-cn 41/41/41。
+    每条非空消息都有模型或估算或耗时证据。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
