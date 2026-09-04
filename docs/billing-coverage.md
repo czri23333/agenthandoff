@@ -176,6 +176,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     CodeBuddy CN 的 Local/Session/WebStorage 共 97 文件——唯一命中是
     CodeBuddy CN WebStorage 缓存的 OpenAI SDK `Usage` 类定义代码
     （非用量数据）。本地无用量缓存。
+26. runs 日志全扫（2026-09-04）：4 store × 329 文件 19MB，logfmt 的
+    input_tokens/output_tokens 全零值（turn.finished/request_id 结构在，
+    模型真实但 token 零占位）。非零值零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
