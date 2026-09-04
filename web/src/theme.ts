@@ -39,16 +39,36 @@ export interface Palette {
   codeBg: string;
   placeholder: string;
   scheme: "dark" | "light";
+  /** M3 tonal containers: semantic ink at low mix on the theme surface. */
+  accentContainer: string;
+  okContainer: string;
+  warnContainer: string;
+  errContainer: string;
   cli: Record<string, CliInk>;
 }
 
-const TOKENS = tokensJson as unknown as { themes: Record<Effective, Palette>; cli: string[] };
+/** M3 Expressive shape scale (px), from tokens.json. */
+export interface ShapeScale {
+  xs: number;
+  sm: number;
+  md: number;
+  lg: number;
+  xl: number;
+  pill: number;
+}
+
+const TOKENS = tokensJson as unknown as {
+  themes: Record<Effective, Palette>;
+  cli: string[];
+  shape: ShapeScale;
+};
 const KEY = "ah-theme";
 const STYLE_ID = "ah-tokens";
 const listeners = new Set<() => void>();
 
 export const palettes = TOKENS.themes;
 export const cliIds = TOKENS.cli;
+export const shape = TOKENS.shape;
 
 /* -- css injection ---------------------------------------------------------- */
 
@@ -68,6 +88,16 @@ function cssVars(p: Palette): string {
     `--ah-warn:${p.warn};`,
     `--ah-err:${p.err};`,
     `--ah-code-bg:${p.codeBg};`,
+    `--ah-accent-container:${p.accentContainer};`,
+    `--ah-ok-container:${p.okContainer};`,
+    `--ah-warn-container:${p.warnContainer};`,
+    `--ah-err-container:${p.errContainer};`,
+    `--ah-shape-xs:${shape.xs}px;`,
+    `--ah-shape-sm:${shape.sm}px;`,
+    `--ah-shape-md:${shape.md}px;`,
+    `--ah-shape-lg:${shape.lg}px;`,
+    `--ah-shape-xl:${shape.xl}px;`,
+    `--ah-shape-pill:${shape.pill}px;`,
   ].join("");
 }
 
@@ -173,7 +203,11 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
     algorithm: effective === "dark" ? antdAlgorithms.darkAlgorithm : antdAlgorithms.defaultAlgorithm,
     token: {
       colorPrimary: PRIMARY,
-      borderRadius: 8,
+      // M3E shape scale: cards lg(16), controls md(12), chips pill.
+      borderRadius: 12,
+      borderRadiusLG: 16,
+      borderRadiusSM: 8,
+      borderRadiusXS: 4,
       // The tiers in tokens.json are AA-verified against our surfaces; antd's
       // defaults are not, and its *secondary* text is what most meta rows use.
       colorText: p.text1,

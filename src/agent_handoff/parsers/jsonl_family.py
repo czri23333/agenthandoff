@@ -1065,6 +1065,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                     jt = self._job_titles().get(session_id)
                     if jt:
                         raw.meta.title = jt
+                    self._apply_db_overlay(raw)
                 return raw
 
         # Layout 1: flat file — fall back to the base class resolver.
@@ -1073,7 +1074,16 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             jt = self._job_titles().get(session_id)
             if jt:
                 raw.meta.title = jt
+            self._apply_db_overlay(raw)
         return raw
+
+    def _apply_db_overlay(self, raw) -> None:
+        """Copy store-level overlays (kind/expert) onto a loaded session.
+
+        list_sessions() applies _db_kinds/_db_experts; load() builds a fresh
+        meta from the transcript, so re-apply here to keep both views honest.
+        Base implementation is a no-op; WorkbuddyParser overrides it.
+        """
 
     def _find_session_dir(self, session_id: str) -> Path | None:
         """Locate a session dir by name under any project."""
@@ -1171,6 +1181,7 @@ class WorkbuddyParser(_CodebuddyHybridParser):
     def list_sessions(self) -> list[SessionMeta]:
         metas = super().list_sessions()  # already carries jsonl ai-title rows
         db = self._db_titles()
+        kinds = self._db_kinds()
         for m in metas:
             # The AI-generated title written into the transcript is the title
             # the product shows; the db sessions.title (often the raw first
@@ -1179,7 +1190,120 @@ class WorkbuddyParser(_CodebuddyHybridParser):
                 t = db.get(m.session_id)
                 if t:
                     m.title = t
+            # Session kind as the product organises it: playground /
+            # background-automation / working-source (working/craft/design/
+            # coding) / plain craft. Drives the cockpit kind badge.
+            k = kinds.get(m.session_id)
+            if k:
+                m.task_type = k
+        experts = self._db_experts()
+        for m in metas:
+            ex = experts.get(m.session_id)
+            if ex:
+                m.expert_name, m.expert_avatar = ex
         return metas
+
+    def _apply_db_overlay(self, raw) -> None:
+        # Same overlays list_sessions() applies: kind + expert always win
+        # (store-level facts); the db title only fills gaps so the
+        # transcript's own ai-title / job-title keeps priority.
+        sid = raw.meta.session_id
+        experts = self._db_experts()
+        ex = experts.get(sid)
+        if ex:
+            raw.meta.expert_name, raw.meta.expert_avatar = ex
+        k = self._db_kinds().get(sid)
+        if k:
+            raw.meta.task_type = k
+        if not raw.meta.title or raw.meta.title == sid or len(raw.meta.title) <= 8:
+            t = self._db_titles().get(sid)
+            if t:
+                raw.meta.title = t
+
+    def _db_experts(self) -> dict[str, tuple[str | None, str | None]]:
+        """session_id -> (expert name, avatar URL) from assistant-display.
+
+        ``~/.workbuddy/assistant-display/<sid>.json`` keeps timestamped
+        snapshots; the latest resolved one is what the product shows.
+        Avatar URLs point at the vendor's public CDN (display-only).
+        """
+        try:
+            disp = home() / ".workbuddy" / "assistant-display"
+            if not disp.is_dir():
+                return {}
+            out: dict[str, tuple[str | None, str | None]] = {}
+            for path in disp.glob("*.json"):
+                sid = path.stem
+                try:
+                    d = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, ValueError):
+                    continue
+                snaps = d.get("snapshots") if isinstance(d, dict) else None
+                if not isinstance(snaps, list) or not snaps:
+                    continue
+                last = None
+                for s in snaps:
+                    if not isinstance(s, dict):
+                        continue
+                    ad = s.get("assistantDisplay")
+                    if isinstance(ad, dict) and ad.get("resolution") != "provisional":
+                        last = ad
+                if last is None:
+                    for s in reversed(snaps):
+                        if isinstance(s, dict) and isinstance(s.get("assistantDisplay"), dict):
+                            last = s["assistantDisplay"]
+                            break
+                if not isinstance(last, dict):
+                    continue
+                name = last.get("name") or last.get("profession")
+                avatar = last.get("avatarUrl")
+                out[sid] = (
+                    str(name)[:40] if isinstance(name, str) and name else None,
+                    str(avatar)[:300] if isinstance(avatar, str) and avatar else None,
+                )
+            return out
+        except OSError:
+            return {}
+
+    def _db_kinds(self) -> dict[str, str]:
+        """session_id -> kind from workbuddy.db (read-only).
+
+        Priority: playground > background-automation > source_mode >
+        mode > none. Mirrors how the product separates playground tries,
+        background runs and working modes.
+        """
+        try:
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return {}
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                rows = conn.execute(
+                    "SELECT id, mode, source_mode, is_playground, "
+                    "is_background_automation, deleted_at FROM sessions"
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return {}
+        out: dict[str, str] = {}
+        for sid, mode, source, play, bg, deleted in rows:
+            if deleted or not sid:
+                continue
+            kind = None
+            if str(play) == "1":
+                kind = "playground"
+            elif str(bg) == "1":
+                kind = "background"
+            elif source and str(source).strip():
+                kind = str(source).strip()
+            elif mode and str(mode).strip():
+                kind = str(mode).strip()
+            if kind:
+                out[str(sid)] = kind
+        return out
 
     def peek_status(self, session_id: str) -> str | None:
         """workbuddy.db sessions.status (completed/archived/error/…).

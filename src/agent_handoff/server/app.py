@@ -259,6 +259,8 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                     "origin": m.origin,
                     "parent_session_id": m.parent_session_id,
                     **({"task_type": m.task_type} if m.task_type else {}),
+                    **({"expert_name": m.expert_name} if m.expert_name else {}),
+                    **({"expert_avatar": m.expert_avatar} if m.expert_avatar else {}),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),

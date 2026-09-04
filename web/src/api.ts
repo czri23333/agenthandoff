@@ -27,6 +27,9 @@ export interface SessionMeta {
   tokens_out?: number | null;
   /** Provenance notes (supplement counts, linked sessions, tool failures…). */
   notes?: string[];
+  /** Assistant identity as the product shows it (expert name + avatar URL). */
+  expert_name?: string;
+  expert_avatar?: string;
 }
 
 export interface UsageModel {

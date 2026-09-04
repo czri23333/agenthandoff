@@ -551,6 +551,11 @@ function SessionRow({
               <span className="ah-accent hidden shrink-0 font-mono text-[11px] lg:inline">◈ {t("questTask")}</span>
             </Tooltip>
           )}
+          {s.task_type && s.task_type !== "quest-task" && s.task_type !== "interactive" && (
+            <Tooltip title={`${t("taskKind")} · ${s.task_type}`}>
+              <span className="ah-faint hidden shrink-0 font-mono text-[11px] lg:inline">⬣ {t(`kind_${s.task_type}` as Parameters<typeof t>[0])}</span>
+            </Tooltip>
+          )}
           {s.provider && (
             <Tooltip title={t("provider")}>
               <span className="ah-faint hidden shrink-0 font-mono lg:inline">

@@ -46,72 +46,260 @@ function guessLinkedCli(_id: string, fromCli: string): string {
   return fromCli;
 }
 
-function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: string; assistant: string; expand: string; collapse: string; raw: string; clean: string } }) {
+/**
+ * Official-grade transcript row (WorkBuddy asar ground truth):
+ * - user: right-aligned bubble (M3E large radius, sender corner cut)
+ * - assistant: full-width column, transparent — avatar row above the text
+ * - thinking ([思考] prefix): folded by default, tertiary 13px header
+ * - tool call ([工具 name] line): card with header + args
+ * - sub-agent call ([子代理 mark] line): nested block linked to the child
+ * - timestamp: hover-only time tip, never standing text
+ */
+function TranscriptRow({
+  m,
+  labels,
+  expert,
+  cli,
+  onOpenSub,
+}: {
+  m: TranscriptMessage;
+  labels: {
+    user: string;
+    assistant: string;
+    expand: string;
+    collapse: string;
+    raw: string;
+    clean: string;
+    thinking: string;
+    toolCall: string;
+    subagentCall: string;
+    openSubagent: string;
+  };
+  expert?: { name?: string | null; avatar?: string | null };
+  cli: string;
+  onOpenSub?: (cli: string, sid: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
-  const long = m.text.length > 500;
+  const [thinkOpen, setThinkOpen] = useState(false);
+  const [toolOpen, setToolOpen] = useState(false);
+  const text = m.text || "";
+  const isThinking = text.startsWith("[思考]");
+  const isTool = !isThinking && text.startsWith("[工具");
+  const isSubagent = !isThinking && !isTool && text.startsWith("[子代理");
+  const long = !isThinking && !isTool && !isSubagent && text.length > 500;
   const who = m.role === "user" ? labels.user : labels.assistant;
-  const shown = showRaw && m.raw_text ? m.raw_text : m.text;
-  return (
-    <div
-      className="ah-inset cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] leading-[1.65]"
-      onClick={() => long && setOpen(!open)}
-      title={long ? (open ? labels.collapse : labels.expand) : undefined}
+  const shown = showRaw && m.raw_text ? m.raw_text : text;
+  const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
+
+  const modelChip = m.model ? (
+    <span
+      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+      title={`${m.model}${
+        typeof m.tokens_in === "number" || typeof m.tokens_out === "number"
+          ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
+              typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
+            }`
+          : ""
+      }`}
     >
-      <span className="ah-label mr-1.5 select-none" style={{ textTransform: "none" }}>
-        {m.role === "user" ? "👤" : "🤖"} {who}
-      </span>
-      {m.subagent && (
-        <span className="ah-accent mr-1.5 px-1.5 py-px font-mono text-[11px]" title={m.subagent}>
-          ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
+      <span>{m.model}</span>
+      {(typeof m.tokens_in === "number" || typeof m.tokens_out === "number") && (
+        <span className="ah-faint">
+          {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
+          {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
         </span>
       )}
-      {m.model && (
-        <span
-          className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-          title={`${m.model}${
-            typeof m.tokens_in === "number" || typeof m.tokens_out === "number"
-              ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
-                  typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
-                }`
-              : ""
-          }`}
-        >
-          <span>{m.model}</span>
-          {(typeof m.tokens_in === "number" || typeof m.tokens_out === "number") && (
-            <span className="ah-faint">
-              {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
-              {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
+    </span>
+  ) : null;
+
+  const rawToggle = m.raw_text ? (
+    <button
+      className="ah-faint mr-1.5 font-mono text-[11px]"
+      title={showRaw ? labels.clean : labels.raw}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowRaw(!showRaw);
+      }}
+    >
+      {showRaw ? labels.clean : labels.raw}
+    </button>
+  ) : null;
+
+  // — user: right-aligned bubble —
+  if (m.role === "user") {
+    return (
+      <div className="ah-user-row">
+        <div className="flex max-w-full flex-col items-end">
+          <div className="ah-user-bubble" dir="auto" title={timeTip}>
+            <Markdown text={shown} />
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="ah-time-tip font-mono">{timeTip}</span>
+            {rawToggle}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — thinking: folded block —
+  if (isThinking) {
+    const body = text.replace(/^\[思考\]\s?/, "");
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div
+            className="ah-reasoning"
+            onClick={() => setThinkOpen(!thinkOpen)}
+            title={thinkOpen ? labels.collapse : labels.expand}
+          >
+            <span className="mr-1 select-none">{thinkOpen ? "▾" : "▸"}</span>
+            💭 {labels.thinking}
+            {m.model ? <span className="ml-1.5 font-mono text-[11px]">· {m.model}</span> : null}
+            <span className="ah-time-tip ml-1.5 font-mono">{timeTip}</span>
+          </div>
+          {thinkOpen && (
+            <div className="ah-reasoning-content" dir="auto">
+              <Markdown text={showRaw && m.raw_text ? m.raw_text : body} />
+            </div>
+          )}
+          <div className="mt-0.5">{rawToggle}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // — tool call: card —
+  if (isTool) {
+    const nl = text.indexOf("\n");
+    const head = (nl >= 0 ? text.slice(0, nl) : text).replace(/^\[工具\s?/, "").replace(/\]$/, "");
+    const rest = nl >= 0 ? text.slice(nl + 1) : "";
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div className="ah-toolcall">
+            <button className="ah-toolcall-head" onClick={() => setToolOpen(!toolOpen)}>
+              <span className="select-none">{toolOpen ? "▾" : "▸"}</span>
+              <span>🔧 {head || labels.toolCall}</span>
+              {m.subagent ? (
+                <span className="ah-faint font-mono text-[11px]" title={m.subagent}>
+                  ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
+                </span>
+              ) : null}
+              <span className="ah-time-tip ml-auto font-mono">{timeTip}</span>
+            </button>
+            {toolOpen && rest ? (
+              <div className="ah-toolcall-body">
+                <pre className="ah-toolcall-args" dir="auto">
+                  {rest}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+          <div>
+            {modelChip}
+            {rawToggle}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — sub-agent call: nested block linked to the child session —
+  if (isSubagent) {
+    // "[子代理 ✓] description → child-id"
+    const body = text.replace(/^\[子代理\s?[✓…✗]?\]\s?/, "");
+    const arrow = body.lastIndexOf(" → ");
+    const desc = arrow >= 0 ? body.slice(0, arrow) : body;
+    const childId = arrow >= 0 ? body.slice(arrow + 3).trim() : "";
+    const looksLikeSid = /^[A-Za-z0-9_:-]{6,128}$/.test(childId);
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div className="ah-subagent">
+            <button className="ah-toolcall-head" onClick={() => setToolOpen(!toolOpen)}>
+              <span className="select-none">{toolOpen ? "▾" : "▸"}</span>
+              <span>
+                👥 {labels.subagentCall} · {desc || who}
+              </span>
+              <span className="ah-time-tip ml-auto font-mono">{timeTip}</span>
+            </button>
+            <div className="ah-toolcall-body flex items-center gap-2">
+              {modelChip}
+              {looksLikeSid && onOpenSub ? (
+                <button
+                  className="ah-accent font-mono text-[12px]"
+                  title={`${labels.openSubagent} · ${childId}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenSub(cli, childId);
+                  }}
+                >
+                  → {childId.slice(0, 8)}…
+                </button>
+              ) : m.subagent ? (
+                <span className="ah-faint font-mono text-[11px]" title={m.subagent}>
+                  ⌥ {m.subagent.slice(0, 24)}
+                </span>
+              ) : null}
+              {rawToggle}
+            </div>
+            {toolOpen && m.raw_text ? (
+              <div className="ah-toolcall-body border-t border-[var(--ah-line)]">
+                <pre className="ah-toolcall-args" dir="auto">
+                  {m.raw_text.slice(0, 2000)}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — assistant: avatar row + transparent body —
+  return (
+    <div className="ah-assistant-row">
+      <div className="ah-assistant-body">
+        <div className="mb-1 flex items-center gap-1.5">
+          <span className="ah-label flex select-none items-center" style={{ textTransform: "none" }}>
+            {expert?.avatar ? (
+              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 rounded-full align-[-2px]" loading="lazy" />
+            ) : (
+              <span className="mr-1">🤖</span>
+            )}
+            {expert?.name || who}
+          </span>
+          {m.subagent && (
+            <span className="ah-accent px-1.5 py-px font-mono text-[11px]" title={m.subagent}>
+              ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
             </span>
           )}
-        </span>
-      )}
-      {m.raw_text && (
-        <button
-          className="ah-faint mr-1.5 font-mono text-[11px]"
-          title={showRaw ? labels.clean : labels.raw}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowRaw(!showRaw);
-          }}
-        >
-          {showRaw ? labels.clean : labels.raw}
-        </button>
-      )}
-      {m.role === "assistant" && (open || !long) ? (
-        <div dir="auto" className="tx-user min-w-0 break-words text-[var(--ah-text-1)]">
-          <Markdown text={showRaw && m.raw_text ? m.raw_text : m.text} />
+          {modelChip}
+          {rawToggle}
+          <span className="ah-time-tip ml-auto font-mono">{timeTip}</span>
         </div>
-      ) : (
-        <span dir="auto" className="tx-user whitespace-pre-wrap break-words text-[var(--ah-text-1)]">
-          {open || !long ? shown : `${graphemeSlice(shown, 500)}…`}
-        </span>
-      )}
-      {long && (
-        <span className="ah-accent ml-1.5 select-none text-[12px]">
-          {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${shown.length})`}
-        </span>
-      )}
+        <div
+          dir="auto"
+          className="min-w-0 cursor-pointer break-words text-[var(--ah-text-1)]"
+          onClick={() => long && setOpen(!open)}
+          title={long ? (open ? labels.collapse : labels.expand) : undefined}
+        >
+          {open || !long ? (
+            <Markdown text={shown} />
+          ) : (
+            <span className="tx-user whitespace-pre-wrap break-words">
+              {`${graphemeSlice(shown, 500)}…`}
+            </span>
+          )}
+        </div>
+        {long && (
+          <span className="ah-accent ml-1.5 select-none text-[12px]">
+            {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${shown.length})`}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -410,6 +598,9 @@ export default function SessionDetail({
                       <li key={i}>
                         <TranscriptRow
                           m={m}
+                          expert={{ name: meta.expert_name, avatar: meta.expert_avatar }}
+                          cli={cli}
+                          onOpenSub={onOpen}
                           labels={{
                             user: t("user"),
                             assistant: t("assistant"),
@@ -417,6 +608,10 @@ export default function SessionDetail({
                             collapse: t("collapse"),
                             raw: t("viewRaw"),
                             clean: t("viewClean"),
+                            thinking: t("thinking"),
+                            toolCall: t("toolCall"),
+                            subagentCall: t("subagentCall"),
+                            openSubagent: t("openSubagent"),
                           }}
                         />
                       </li>

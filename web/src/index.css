@@ -12,7 +12,14 @@
 
 :root {
   --ah-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
-  --ah-radius: 8px;
+  /* M3E shape scale (values injected from tokens.json; fallbacks match it). */
+  --ah-radius: var(--ah-shape-md, 12px);
+  --ah-shape-xs: 4px;
+  --ah-shape-sm: 8px;
+  --ah-shape-md: 12px;
+  --ah-shape-lg: 16px;
+  --ah-shape-xl: 28px;
+  --ah-shape-pill: 999px;
 }
 
 html,
@@ -38,13 +45,136 @@ body {
 .ah-card {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
-  border-radius: var(--ah-radius);
+  border-radius: var(--ah-shape-lg);
 }
 
 .ah-inset {
   background: var(--ah-surface-2);
   border: 1px solid var(--ah-line);
-  border-radius: 6px;
+  border-radius: var(--ah-shape-sm);
+}
+
+/* M3E tonal containers: semantic ink on its own low-mix surface. */
+.ah-tonal-accent { background: var(--ah-accent-container); color: var(--ah-text-1); }
+.ah-tonal-ok { background: var(--ah-ok-container); color: var(--ah-text-1); }
+.ah-tonal-warn { background: var(--ah-warn-container); color: var(--ah-text-1); }
+.ah-tonal-err { background: var(--ah-err-container); color: var(--ah-text-1); }
+
+/* ── Official-grade message roles (WorkBuddy asar ground truth) ─────────────
+   userMessageBubble: right-aligned bubble, radius 16/16/0/16, 13px/19px.
+   assistant: full-width column, transparent (no bubble), 14px/20px.
+   reasoning: 13px tertiary header (click to fold) + 4px left-rule body.
+   toolCall: card with deep header + side body + mono args block.
+   time tip: hover-only, never a standing timestamp. */
+
+/* User bubble: right column, M3E large radius with the sender corner cut. */
+.ah-user-row {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+.ah-user-bubble {
+  box-sizing: border-box;
+  max-width: min(78%, 640px);
+  padding: 8px 12px;
+  border-radius: var(--ah-shape-lg) var(--ah-shape-lg) 0 var(--ah-shape-lg);
+  background: var(--ah-accent-container);
+  color: var(--ah-text-1);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: break-word;
+}
+
+/* Assistant: full-width, no bubble — avatar row sits above the text. */
+.ah-assistant-row {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  position: relative;
+}
+.ah-assistant-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ah-text-1);
+}
+.ah-time-tip {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  font-size: 12px;
+  color: var(--ah-text-3);
+}
+.ah-assistant-row:hover .ah-time-tip,
+.ah-user-row:hover .ah-time-tip {
+  opacity: 1;
+}
+
+/* Thinking block: tertiary 13px header + 4px left rule, folded by default. */
+.ah-reasoning {
+  margin: 2px 0;
+  font-size: 13px;
+  color: var(--ah-text-3);
+  cursor: pointer;
+  user-select: none;
+}
+.ah-reasoning-content {
+  border-left: 4px solid var(--ah-line-strong);
+  padding: 4px 0 4px 10px;
+  margin-top: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  color: var(--ah-text-2);
+  cursor: default;
+}
+
+/* Tool-call card: deep header, side-tone body, mono args. */
+.ah-toolcall {
+  margin: 12px 0;
+  border-radius: var(--ah-shape-xs);
+  border: 1px solid var(--ah-line-strong);
+  overflow: hidden;
+  font-size: 13px;
+}
+.ah-toolcall-head {
+  padding: 8px 12px;
+  line-height: 16px;
+  background: var(--ah-surface-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ah-text-1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+  text-align: left;
+  border: 0;
+}
+.ah-toolcall-body {
+  padding: 8px 12px;
+  background: var(--ah-surface-1);
+}
+.ah-toolcall-args {
+  font-family: var(--ah-font-mono);
+  font-size: 12.5px;
+  background: var(--ah-code-bg);
+  border: 1px solid var(--ah-line);
+  border-radius: var(--ah-shape-xs);
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Sub-agent block: nested under the parent call, M3E medium radius. */
+.ah-subagent {
+  margin: 8px 0 8px 16px;
+  border: 1px solid var(--ah-line);
+  border-left: 3px solid var(--ah-accent);
+  border-radius: var(--ah-shape-md);
+  background: var(--ah-surface-1);
+  overflow: hidden;
 }
 
 /* Text tiers ------------------------------------------------------------- */
@@ -96,7 +226,7 @@ body {
   align-items: center;
   gap: 4px;
   padding: 1px 7px;
-  border-radius: 6px;
+  border-radius: var(--ah-shape-pill);
   border: 1px solid var(--ah-cli-border, var(--ah-line-strong));
   background: var(--ah-cli-bg, var(--ah-surface-2));
   color: var(--ah-cli-fg, var(--ah-text-1));

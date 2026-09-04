@@ -68,6 +68,11 @@ class SessionMeta:
     provider: str | None = None
     origin: str | None = None
     parent_session_id: str | None = None
+    # Assistant identity as the product shows it (workbuddy
+    # assistant-display snapshots: expert name + avatar URL). Display-only;
+    # never a credential, URLs point at the vendor's public CDN.
+    expert_name: str | None = None
+    expert_avatar: str | None = None
     notes: list[str] = field(default_factory=list)
     # Task kind as the store reports it (zcode: interactive | subagent_child …).
     # Drives grouping: the app itself separates child runs from conversations.
@@ -243,6 +248,8 @@ class HandoffBundle:
                 "provider": self.meta.provider,
                 "origin": self.meta.origin,
                 "parent_session_id": self.meta.parent_session_id,
+                "expert_name": self.meta.expert_name,
+                "expert_avatar": self.meta.expert_avatar,
                 "notes": self.meta.notes,
                 "task_type": self.meta.task_type,
                 "title_source": self.meta.title_source,

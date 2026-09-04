@@ -34,6 +34,35 @@ def _permission_mode(raw) -> str | None:
         return None
 
 
+def _match_child(children, prompt: str, desc: str) -> str | None:
+    """Match an Agent tool call to the child session it spawned.
+
+    The child title is the head of the same prompt, so a prompt-prefix match
+    is exact. Falls back to creation-time order (a call spawns its child
+    within seconds); returns None when nothing matches honestly.
+    """
+    prompt = (prompt or "").strip()
+    desc = (desc or "").strip()
+    if not children:
+        return None
+    if prompt:
+        for ch in children:
+            # The child title is a truncation of this same prompt
+            # (often ending in …); match on the shared head.
+            title = str(ch["title"] or "").rstrip("…. ").strip()
+            if len(title) >= 20 and prompt.startswith(title[:60]):
+                return str(ch["id"])
+            head = prompt[:120]
+            if title and (title.startswith(head) or head.startswith(title[:60])):
+                return str(ch["id"])
+    if desc:
+        for ch in children:
+            title = str(ch["title"] or "")
+            if title and (desc in title or title[:40] in desc):
+                return str(ch["id"])
+    return None
+
+
 class ZcodeParser(Parser):
     cli = "zcode"
 
@@ -122,11 +151,22 @@ class ZcodeParser(Parser):
             tools: Counter[str] = Counter()
             compactions: list[CompactionEvent] = []
             attachments: list[str] = []
+            # (time_created, Message): sub-agent spawn calls, merged into the
+            # timeline in chronological order after the main pass.
+            agent_msgs: list[tuple[int, Message]] = []
             model: str | None = None
             tokens_in = tokens_out = 0
 
             msg_rows = con.execute(
                 "SELECT id, data, time_created FROM message WHERE session_id=? ORDER BY sequence",
+                (session_id,),
+            ).fetchall()
+            # Children of this session (sub-agent runs): an Agent tool call in
+            # the parent timeline spawns one of these. Matching the call's
+            # prompt against the child title puts the sub-agent run back where
+            # the product shows it — as a call inside the parent conversation.
+            children = con.execute(
+                "SELECT id, title, time_created, time_updated FROM session WHERE parent_id=?",
                 (session_id,),
             ).fetchall()
             # Batch-load all parts in one query — a per-message query here is
@@ -186,6 +226,31 @@ class ZcodeParser(Parser):
                         if isinstance(tool_input, dict):
                             for path in self.extract_paths(tool_input):
                                 files[path] += 1
+                        if tool_name == "Agent" and isinstance(tool_input, dict):
+                            # A sub-agent spawn: keep it in the parent timeline
+                            # as a call message (the product shows it inline),
+                            # linked to the child session it created.
+                            desc = str(tool_input.get("description") or "").strip()
+                            prompt = str(tool_input.get("prompt") or "")
+                            status = str(state.get("status") or "")
+                            child_id = _match_child(children, prompt, desc)
+                            mark = "✓" if status == "completed" else ("…" if not status or status == "running" else "✗")
+                            call_text = f"[子代理 {mark}] {desc or 'subagent'}"
+                            if child_id:
+                                call_text += f" → {child_id}"
+                            agent_msgs.append(
+                                (
+                                    m["time_created"],
+                                    self.msg(
+                                        "assistant",
+                                        prompt or desc,
+                                        text=call_text,
+                                        at=ts_to_iso(m["time_created"]),
+                                        model=mdata.get("modelID") or None,
+                                        subagent=child_id or f"agent:{pdata.get('callID') or 'unknown'}",
+                                    ),
+                                )
+                            )
                     elif ptype == "file":
                         # A file the user attached: filename + path are both on
                         # the row. Record it as an attachment (not a tool touch).
@@ -244,6 +309,13 @@ class ZcodeParser(Parser):
                             tokens_reasoning=msg_reason,
                         )
                     )
+
+            if agent_msgs:
+                # Sub-agent spawns join the parent timeline where the product
+                # shows them: as calls inside the conversation, in time order.
+                for _, am in sorted(agent_msgs, key=lambda t: t[0] or 0):
+                    messages.append(am)
+                messages.sort(key=lambda x: x.at or "")
 
             todos = [
                 TodoItem(
