@@ -38,7 +38,7 @@
       "reader": true,
       "fixtures": 25,
       "fixture_sessions": 15,
-      "fixture_messages": 301,
+      "fixture_messages": 530,
       "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,

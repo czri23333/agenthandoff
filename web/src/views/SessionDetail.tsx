@@ -304,6 +304,40 @@ function TranscriptRow({
   );
 }
 
+/** Paginated transcript: huge task sessions (4000+ turns) would freeze the
+ * tab if every row mounted at once. Latest first page, older pages on demand
+ * — the product loads history the same way. */
+function TranscriptList({
+  messages,
+  page,
+  moreLabel,
+  row,
+}: {
+  messages: TranscriptMessage[];
+  page: number;
+  moreLabel: string;
+  row: (m: TranscriptMessage, i: number) => React.ReactNode;
+}) {
+  // messages arrive newest-first; show the newest page, prepend older ones.
+  const [pages, setPages] = useState(1);
+  useEffect(() => setPages(1), [messages.length]);
+  const shown = messages.slice(0, pages * page);
+  const rest = messages.length - shown.length;
+  return (
+    <div className="max-h-[420px] overflow-y-auto pr-1">
+      <ul className="m-0 list-none space-y-1.5 p-0">{shown.map((m, i) => row(m, i))}</ul>
+      {rest > 0 && (
+        <button
+          onClick={() => setPages((n) => n + 1)}
+          className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+        >
+          {moreLabel} ({rest})
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function SessionDetail({
   cli,
   sid,
@@ -586,39 +620,40 @@ export default function SessionDetail({
             {data.messages.length === 0 ? (
               <Typography.Text className="ah-meta italic">{t("noMessages")}</Typography.Text>
             ) : (
-              <div className="max-h-[420px] overflow-y-auto pr-1">
-                <ul className="m-0 list-none space-y-1.5 p-0">
-                  {data.messages.map((m, i) =>
-                    m.role === "compaction" ? (
-                      <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
-                        <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
-                        <span className="ah-meta">{m.text}</span>
-                      </li>
-                    ) : (
-                      <li key={i}>
-                        <TranscriptRow
-                          m={m}
-                          expert={{ name: meta.expert_name, avatar: meta.expert_avatar }}
-                          cli={cli}
-                          onOpenSub={onOpen}
-                          labels={{
-                            user: t("user"),
-                            assistant: t("assistant"),
-                            expand: t("expand"),
-                            collapse: t("collapse"),
-                            raw: t("viewRaw"),
-                            clean: t("viewClean"),
-                            thinking: t("thinking"),
-                            toolCall: t("toolCall"),
-                            subagentCall: t("subagentCall"),
-                            openSubagent: t("openSubagent"),
-                          }}
-                        />
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </div>
+              <TranscriptList
+                messages={data.messages}
+                page={200}
+                moreLabel={t("showMore")}
+                row={(m, i) =>
+                  m.role === "compaction" ? (
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
+                      <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
+                      <span className="ah-meta">{m.text}</span>
+                    </li>
+                  ) : (
+                    <li key={i}>
+                      <TranscriptRow
+                        m={m}
+                        expert={{ name: meta.expert_name, avatar: meta.expert_avatar }}
+                        cli={cli}
+                        onOpenSub={onOpen}
+                        labels={{
+                          user: t("user"),
+                          assistant: t("assistant"),
+                          expand: t("expand"),
+                          collapse: t("collapse"),
+                          raw: t("viewRaw"),
+                          clean: t("viewClean"),
+                          thinking: t("thinking"),
+                          toolCall: t("toolCall"),
+                          subagentCall: t("subagentCall"),
+                          openSubagent: t("openSubagent"),
+                        }}
+                      />
+                    </li>
+                  )
+                }
+              />
             )}
           </SectionCard>
 

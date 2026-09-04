@@ -578,6 +578,25 @@ class JsonlSessionParser(Parser):
                                     subagent=sub_label,
                                 )
                             )
+                        elif _has_text:
+                            # Successful calls are visible collapsible cards in
+                            # the product timeline — dropping them hides the
+                            # work. One folded line; the full output stays in
+                            # raw_text for the 原文 view.
+                            mark = "✓" if status == "completed" else ""
+                            disp = f"[工具{name} {mark}]".strip()
+                            summary = self.clean_text(otext)[:160]
+                            if summary:
+                                disp += f" {summary}"
+                            messages.append(
+                                self.msg(
+                                    "assistant",
+                                    otext,
+                                    text=disp,
+                                    at=at,
+                                    subagent=sub_label,
+                                )
+                            )
                     continue
                 if rtype == "file-history-snapshot":
                     for fp in self._snapshot_files(row):
@@ -636,7 +655,11 @@ class JsonlSessionParser(Parser):
                         continue  # the same turn mirrored into a companion file
                     seen_ids.add(key)
                     if role == "user" and not title:
-                        title = text[:80]
+                        # System-context reminders are real turns but never
+                        # titles — the product shows the ai-title / first real
+                        # prompt instead.
+                        if not text.lstrip().startswith("<system-reminder"):
+                            title = text[:80]
                     model, tokens = self._row_billing(row)
                     if not model:
                         model = runtime_model

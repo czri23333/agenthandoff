@@ -83,6 +83,11 @@ body {
   font-size: 13px;
   line-height: 19px;
   overflow-wrap: break-word;
+  /* Official geometry: long turns scroll inside the bubble (310px cap),
+     never stretch the timeline. */
+  max-height: 310px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 /* Assistant: full-width, no bubble — avatar row sits above the text. */

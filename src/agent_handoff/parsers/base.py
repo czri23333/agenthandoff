@@ -191,6 +191,12 @@ class Parser(ABC):
     @staticmethod
     def is_noise(text: str) -> bool:
         head = text.lstrip()[:60]
+        # The product timeline shows data-role="user-context" reminders as
+        # regular user turns (only compact-summary gets special handling
+        # there); dropping the whole turn hides real conversation. Compact
+        # summaries stay noise — they duplicate history the transcript keeps.
+        if head.startswith("<system-reminder"):
+            return 'data-role="user-context"' not in text.lstrip()[:120]
         return any(head.startswith(m) for m in _NOISE_MARKERS)
 
     @staticmethod
