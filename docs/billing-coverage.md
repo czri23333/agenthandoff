@@ -221,6 +221,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     782/est 782/dur 355；qodercn-ide 16477 asst/model 5726/est 16473
     （4 空文本行无消耗可言）/tok 4（零值行）；qoderwake-cn 41/41/41。
     每条非空消息都有模型或估算或耗时证据。
+42. 国际版 store（2026-09-04）：`~/.qoder/logs/sessions+runs` 7 文件 12KB
+    非零 token 零命中；端点为 api1/center/openapi.qoder.sh 系（与 CN 不同域）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
