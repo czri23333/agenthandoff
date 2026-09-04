@@ -203,6 +203,9 @@ class _QoderAppSharedMixin:
             if isinstance(link, str) and link and link not in linked:
                 linked.append(link)
             at = ts_to_iso(_epoch(row["created_at"]))
+            # Measured cost proxy: the store's own per-message duration.
+            row_dur = meta_json.get("durationMs")
+            row_dur = row_dur if isinstance(row_dur, int) and row_dur > 0 else None
             try:
                 parts = json.loads(row["parts"] or "[]")
             except ValueError:
@@ -213,7 +216,7 @@ class _QoderAppSharedMixin:
                 praw = row["searchable_text"]
                 text = self.clean_text(praw)
                 if text and not self.is_noise(text):
-                    messages.append(self.msg(role, praw, text=text, at=at, model=chat_model))
+                    messages.append(self.msg(role, praw, text=text, at=at, model=chat_model, dur_ms=row_dur))
                 continue
             for part in parts:
                 if not isinstance(part, dict):
@@ -223,7 +226,7 @@ class _QoderAppSharedMixin:
                     praw = str(part.get("text") or "")
                     text = self.clean_text(praw)
                     if text and not self.is_noise(text):
-                        messages.append(self.msg(role, praw, text=text, at=at, model=chat_model))
+                        messages.append(self.msg(role, praw, text=text, at=at, model=chat_model, dur_ms=row_dur))
                 elif ptype.startswith("tool-"):
                     name = str(part.get("toolName") or ptype[5:] or "tool")
                     if name == "Thinking":
@@ -231,7 +234,7 @@ class _QoderAppSharedMixin:
                         text = self.clean_text(praw)
                         if text and not self.is_noise(text):
                             messages.append(self.msg("assistant", f"[思考] {praw}",
-                                                     text=f"[思考] {text}", at=at, model=chat_model))
+                                                     text=f"[思考] {text}", at=at, model=chat_model, dur_ms=row_dur))
                     else:
                         tools[name] += 1
                         for p in self.extract_paths(part.get("input") or {}):
@@ -241,7 +244,7 @@ class _QoderAppSharedMixin:
                     text = self.clean_text(praw)
                     if text:
                         messages.append(self.msg("assistant", f"[工具error] {praw}",
-                                                 text=f"[工具error] {text[:500]}", at=at, model=chat_model))
+                                                 text=f"[工具error] {text[:500]}", at=at, model=chat_model, dur_ms=row_dur))
         if linked:
             meta.notes = [*meta.notes, f"linked_cli_sessions:{','.join(linked[:8])}"]
         if quota_note:
