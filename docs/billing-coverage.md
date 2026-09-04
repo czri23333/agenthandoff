@@ -239,6 +239,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     128 文件 3.9MB——用量键零命中。
 50. Cherry 日志（2026-09-04）：Roaming/CherryStudio/logs 48 文件 4MB——
     用量键零命中。
+51. bin 与外接命令（2026-09-04）：qoder-cn/computer-use 二进制、external
+    wiki 命令配置——无用量数据。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
