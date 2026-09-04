@@ -128,6 +128,10 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     概念。官方用量模型 = 订阅总额 + 上下文水位（`{totalTokens,maxTokens,
     percentage,apiUsage}`），官方 IDE 消息区本身无逐消息 token 显示。
     逐消息 token 只存在服务端计费流水，客户端（含官方应用）不可见。
+17. qoderworkcn CLI transcript 全库（11 文件）用量键正则零命中；
+    runtime-config 行 model 为空串（CLI 靠服务端路由，本地不记）；
+    `awareness/` 为记忆索引、`compression-v2/state.json` 为压缩状态机，
+    均无用量；`workspace/modelMap` 仅 2 映射（auto，已回填）。
     cockpit 的 dur_ms 逐消息耗时已超越官方可见维度。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
