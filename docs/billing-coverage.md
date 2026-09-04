@@ -202,6 +202,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     transcript 零模型信号，键级证实。
 35. 快照与遥测（2026-09-04）：ai-stats snapshots 为 shell 脚本存档、
     tmp/telemetry 仅 5KB 进程元数据——用量键零命中。
+36. runs 与 transcript id 空间（2026-09-04）：runs 日志 199 request_id 与
+    transcript 13 promptId 零重叠——进程级请求与会话级 prompt 两套 id，
+    精确关联不成立（sessions 日志 turn_id=promptId 仍是唯一精确键）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
