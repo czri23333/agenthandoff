@@ -1,8 +1,13 @@
-# 逐消息模型/消耗覆盖率与不可达证明（2026-09-03 实测，23:00 刷新）
+# 逐消息模型/消耗覆盖率与不可达证明（2026-09-04 实测，14:00 刷新）
 
 > 方法：各 CLI 取最近 ≤6 会话，统计消息级 `model` / `tokens_in|out` /
 > `raw_text` 覆盖率。缺失项逐项翻过候选数据源，结论为“有”则补，
 > “无”则给出穷尽路径（不可达证明），绝不虚构。
+>
+> 2026-09-04 补充：每条消息另有 `dur_ms` 实测耗时证据（parser 实测优先，
+> 否则相邻时间戳推导；同秒批量 artifact 置空）。token 缺席的消息以前端
+> ⏱ 耗时芯片展示（model+token > model+⏱ > 纯⏱ > 无），“每条消息有消耗
+> 证据”已全量达成；token 本身仅在数据源存在时展示。
 
 ## 覆盖率表
 
@@ -93,7 +98,45 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 （实测为 cargo/test 等工具输出全文，无模型/消耗键）——可作为工具结果
 溯源（不在账单 scope，记于此防重查）。
 
-## §4 降级验收确认（2026-09-03，用户逐项确认）
+## §4 qoder/wake 本地用量扫荡（2026-09-04，第 12–15 处）
+
+12. `~/.qoderwake-cn/data/store/qoderwake.sqlite` 全 75 表扫描：
+    `session_events`（65 行，仅 2 个 7 月残留 qs 会话）`assistant` 事件确有
+    `usage{input_tokens,output_tokens,cache_*,server_tool_use,context_usage_ratio}`
+    + `model` 结构，但全零值、无非零行；`team_group_messages_v3`（36 行）
+    payload 零 usage/token 命中；`leader_model_invocations`（7）、
+    `leader_sdk_messages`（65）、`missions`、`role_runs` 零用量命中。
+    parser 读的 team_group 表本身无用量列——不是解析遗漏。
+13. `~/.qoderworkcn/logs/runs/*/qodercli.log`：进程/HTTP/环境日志，
+    无 usage/token 字符串（全目录 grep 零命中）。
+14. `~/.qoderworkcn/projects/<sid>/state.json`：`items` 为加密 blob
+    （base64 非 JSON），内容不透明；维持不解密。
+15. 云端凭证边界：`credit/usage` 是 daemon→云 RPC（插件包逆向证实），
+    需用户账号凭证调用。cockpit 只读本地、不碰账号凭证——云端复现
+    在此止步。替代证据 `dur_ms` 已全量上线（本文件头注）。
+
+结论：qoder 系逐消息 token 本地穷尽（§1 的 11 处 + 本 §4 处 = 15 处），
+云端是唯一真相源但需用户凭证，不属 cockpit 只读 scope。
+
+## §5 降级验收确认（2026-09-03，用户逐项确认）
+
+12. `~/.qoderwake-cn/data/store/qoderwake.sqlite` 全 75 表扫描：
+    `session_events`（65 行，仅 2 个 7 月残留 qs 会话）`assistant` 事件确有
+    `usage{input_tokens,output_tokens,cache_*,server_tool_use,context_usage_ratio}`
+    + `model` 结构，但全零值、无非零行；`team_group_messages_v3`（36 行）
+    payload 零 usage/token 命中；`leader_model_invocations`（7）、
+    `leader_sdk_messages`（65）、`missions`、`role_runs` 零用量命中。
+    parser 读的 team_group 表本身无用量列——不是解析遗漏。
+13. `~/.qoderworkcn/logs/runs/*/qodercli.log`：进程/HTTP/环境日志，
+    无 usage/token 字符串（全目录 grep 零命中）。
+14. `~/.qoderworkcn/projects/<sid>/state.json`：`items` 为加密 blob
+    （base64 非 JSON），内容不透明；维持不解密。
+15. 云端凭证边界：`credit/usage` 是 daemon→云 RPC（插件包逆向证实），
+    需用户账号凭证调用。cockpit 只读本地、不碰账号凭证——云端复现
+    在此止步。替代证据 `dur_ms` 已全量上线（本文件头注）。
+
+结论：qoder 系逐消息 token 本地穷尽（§1 的 11 处 + 本 §4 处 = 15 处），
+云端是唯一真相源但需用户凭证，不属 cockpit 只读 scope。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
