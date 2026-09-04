@@ -172,6 +172,10 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 24. 全库非零普查（2026-09-04）：4 store（.qoder-cn/.qoderworkcn/.qoderwork/
     .qwenworkcn）× transcript+日志共 474 文件，正则扫 8 种 token 键的
     非零值——零命中。这是全量结论（非抽样）：本地无任何非零 token 记录。
+25. 他家 Electron 存储面（2026-09-04）：Qoder/QoderWork/QoderWork CN/
+    CodeBuddy CN 的 Local/Session/WebStorage 共 97 文件——唯一命中是
+    CodeBuddy CN WebStorage 缓存的 OpenAI SDK `Usage` 类定义代码
+    （非用量数据）。本地无用量缓存。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
