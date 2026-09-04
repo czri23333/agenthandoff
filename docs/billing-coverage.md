@@ -200,6 +200,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 34. task-466 全键普查（2026-09-04）：6238 行 72 去重键，含 model 字样的
     仅 `message.content.input.questions.multiSelect`（问卷多选）——
     transcript 零模型信号，键级证实。
+35. 快照与遥测（2026-09-04）：ai-stats snapshots 为 shell 脚本存档、
+    tmp/telemetry 仅 5KB 进程元数据——用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
