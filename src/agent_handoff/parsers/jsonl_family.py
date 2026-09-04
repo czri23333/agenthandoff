@@ -406,8 +406,36 @@ class JsonlSessionParser(Parser):
         # Task sessions append .session.execution to the transcript name;
         # the log dir uses the bare task id.
         sid_bare = sid.split(".session.execution")[0]
+        # Turn-precise attribution: transcript promptId == log turn_id, so
+        # each log turn (model + duration) maps to the transcript turn that
+        # shares its id; timestamp proximity (±120s) is only the fallback.
+        # Build at->promptId from the transcript files backing this session.
+        at_to_prompt: dict[str, str] = {}
+        try:
+            for path in self._resolve_group(sid):
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    pid = row.get("promptId")
+                    ts = row.get("timestamp")
+                    if pid and ts:
+                        iso = ts_to_iso(ts)
+                        if iso:
+                            at_to_prompt.setdefault(iso, str(pid))
+        except (OSError, ValueError):
+            pass
         events: list[tuple] = []
         durs: list[tuple] = []
+        turn_ids: dict[str, list[tuple]] = {}
         seen: set[str] = set()
         for key in ({sid, sid_bare}):
             for seg in sorted((logs.rglob(f"{key}/segments/*.jsonl"))):
@@ -427,20 +455,37 @@ class JsonlSessionParser(Parser):
                     except ValueError:
                         continue
                     data = row.get("data") or {}
+                    tid = str(row.get("turn_id") or "")
                     if row.get("type") == "model.response.completed":
                         model = str(data.get("model") or "").strip()
                         at = _parse_iso_local(row.get("ts"))
                         if model and at is not None:
                             events.append((at, model))
+                            if tid:
+                                turn_ids.setdefault(tid, []).append((at, model, None))
                     elif row.get("type") == "turn.finished":
                         dur = data.get("duration_ms")
                         at = _parse_iso_local(row.get("ts"))
                         if isinstance(dur, int) and dur > 0 and at is not None:
                             durs.append((at, dur))
+                            if tid:
+                                turn_ids.setdefault(tid, []).append((at, None, dur))
         hit = 0
-        if events:
+        if events or turn_ids:
             for m in raw.messages:
                 if m.role != "assistant" or m.model or not m.at:
+                    continue
+                # Exact first: same turn id on both sides.
+                pid = at_to_prompt.get(m.at or "")
+                exact = None
+                if pid:
+                    for at, model, _ in turn_ids.get(pid, []):
+                        if model:
+                            exact = model
+                            break
+                if exact is not None:
+                    m.model = exact
+                    hit += 1
                     continue
                 mat = _parse_iso_local(m.at)
                 if mat is None:
