@@ -197,6 +197,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     （JS bundle 缓存）用量键零命中。
 33. 移动端壳与空目录（2026-09-04）：com.qodercn.app.stable Cache/Code Cache
     共 110 文件 26MB 零命中；session-env 为空目录壳（0 文件）。
+34. task-466 全键普查（2026-09-04）：6238 行 72 去重键，含 model 字样的
+    仅 `message.content.input.questions.multiSelect`（问卷多选）——
+    transcript 零模型信号，键级证实。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
