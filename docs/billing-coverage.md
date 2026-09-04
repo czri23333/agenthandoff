@@ -241,6 +241,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     用量键零命中。
 51. bin 与外接命令（2026-09-04）：qoder-cn/computer-use 二进制、external
     wiki 命令配置——无用量数据。
+52. OAuth 与知识库表（2026-09-04）：mcp_oauth_tokens/knowledge_bases
+    全空表——无凭证可用、无用量。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
