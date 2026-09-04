@@ -101,24 +101,39 @@ function TranscriptRow({
   const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
   const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
 
-  const modelChip = m.model ? (
+  // Cost chip priority: model+tokens > model > tokens > measured duration.
+  // A turn with no token billing still shows its verifiable elapsed time —
+  // every message carries visible cost evidence, never a blank.
+  const hasTokens = typeof m.tokens_in === "number" || typeof m.tokens_out === "number";
+  const modelChip = m.model || hasTokens ? (
     <span
       className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-      title={`${m.model}${
-        typeof m.tokens_in === "number" || typeof m.tokens_out === "number"
+      title={`${m.model ?? "?"}${
+        hasTokens
           ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
               typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
             }`
-          : ""
+          : durTip
+            ? ` · +${durTip} (no token billing in store)`
+            : ""
       }`}
     >
-      <span>{m.model}</span>
-      {(typeof m.tokens_in === "number" || typeof m.tokens_out === "number") && (
+      <span>{m.model ?? "?"}</span>
+      {hasTokens ? (
         <span className="ah-faint">
           {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
           {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
         </span>
-      )}
+      ) : durTip ? (
+        <span className="ah-faint">⏱ {durTip}</span>
+      ) : null}
+    </span>
+  ) : durTip ? (
+    <span
+      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+      title={`no model/token billing in store · measured +${durTip}`}
+    >
+      <span className="ah-faint">⏱ {durTip}</span>
     </span>
   ) : null;
 
@@ -165,7 +180,28 @@ function TranscriptRow({
           >
             <span className="mr-1 select-none">{thinkOpen ? "▾" : "▸"}</span>
             💭 {labels.thinking}
-            {m.model ? <span className="ml-1.5 font-mono text-[11px]">· {m.model}</span> : null}
+            {m.model || hasTokens || durTip ? (
+              <span
+                className="ah-inset ml-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+                title={
+                  hasTokens
+                    ? `${m.model ?? "?"} · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}`
+                    : durTip
+                      ? `${m.model ?? "?"} · +${durTip} (no token billing in store)`
+                      : (m.model ?? "")
+                }
+              >
+                <span>{m.model ?? "?"}</span>
+                {hasTokens ? (
+                  <span className="ah-faint">
+                    {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
+                    {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
+                  </span>
+                ) : durTip ? (
+                  <span className="ah-faint">⏱ {durTip}</span>
+                ) : null}
+              </span>
+            ) : null}
             <span className="ah-time-tip ml-1.5 font-mono" title={timeTipFull}>{durTip || timeTip}</span>
           </div>
           {thinkOpen && (
