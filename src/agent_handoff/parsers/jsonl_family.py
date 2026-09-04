@@ -370,6 +370,86 @@ class JsonlSessionParser(Parser):
 
     # -- extraction ---------------------------------------------------------
 
+    def _apply_log_models(self, raw: RawSession) -> int:
+        """Attribute serving models from the CLI's own session logs.
+
+        Segment rows carry ``{ts, type:model.response.completed, data:{model,
+        input_tokens, output_tokens}}``. Token fields are server-side zero
+        placeholders (never attributed); the model name is measured and
+        fills assistant turns lacking one (nearest within ±120s).
+        Test/fixture trees (root outside the real home) never touch disk.
+        Shared by the work-CLI mixin and the IDE parser: both stores keep
+        ``<store>/logs/sessions/<sid>/segments/*.jsonl``.
+        """
+        try:
+            rooted = self.root.resolve().is_relative_to(home().resolve())
+        except (OSError, ValueError):
+            return 0
+        if not rooted or not self.projects_dirname:
+            return 0
+        # Walk up from root to the hidden-store dir.
+        store = None
+        rp = self.root
+        for _ in range(4):
+            if rp.name == self.projects_dirname:
+                store = rp
+                break
+            rp = rp.parent
+        if store is None:
+            return 0
+        logs = store / "logs" / "sessions"
+        if not logs.is_dir():
+            return 0
+        sid = raw.meta.session_id
+        # Task sessions append .session.execution to the transcript name;
+        # the log dir uses the bare task id.
+        sid_bare = sid.split(".session.execution")[0]
+        events: list[tuple] = []
+        seen: set[str] = set()
+        for key in ({sid, sid_bare}):
+            for seg in sorted((logs.rglob(f"{key}/segments/*.jsonl"))):
+                if str(seg) in seen:
+                    continue
+                seen.add(str(seg))
+                try:
+                    text = seg.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if row.get("type") != "model.response.completed":
+                        continue
+                    data = row.get("data") or {}
+                    model = str(data.get("model") or "").strip()
+                    at = _parse_iso_local(row.get("ts"))
+                    if model and at is not None:
+                        events.append((at, model))
+        if not events:
+            return 0
+        hit = 0
+        for m in raw.messages:
+            if m.role != "assistant" or m.model or not m.at:
+                continue
+            mat = _parse_iso_local(m.at)
+            if mat is None:
+                continue
+            best = None
+            best_d = 120.0
+            for at, model in events:
+                d = abs((mat - at).total_seconds())
+                if d < best_d:
+                    best, best_d = model, d
+            if best is not None:
+                m.model = best
+                hit += 1
+        return hit
+
     def _row_content(self, row: dict) -> tuple[str, str, str, list[dict]]:
         """Return (role, plain_text, raw_text, tool_blocks) for one JSONL row."""
         rtype = row.get("type")
@@ -1488,8 +1568,14 @@ class _QoderworkSharedMixin:
             for p, n in anchors.items():
                 raw.files_touched[p] = raw.files_touched.get(p, 0) + n
             raw.meta.notes = [*raw.meta.notes, f"qodersec_anchors:{len(anchors)}"]
+        # Session-log model attribution: ~/.<store>/logs/sessions/*/<sid>/
+        # segments/*.jsonl records model.response.completed per LLM call
+        # (model + ts; token fields are zero placeholders server-side).
+        # Attribute the serving model to nearby unattributed turns.
+        n_applied = self._apply_log_models(raw)
+        if n_applied:
+            raw.meta.notes = [*raw.meta.notes, f"log_models:{n_applied}"]
         return raw
-
 
 class QoderworkParser(_QoderworkSharedMixin, JsonlSessionParser):
     """Qoderwork — Claude-Code-style JSONL under ~/.qoderwork/projects."""
@@ -1770,6 +1856,9 @@ class QodercnIdeParser(JsonlSessionParser):
                 anchor = self._workspace_model_anchor(session_id, raw.meta.cwd)
                 if anchor:
                     raw.meta.notes = [*raw.meta.notes, f"workspace_model:{anchor}"]
+            n_log = self._apply_log_models(raw)
+            if n_log:
+                raw.meta.notes = [*raw.meta.notes, f"log_models:{n_log}"]
             task_files = self._task_execution_files(session_id)
             if task_files:
                 for pth in task_files:

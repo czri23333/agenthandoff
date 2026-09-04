@@ -137,6 +137,13 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     无 aicoding 键）、Session Storage（1.9KB）、WebStorage CacheStorage
     19 文件（1MB，用量键零命中）、Preferences（仅 electron/spellcheck）。
     解密后的用量无本地缓存。
+19. 会话日志双轨制（2026-09-04）：`logs/sessions/*/<sid>/segments/*.jsonl`
+    的 `model.response.completed` 行确有真实模型（IDE 侧 qmodel_38max 214、
+    qfmodel 367；CLI 侧 qmodel_preview 188），token 全零占位；parser 已按
+    时间归因接入（`_apply_log_models`，±120s）。但 IDE 侧 74 日志目录与
+    21 transcript 会话零重叠——日志记 headless run id，transcript 记 chat id，
+    两套 id 空间隔离，IDE 侧归因命中率为 0；CLI 侧目录名即 transcript sid，
+    时间重叠已验证。token 在两边均为零占位（服务端计费）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
