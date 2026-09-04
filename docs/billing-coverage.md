@@ -193,6 +193,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 31. 内嵌浏览器缓存（2026-09-04）：Partitions/GPUCache/Dawn* 共 149 文件
     40MB——唯一命中是缓存的 cockpit 自家页面 JSON（`input_tokens: 12`
     对话文本），非用量数据。
+32. 网络与 JS 缓存（2026-09-04）：Cookies 空表；CachedData 144 文件 9MB
+    （JS bundle 缓存）用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
