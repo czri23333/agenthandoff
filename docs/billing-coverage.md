@@ -179,6 +179,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 26. runs 日志全扫（2026-09-04）：4 store × 329 文件 19MB，logfmt 的
     input_tokens/output_tokens 全零值（turn.finished/request_id 结构在，
     模型真实但 token 零占位）。非零值零命中。
+27. Chromium HTTP 缓存（2026-09-04）：QoderCN/QoderWork/QoderWork CN
+    Cache_Data 共 16MB，用量 URL 与非零 token 值零命中（网关响应不落盘）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
