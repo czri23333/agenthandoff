@@ -107,6 +107,10 @@ class Message:
     # None for the main conversation. Lets the UI nest sub-agent work under the
     # parent session instead of interleaving it flat.
     subagent: str | None = None
+    # Measured cost of this turn in the vendor's own billing unit, keyed by
+    # the request id the store records (workbuddy session_usage.credit_json:
+    # conversationRequestId -> credits). Per-request attribution, never split.
+    credits: float | None = None
     # Measured elapsed ms for this turn from the store's own clocks (e.g.
     # CherryStudio metrics.time_completion_millsec). A verifiable cost proxy
     # where token billing is absent. Server fills it from timestamps when the

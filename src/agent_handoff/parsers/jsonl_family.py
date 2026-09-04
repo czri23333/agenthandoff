@@ -1404,6 +1404,100 @@ class WorkbuddyParser(_CodebuddyHybridParser):
             t = self._db_titles().get(sid)
             if t:
                 raw.meta.title = t
+        # Per-request credit attribution: session_usage.credit_json maps
+        # conversationRequestId -> credits (100% key match verified). The
+        # request id rides on providerData but _load_paths drops it, so
+        # re-resolve: credit goes to the first assistant text turn at/after
+        # the request's own timestamp. Tokens stay absent (honest).
+        credits = self._db_credits(sid)
+        if credits:
+            self._attribute_credits(raw, sid, credits)
+
+    def _db_credits(self, session_id: str) -> dict[str, float]:
+        """session request credits from workbuddy.db.session_usage."""
+        try:
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return {}
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                row = conn.execute(
+                    "SELECT credit_json FROM session_usage WHERE session_id=?",
+                    (session_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if not row or not row[0]:
+                return {}
+            data = json.loads(row[0])
+            return {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))}
+        except (OSError, ValueError):
+            return {}
+
+    def _attribute_credits(self, raw, session_id: str, credits: dict[str, float]) -> None:
+        """Attach per-request credits to turns by request timestamp.
+
+        Transcript rows carry providerData.conversationRequestId (= the
+        credit key) plus their own timestamp; match each credit to the
+        earliest assistant text turn at/after its request time. One credit
+        lands on exactly one turn (no splitting, no double count).
+        """
+        try:
+            paths = self._resolve_group(session_id)
+        except (OSError, ValueError):
+            return
+        # request id -> earliest row timestamp
+        req_at: dict[str, object] = {}
+        for path in paths:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                pd = row.get("providerData")
+                if not isinstance(pd, dict):
+                    continue
+                req = pd.get("conversationRequestId")
+                ts = row.get("timestamp")
+                if req and ts and req not in req_at:
+                    at = ts_to_iso(ts)
+                    if at:
+                        req_at[str(req)] = at
+        if not req_at:
+            return
+        for req, amount in credits.items():
+            at = req_at.get(req)
+            if at is None:
+                continue
+            # Prefer the request's text turn (the billable answer); fall
+            # back to the earliest tool row when the request has no text.
+            best = None
+            for m in raw.messages:
+                if m.role != "assistant" or m.credits is not None or not m.at:
+                    continue
+                if m.text.startswith("[思考]") or m.text.startswith("[工具"):
+                    continue
+                if m.at >= at and (best is None or m.at < best.at):
+                    best = m
+            if best is None:
+                for m in raw.messages:
+                    if m.role != "assistant" or m.credits is not None or not m.at:
+                        continue
+                    if m.text.startswith("[思考]"):
+                        continue
+                    if m.at >= at and (best is None or m.at < best.at):
+                        best = m
+            if best is not None:
+                best.credits = amount
 
     def _db_experts(self) -> dict[str, tuple[str | None, str | None]]:
         """session_id -> (expert name, avatar URL) from assistant-display.

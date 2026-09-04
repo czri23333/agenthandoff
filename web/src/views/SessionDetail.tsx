@@ -101,22 +101,24 @@ function TranscriptRow({
   const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
   const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
 
-  // Cost chip priority: model+tokens > model > tokens > measured duration.
-  // A turn with no token billing still shows its verifiable elapsed time —
-  // every message carries visible cost evidence, never a blank.
+  // Cost chip priority: model+tokens > model+credits > model > tokens >
+  // credits > measured duration. A turn with no token billing still shows
+  // its verifiable cost — every message carries visible cost evidence.
   const hasTokens = typeof m.tokens_in === "number" || typeof m.tokens_out === "number";
-  const modelChip = m.model || hasTokens ? (
+  const hasCredits = typeof m.credits === "number";
+  const costTitle = hasTokens
+    ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
+        typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
+      }${hasCredits ? ` · ${m.credits} credits` : ""}`
+    : hasCredits
+      ? ` · ${m.credits} credits${durTip ? ` · +${durTip}` : ""}`
+      : durTip
+        ? ` · +${durTip} (no token billing in store)`
+        : "";
+  const modelChip = m.model || hasTokens || hasCredits ? (
     <span
       className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-      title={`${m.model ?? "?"}${
-        hasTokens
-          ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
-              typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
-            }`
-          : durTip
-            ? ` · +${durTip} (no token billing in store)`
-            : ""
-      }`}
+      title={`${m.model ?? "?"}${costTitle}`}
     >
       <span>{m.model ?? "?"}</span>
       {hasTokens ? (
@@ -124,9 +126,9 @@ function TranscriptRow({
           {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
           {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
         </span>
-      ) : durTip ? (
-        <span className="ah-faint">⏱ {durTip}</span>
       ) : null}
+      {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
+      {!hasTokens && !hasCredits && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
     </span>
   ) : durTip ? (
     <span
@@ -180,16 +182,10 @@ function TranscriptRow({
           >
             <span className="mr-1 select-none">{thinkOpen ? "▾" : "▸"}</span>
             💭 {labels.thinking}
-            {m.model || hasTokens || durTip ? (
+            {m.model || hasTokens || hasCredits || durTip ? (
               <span
                 className="ah-inset ml-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-                title={
-                  hasTokens
-                    ? `${m.model ?? "?"} · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}`
-                    : durTip
-                      ? `${m.model ?? "?"} · +${durTip} (no token billing in store)`
-                      : (m.model ?? "")
-                }
+                title={`${m.model ?? "?"}${costTitle}`}
               >
                 <span>{m.model ?? "?"}</span>
                 {hasTokens ? (
@@ -197,7 +193,9 @@ function TranscriptRow({
                     {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
                     {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
                   </span>
-                ) : durTip ? (
+                ) : null}
+                {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
+                {!hasTokens && !hasCredits && durTip ? (
                   <span className="ah-faint">⏱ {durTip}</span>
                 ) : null}
               </span>

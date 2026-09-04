@@ -64,6 +64,8 @@ export interface TranscriptMessage {
   tokens_out?: number;
   /** Reasoning tokens this turn cost (only when the store records it). */
   tokens_reasoning?: number;
+  /** Vendor billing units this turn cost (workbuddy per-request credits). */
+  credits?: number;
   /** Sub-agent that produced this turn (absent = main conversation). */
   subagent?: string;
   /** Verbatim source before cleaning (absent = cleaning changed nothing). */
