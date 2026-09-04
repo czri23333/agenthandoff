@@ -704,13 +704,14 @@ class JsonlSessionParser(Parser):
             messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
 
         # Second pass after the chronological sort: thinking turns stranded by
-        # cross-file disorder inherit the billing of the nearest settled
-        # assistant turn at or after their own timestamp (same request's spend).
+        # cross-file disorder take the model of the nearest settled turn —
+        # but NEVER its tokens. Cross-turn token inheritance misattributes
+        # one request's spend to another; None stays honest absence.
         # Only [思考] turns qualify — text turns without billing mean the store
         # recorded no usage row for that request (honest absence).
         settled: list = []
         for m in messages:
-            if m.role == "assistant" and (m.tokens_in is not None or m.tokens_out is not None):
+            if m.role == "assistant" and m.model:
                 settled.append(m)
         if settled:
             for m in messages:
@@ -720,16 +721,12 @@ class JsonlSessionParser(Parser):
                     and m.tokens_out is None
                     and (m.text or "").startswith("[思考]")
                     and m.at
+                    and not m.model
                 ):
                     nxt = next((s for s in settled if (s.at or "") >= (m.at or "")), None)
                     if nxt is None:
                         continue
-                    m.tokens_in = nxt.tokens_in
-                    m.tokens_out = nxt.tokens_out
-                    if m.tokens_reasoning is None:
-                        m.tokens_reasoning = nxt.tokens_reasoning
-                    if not m.model:
-                        m.model = nxt.model
+                    m.model = nxt.model
 
         notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
         if agent_surfaces:

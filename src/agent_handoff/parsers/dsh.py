@@ -408,10 +408,12 @@ class DshParser(Parser):
                     )
                 )
 
-        # Second pass (same rule as the jsonl family): tokenless [思考] turns
-        # inherit the nearest settled assistant turn at/after their timestamp.
+        # Second pass: tokenless [思考] turns take the model of the nearest
+        # settled turn (same session, same serving model) — but NEVER its
+        # tokens. Token inheritance across turns misattributes one request's
+        # spend to another; None stays honest absence.
         messages.sort(key=lambda m: m.at or "")
-        settled = [m for m in messages if m.role == "assistant" and (m.tokens_in is not None or m.tokens_out is not None)]
+        settled = [m for m in messages if m.role == "assistant" and m.model]
         if settled:
             for m in messages:
                 if (
@@ -420,16 +422,12 @@ class DshParser(Parser):
                     and m.tokens_out is None
                     and (m.text or "").startswith("[思考]")
                     and m.at
+                    and not m.model
                 ):
                     nxt = next((s for s in settled if (s.at or "") >= (m.at or "")), None)
                     if nxt is None:
                         continue
-                    m.tokens_in = nxt.tokens_in
-                    m.tokens_out = nxt.tokens_out
-                    if m.tokens_reasoning is None:
-                        m.tokens_reasoning = nxt.tokens_reasoning
-                    if not m.model:
-                        m.model = nxt.model
+                    m.model = nxt.model
 
         meta = SessionMeta(
             cli=self.cli,

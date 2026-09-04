@@ -54,6 +54,8 @@ export interface TranscriptMessage {
   role: string;
   text: string;
   at: string | null;
+  /** ms since the previous turn (store-clock cost proxy where tokens are absent). */
+  dur_ms?: number;
   /** Which model answered this turn (assistant turns only, when the store records it). */
   model?: string;
   /** Input tokens this turn cost (only when the store records it). */

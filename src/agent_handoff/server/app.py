@@ -313,26 +313,55 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
     # Transcript with honest compaction markers: long sessions get compacted
     # many times and everything before a marker exists only as a summary.
     # Hiding that would present a truncated history as complete.
-    stream: list[dict] = [
-        {
-            "role": m.role,
-            # Verbatim: the cockpit must show exactly what the store holds.
-            # Truncation is a display decision and belongs to the frontend
-            # (TranscriptRow expands to the full text on click).
-            "text": m.text,
-            "at": m.at,
-            # per-turn billing: which model answered, what it cost in tokens
-            **({"model": m.model} if m.model else {}),
-            **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
-            **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
-            **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
-            **({"subagent": m.subagent} if m.subagent else {}),
-            # Verbatim source beside the cleaned text (None = cleaning
-            # changed nothing); the cockpit offers a 原文 view off this.
-            **({"raw_text": m.raw_text} if m.raw_text else {}),
-        }
-        for m in raw.messages
-    ]
+    # Per-turn elapsed time (ms since the previous turn): a verifiable,
+    # store-grounded cost proxy where token billing is absent (qoder family
+    # bills in the cloud; the transcript keeps only timestamps). Computed
+    # from the store's own clocks, never estimated.
+    def _dur_ms(cur: str | None, prev: str | None) -> int | None:
+        try:
+            from datetime import datetime as _dt
+
+            if not cur or not prev:
+                return None
+            c = _dt.fromisoformat(cur.replace("Z", "+00:00"))
+            p = _dt.fromisoformat(prev.replace("Z", "+00:00"))
+            d = (c - p).total_seconds() * 1000
+            return int(d) if 0 <= d < 86400 * 1000 else None
+        except (ValueError, TypeError):
+            return None
+
+    stream: list[dict] = []
+    _prev_at: str | None = None
+    for m in raw.messages:
+        # Parser-measured duration wins (store clocks); otherwise derive
+        # from adjacent timestamps. Both are measurements, never estimates.
+        # A derived 0ms means same-timestamp batch rows (one message fanned
+        # out), not a real measurement — leave it absent.
+        _own = m.dur_ms if isinstance(m.dur_ms, int) and m.dur_ms >= 0 else None
+        _derived = _dur_ms(m.at, _prev_at)
+        _d = _own if _own is not None else (_derived if _derived else None)
+        stream.append(
+            {
+                "role": m.role,
+                # Verbatim: the cockpit must show exactly what the store holds.
+                # Truncation is a display decision and belongs to the frontend
+                # (TranscriptRow expands to the full text on click).
+                "text": m.text,
+                "at": m.at,
+                **({"dur_ms": _d} if _d is not None else {}),
+                # per-turn billing: which model answered, what it cost in tokens
+                **({"model": m.model} if m.model else {}),
+                **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
+                **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
+                **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
+                **({"subagent": m.subagent} if m.subagent else {}),
+                # Verbatim source beside the cleaned text (None = cleaning
+                # changed nothing); the cockpit offers a 原文 view off this.
+                **({"raw_text": m.raw_text} if m.raw_text else {}),
+            }
+        )
+        if m.at:
+            _prev_at = m.at
     markers: list[dict] = [
         {
             "role": "compaction",

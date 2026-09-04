@@ -90,7 +90,16 @@ function TranscriptRow({
   const long = !isThinking && !isTool && !isSubagent && text.length > 500;
   const who = m.role === "user" ? labels.user : labels.assistant;
   const shown = showRaw && m.raw_text ? m.raw_text : text;
+  // Elapsed-time cost proxy (store clocks): "3.2s" when the store kept no
+  // token billing for this turn. Verifiable, never estimated.
+  const durTip =
+    typeof m.dur_ms === "number"
+      ? m.dur_ms < 1000
+        ? `${m.dur_ms}ms`
+        : `${(m.dur_ms / 1000).toFixed(1)}s`
+      : "";
   const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
+  const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
 
   const modelChip = m.model ? (
     <span
@@ -131,11 +140,11 @@ function TranscriptRow({
     return (
       <div className="ah-user-row">
         <div className="flex max-w-full flex-col items-end">
-          <div className="ah-user-bubble" dir="auto" title={timeTip}>
+          <div className="ah-user-bubble" dir="auto" title={timeTipFull}>
             <Markdown text={shown} />
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="ah-time-tip font-mono">{timeTip}</span>
+            <span className="ah-time-tip font-mono" title={timeTipFull}>{durTip || timeTip}</span>
             {rawToggle}
           </div>
         </div>
@@ -157,7 +166,7 @@ function TranscriptRow({
             <span className="mr-1 select-none">{thinkOpen ? "▾" : "▸"}</span>
             💭 {labels.thinking}
             {m.model ? <span className="ml-1.5 font-mono text-[11px]">· {m.model}</span> : null}
-            <span className="ah-time-tip ml-1.5 font-mono">{timeTip}</span>
+            <span className="ah-time-tip ml-1.5 font-mono" title={timeTipFull}>{durTip || timeTip}</span>
           </div>
           {thinkOpen && (
             <div className="ah-reasoning-content" dir="auto">
@@ -187,7 +196,7 @@ function TranscriptRow({
                   ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
                 </span>
               ) : null}
-              <span className="ah-time-tip ml-auto font-mono">{timeTip}</span>
+              <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>{durTip || timeTip}</span>
             </button>
             {toolOpen && rest ? (
               <div className="ah-toolcall-body">
@@ -223,7 +232,7 @@ function TranscriptRow({
               <span>
                 👥 {labels.subagentCall} · {desc || who}
               </span>
-              <span className="ah-time-tip ml-auto font-mono">{timeTip}</span>
+              <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>{durTip || timeTip}</span>
             </button>
             <div className="ah-toolcall-body flex items-center gap-2">
               {modelChip}
@@ -278,7 +287,7 @@ function TranscriptRow({
           )}
           {modelChip}
           {rawToggle}
-          <span className="ah-time-tip ml-auto font-mono">{timeTip}</span>
+          <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>{durTip || timeTip}</span>
         </div>
         <div
           dir="auto"

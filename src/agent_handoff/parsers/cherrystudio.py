@@ -240,6 +240,16 @@ class CherryStudioParser(Parser):
             model = msg.get("model")
             model_name = model.get("name") if isinstance(model, dict) else None
             usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+            # One message row = one LLM call: its usage bills every assistant
+            # block inside it (thinking + text + tool), not just main_text.
+            ti = usage.get("prompt_tokens")
+            to = usage.get("completion_tokens")
+            ti = ti if isinstance(ti, int) else None
+            to = to if isinstance(to, int) else None
+            # Measured cost proxy: the store's own per-call completion time.
+            metrics = msg.get("metrics") if isinstance(msg.get("metrics"), dict) else {}
+            mt = metrics.get("time_completion_millsec")
+            mt = mt if isinstance(mt, int) and mt >= 0 else None
             at = msg.get("createdAt") or row["created_at"]
             for block in payload.get("blocks") or []:
                 if not isinstance(block, dict):
@@ -251,7 +261,7 @@ class CherryStudioParser(Parser):
                     if text and not self.is_noise(text):
                         messages.append(
                             self.msg("assistant", f"[思考] {praw}", text=f"[思考] {text}", at=at,
-                                     model=model_name or None)
+                                     model=model_name or None, tokens_in=ti, tokens_out=to, dur_ms=mt)
                         )
                 elif btype == "main_text":
                     praw = _text(block.get("content"))
@@ -260,8 +270,8 @@ class CherryStudioParser(Parser):
                         messages.append(
                             self.msg(
                                 role, praw, text=text, at=at, model=model_name or None,
-                                tokens_in=usage.get("prompt_tokens"),
-                                tokens_out=usage.get("completion_tokens"),
+                                tokens_in=ti,
+                                tokens_out=to, dur_ms=mt,
                             )
                         )
                 elif btype == "tool":
