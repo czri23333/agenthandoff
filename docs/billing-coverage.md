@@ -237,6 +237,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     4MB——用量键零命中。
 49. Buddy 双版日志（2026-09-04）：Roaming/WorkBuddy+CodeBuddy CN/logs
     128 文件 3.9MB——用量键零命中。
+50. Cherry 日志（2026-09-04）：Roaming/CherryStudio/logs 48 文件 4MB——
+    用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
