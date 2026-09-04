@@ -157,6 +157,10 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     + Qwen 专属包明细，**无逐消息明细**。实证官方用量模型 = 订阅总额，
     与 §5-16 的逆向结论一致。解密方法：Local State.os_crypt.encrypted_key
    （DPAPI）→ v10 + 12B nonce GCM。key 材料已删除，不留盘。
+21. 日志模型交叉验证 + workers 扫荡（2026-09-04）：uuid 会话 32a2304c
+    的 segment 模型（qmodel_38max）与 transcript runtime-config 一致，
+    证实 `_apply_log_models` 归因值正确；workers 下全为记忆/版本事件
+    （memory-created-sources/events.jsonl），无用量。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
