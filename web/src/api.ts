@@ -66,6 +66,8 @@ export interface TranscriptMessage {
   tokens_reasoning?: number;
   /** Vendor billing units this turn cost (workbuddy per-request credits). */
   credits?: number;
+  /** Length-based estimate, shown with ≈, never vendor truth. */
+  tokens_estimated?: number;
   /** Sub-agent that produced this turn (absent = main conversation). */
   subagent?: string;
   /** Verbatim source before cleaning (absent = cleaning changed nothing). */

@@ -101,21 +101,25 @@ function TranscriptRow({
   const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
   const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
 
-  // Cost chip priority: model+tokens > model+credits > model > tokens >
-  // credits > measured duration. A turn with no token billing still shows
-  // its verifiable cost — every message carries visible cost evidence.
+  // Cost chip priority: model+tokens > model+credits > model+≈estimate >
+  // model > tokens > credits > measured duration. Turns without vendor
+  // billing show the honest ≈ estimate — every message carries visible
+  // cost evidence, estimates never pose as vendor truth.
   const hasTokens = typeof m.tokens_in === "number" || typeof m.tokens_out === "number";
   const hasCredits = typeof m.credits === "number";
+  const hasEst = typeof m.tokens_estimated === "number";
   const costTitle = hasTokens
     ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
         typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
       }${hasCredits ? ` · ${m.credits} credits` : ""}`
     : hasCredits
       ? ` · ${m.credits} credits${durTip ? ` · +${durTip}` : ""}`
-      : durTip
-        ? ` · +${durTip} (no token billing in store)`
-        : "";
-  const modelChip = m.model || hasTokens || hasCredits ? (
+      : hasEst
+        ? ` · ≈${m.tokens_estimated} tokens (length estimate, not vendor billing)${durTip ? ` · +${durTip}` : ""}`
+        : durTip
+          ? ` · +${durTip} (no token billing in store)`
+          : "";
+  const modelChip = m.model || hasTokens || hasCredits || hasEst ? (
     <span
       className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
       title={`${m.model ?? "?"}${costTitle}`}
@@ -128,7 +132,10 @@ function TranscriptRow({
         </span>
       ) : null}
       {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
-      {!hasTokens && !hasCredits && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
+      {!hasTokens && !hasCredits && hasEst ? (
+        <span className="ah-faint">≈{m.tokens_estimated}</span>
+      ) : null}
+      {!hasTokens && !hasCredits && !hasEst && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
     </span>
   ) : durTip ? (
     <span
@@ -182,7 +189,7 @@ function TranscriptRow({
           >
             <span className="mr-1 select-none">{thinkOpen ? "▾" : "▸"}</span>
             💭 {labels.thinking}
-            {m.model || hasTokens || hasCredits || durTip ? (
+            {m.model || hasTokens || hasCredits || hasEst || durTip ? (
               <span
                 className="ah-inset ml-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
                 title={`${m.model ?? "?"}${costTitle}`}
@@ -195,7 +202,10 @@ function TranscriptRow({
                   </span>
                 ) : null}
                 {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
-                {!hasTokens && !hasCredits && durTip ? (
+                {!hasTokens && !hasCredits && hasEst ? (
+                  <span className="ah-faint">≈{m.tokens_estimated}</span>
+                ) : null}
+                {!hasTokens && !hasCredits && !hasEst && durTip ? (
                   <span className="ah-faint">⏱ {durTip}</span>
                 ) : null}
               </span>

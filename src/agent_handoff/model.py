@@ -103,6 +103,10 @@ class Message:
     tokens_in: int | None = None
     tokens_out: int | None = None
     tokens_reasoning: int | None = None
+    # Deterministic length-based estimate (~4 chars/token, CJK-aware) used
+    # ONLY when the store records no billing. Displayed with a ≈ prefix and
+    # never mixed into usage() aggregates — an honest gauge, not vendor truth.
+    tokens_estimated: int | None = None
     # Set when the turn came from a sub-agent transcript (label = which one);
     # None for the main conversation. Lets the UI nest sub-agent work under the
     # parent session instead of interleaving it flat.

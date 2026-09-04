@@ -354,6 +354,7 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
                 **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
                 **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
                 **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
+                **({"tokens_estimated": m.tokens_estimated} if m.tokens_estimated is not None else {}),
                 **({"credits": m.credits} if m.credits is not None else {}),
                 **({"subagent": m.subagent} if m.subagent else {}),
                 # Verbatim source beside the cleaned text (None = cleaning
