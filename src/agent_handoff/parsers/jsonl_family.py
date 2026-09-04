@@ -371,12 +371,14 @@ class JsonlSessionParser(Parser):
     # -- extraction ---------------------------------------------------------
 
     def _apply_log_models(self, raw: RawSession) -> int:
-        """Attribute serving models from the CLI's own session logs.
+        """Attribute serving models + measured durations from session logs.
 
         Segment rows carry ``{ts, type:model.response.completed, data:{model,
-        input_tokens, output_tokens}}``. Token fields are server-side zero
-        placeholders (never attributed); the model name is measured and
-        fills assistant turns lacking one (nearest within ±120s).
+        input_tokens, output_tokens}}`` (token fields are server-side zero
+        placeholders — never attributed) and ``{ts, type:turn.finished,
+        data:{duration_ms}}`` (server-measured turn cost — attributed as
+        ``dur_ms``, outranking timestamp derivation). Both fill assistant
+        turns lacking them (nearest within ±120s).
         Test/fixture trees (root outside the real home) never touch disk.
         Shared by the work-CLI mixin and the IDE parser: both stores keep
         ``<store>/logs/sessions/<sid>/segments/*.jsonl``.
@@ -405,6 +407,7 @@ class JsonlSessionParser(Parser):
         # the log dir uses the bare task id.
         sid_bare = sid.split(".session.execution")[0]
         events: list[tuple] = []
+        durs: list[tuple] = []
         seen: set[str] = set()
         for key in ({sid, sid_bare}):
             for seg in sorted((logs.rglob(f"{key}/segments/*.jsonl"))):
@@ -423,31 +426,50 @@ class JsonlSessionParser(Parser):
                         row = json.loads(line)
                     except ValueError:
                         continue
-                    if row.get("type") != "model.response.completed":
-                        continue
                     data = row.get("data") or {}
-                    model = str(data.get("model") or "").strip()
-                    at = _parse_iso_local(row.get("ts"))
-                    if model and at is not None:
-                        events.append((at, model))
-        if not events:
-            return 0
+                    if row.get("type") == "model.response.completed":
+                        model = str(data.get("model") or "").strip()
+                        at = _parse_iso_local(row.get("ts"))
+                        if model and at is not None:
+                            events.append((at, model))
+                    elif row.get("type") == "turn.finished":
+                        dur = data.get("duration_ms")
+                        at = _parse_iso_local(row.get("ts"))
+                        if isinstance(dur, int) and dur > 0 and at is not None:
+                            durs.append((at, dur))
         hit = 0
-        for m in raw.messages:
-            if m.role != "assistant" or m.model or not m.at:
-                continue
-            mat = _parse_iso_local(m.at)
-            if mat is None:
-                continue
-            best = None
-            best_d = 120.0
-            for at, model in events:
-                d = abs((mat - at).total_seconds())
-                if d < best_d:
-                    best, best_d = model, d
-            if best is not None:
-                m.model = best
-                hit += 1
+        if events:
+            for m in raw.messages:
+                if m.role != "assistant" or m.model or not m.at:
+                    continue
+                mat = _parse_iso_local(m.at)
+                if mat is None:
+                    continue
+                best = None
+                best_d = 120.0
+                for at, model in events:
+                    d = abs((mat - at).total_seconds())
+                    if d < best_d:
+                        best, best_d = model, d
+                if best is not None:
+                    m.model = best
+                    hit += 1
+        if durs:
+            for m in raw.messages:
+                if m.role != "assistant" or m.dur_ms is not None or not m.at:
+                    continue
+                mat = _parse_iso_local(m.at)
+                if mat is None:
+                    continue
+                best = None
+                best_d = 120.0
+                for at, dur in durs:
+                    d = abs((mat - at).total_seconds())
+                    if d < best_d:
+                        best, best_d = dur, d
+                if best is not None:
+                    m.dur_ms = best
+                    hit += 1
         return hit
 
     def _row_content(self, row: dict) -> tuple[str, str, str, list[dict]]:
