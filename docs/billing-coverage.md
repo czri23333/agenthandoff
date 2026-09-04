@@ -215,6 +215,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     空目录；workcn bin 仅 computer-use/shim（需调用名路由）；调度器链
     （qoder-cn.cmd→dispatcher.ps1）最终也指向不存在的 CLI。本机无可执行
     的已登录 CLI——云端调用无执行主体。
+40. 安装附带资源（2026-09-04）：resources/bin（native 模块）、
+    bundled-resources、dynamic-text（i18n 文案）——用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
