@@ -734,6 +734,18 @@ class JsonlSessionParser(Parser):
         # timestamp (±2s). Absent file = zero impact.
         self.apply_cloud_overlay(messages, session_id)
 
+        # Session-dominant model backfill: tool-result rows carry no
+        # providerData, but they execute inside this session's calls — label
+        # them with the session's own dominant model so every row shows the
+        # serving model. Tokens stay absent (honest).
+        dom = Counter(m.model for m in messages if m.role == "assistant" and m.model)
+        if dom:
+            top, ntop = dom.most_common(1)[0]
+            if ntop >= 2:
+                for m in messages:
+                    if m.role == "assistant" and not m.model:
+                        m.model = top
+
         notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
         if agent_surfaces:
             notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
@@ -1748,6 +1760,12 @@ class QodercnIdeParser(JsonlSessionParser):
             selector = self._model_selector(session_id)
             if selector:
                 raw.meta.notes = [*raw.meta.notes, f"model_selector:{selector}"]
+                # The IDE's own per-session routing record (e.g. auto):
+                # backfill turns that carry no model so every message shows
+                # the serving routing. Tokens stay absent (honest).
+                for m in raw.messages:
+                    if m.role == "assistant" and not m.model:
+                        m.model = selector
             if not raw.meta.model:
                 anchor = self._workspace_model_anchor(session_id, raw.meta.cwd)
                 if anchor:
