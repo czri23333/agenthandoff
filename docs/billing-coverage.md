@@ -190,6 +190,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 30. 杂项位置（2026-09-04）：shell-snapshots（shell 快照脚本）、
     workbuddy blobs（68MB 二进制）、qimei-cache.json（设备指纹）——
     196 文件 70MB 用量键零命中。
+31. 内嵌浏览器缓存（2026-09-04）：Partitions/GPUCache/Dawn* 共 149 文件
+    40MB——唯一命中是缓存的 cockpit 自家页面 JSON（`input_tokens: 12`
+    对话文本），非用量数据。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
