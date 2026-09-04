@@ -245,6 +245,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     全空表——无凭证可用、无用量。
 53. 小表普查（2026-09-04）：voice_input/channel_pairings/scheduled_tasks
     空表；nudge/skill_evolution 为技能建议文本——无用量。
+54. runs 精确 session 前缀（2026-09-04）：logfmt `[session=<sid>]` 直连
+    transcript——但仅覆盖 3 个已有 runtime-config 的 uuid 会话；
+    9 月 task 会话在 runs 里无记录（IDE 任务通道不记 runs 日志）。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
