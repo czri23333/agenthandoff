@@ -211,6 +211,10 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 38. 备份库对比（2026-09-04）：state.vscdb.backup/.bak-sensenova 与主库同类——
     modelSelector.runtimeConfig（contextKey）、customModels（小米 MIMO 等
     路由配置）、modelMap.enterprise.cache（空数组），无 token。
+39. CLI 本体缺失（2026-09-04）：PATH 无 qodercli/qoderclicn；~/.qoder/bin/
+    空目录；workcn bin 仅 computer-use/shim（需调用名路由）；调度器链
+    （qoder-cn.cmd→dispatcher.ps1）最终也指向不存在的 CLI。本机无可执行
+    的已登录 CLI——云端调用无执行主体。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
