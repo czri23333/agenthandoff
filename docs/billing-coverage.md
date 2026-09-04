@@ -208,6 +208,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 37. 插件包 URL 穷举（2026-09-04）：extension.js 内用量相关 URL 仅 3 个——
     阿里云 PAT 文档、qoder.cn/account/integrations、qoder.cn/account/usage
     （账单网页，需登录），无 API 端点。
+38. 备份库对比（2026-09-04）：state.vscdb.backup/.bak-sensenova 与主库同类——
+    modelSelector.runtimeConfig（contextKey）、customModels（小米 MIMO 等
+    路由配置）、modelMap.enterprise.cache（空数组），无 token。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
