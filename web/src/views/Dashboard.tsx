@@ -546,6 +546,13 @@ function SessionRow({
               <span className="ah-faint hidden shrink-0 font-mono xl:inline">⤷ {t("subSession")}</span>
             </Tooltip>
           )}
+          {s.automation && (
+            <Tooltip title={`${t("automation")} · ${s.automation}`}>
+              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-pill)] px-2 py-px font-mono text-[11px] lg:inline">
+                ⚙ {s.automation.length > 18 ? `${s.automation.slice(0, 17)}…` : s.automation}
+              </span>
+            </Tooltip>
+          )}
           {s.task_type === "quest-task" && (
             <Tooltip title={t("questTaskHint")}>
               <span className="ah-accent hidden shrink-0 font-mono text-[11px] lg:inline">◈ {t("questTask")}</span>

@@ -30,6 +30,8 @@ export interface SessionMeta {
   /** Assistant identity as the product shows it (expert name + avatar URL). */
   expert_name?: string;
   expert_avatar?: string;
+  /** Parent task this session belongs to (workbuddy automation name). */
+  automation?: string;
 }
 
 export interface UsageModel {

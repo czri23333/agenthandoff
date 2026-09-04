@@ -1,4 +1,4 @@
-import { Alert, App, Button, Card, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import type { Interruption } from "./api";
 import { formatNum, useT } from "./i18n";
@@ -105,14 +105,18 @@ export function SectionCard({
   tone?: "ok" | "accent" | "err";
   children: React.ReactNode;
 }) {
+  // M3E: tonal header strip + large radius card. The tone tints only the
+  // header (status at a glance); the body stays on the surface.
+  const tonal =
+    tone === "ok" ? "ah-tonal-ok" : tone === "accent" ? "ah-tonal-accent" : tone === "err" ? "ah-tonal-err" : "";
   return (
-    <Card
-      size="small"
-      title={<span className={`ah-label ${tone ? `ah-${tone}` : ""}`}>{title}</span>}
-      extra={extra}
-    >
-      {children}
-    </Card>
+    <div className="ah-card overflow-hidden">
+      <div className={`flex items-center justify-between gap-2 px-3 py-2 ${tonal}`}>
+        <span className={`ah-label ${tone ? `ah-${tone}` : ""}`}>{title}</span>
+        {extra}
+      </div>
+      <div className="px-3 py-2.5">{children}</div>
+    </div>
   );
 }
 

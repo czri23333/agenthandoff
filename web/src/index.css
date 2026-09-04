@@ -263,15 +263,15 @@ body {
   padding: 0 1px;
 }
 
-/* Rows ------------------------------------------------------------------- */
+/* Rows: M3E medium cards with tonal hover -------------------------------- */
 .ah-row {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
-  border-radius: var(--ah-radius);
+  border-radius: var(--ah-shape-md);
 }
 
 .ah-row:hover {
-  background: var(--ah-surface-2);
+  background: var(--ah-accent-container);
   border-color: var(--ah-line-strong);
 }
 

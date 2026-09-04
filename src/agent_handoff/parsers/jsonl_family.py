@@ -1367,6 +1367,7 @@ class WorkbuddyParser(_CodebuddyHybridParser):
         metas = super().list_sessions()  # already carries jsonl ai-title rows
         db = self._db_titles()
         kinds = self._db_kinds()
+        autos = self._db_automations()
         for m in metas:
             # The AI-generated title written into the transcript is the title
             # the product shows; the db sessions.title (often the raw first
@@ -1381,6 +1382,13 @@ class WorkbuddyParser(_CodebuddyHybridParser):
             k = kinds.get(m.session_id)
             if k:
                 m.task_type = k
+            # Automation归属: automation_runs.runs_json[].conversationId
+            # links background runs to their automation (tts/LUFS/每日检查…).
+            # Recorded as a note; the server groups by it so no session is
+            # 主-less in the cockpit.
+            a = autos.get(m.session_id)
+            if a:
+                m.notes = [*m.notes, f"automation:{a}"]
         experts = self._db_experts()
         for m in metas:
             ex = experts.get(m.session_id)
@@ -1608,6 +1616,59 @@ class WorkbuddyParser(_CodebuddyHybridParser):
         if not row or not row[0]:
             return None
         return str(row[0])
+
+    def _db_automations(self) -> dict[str, str]:
+        """session_id -> automation name from automation_runs (read-only).
+
+        ``runs_json[].conversationId`` is the session id; the automation
+        name (tts / LUFS / 每日检查…) is the parent a background session
+        belongs to. NOTE: ``deleted_at`` carries timestamps on every row
+        (not a live/dead flag), so it must NOT filter — status rides along
+        in the note instead.
+        """
+        try:
+            import json as _json
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return {}
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                names = {}
+                for aid, name, status in conn.execute(
+                    "SELECT id, name, status FROM automations"
+                ).fetchall():
+                    label = str(name or "").strip()
+                    if status and str(status).strip().upper() != "ACTIVE":
+                        label = f"{label} [{status}]"
+                    if aid and label:
+                        names[str(aid)] = label
+                runs = conn.execute(
+                    "SELECT runs_json, automation_id FROM automation_runs"
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return {}
+        out: dict[str, str] = {}
+        for runs_json, aid in runs:
+            name = names.get(str(aid or ""))
+            if not name:
+                continue
+            try:
+                items = _json.loads(runs_json or "[]")
+            except ValueError:
+                continue
+            if not isinstance(items, list):
+                continue
+            for run in items:
+                if not isinstance(run, dict):
+                    continue
+                cid = run.get("conversationId")
+                if cid and str(cid) not in out:
+                    out[str(cid)] = name
+        return out
 
     def _db_titles(self) -> dict[str, str]:
         """session_id -> display title from workbuddy.db (read-only)."""

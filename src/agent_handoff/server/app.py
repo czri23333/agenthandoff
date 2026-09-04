@@ -261,6 +261,13 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                     **({"task_type": m.task_type} if m.task_type else {}),
                     **({"expert_name": m.expert_name} if m.expert_name else {}),
                     **({"expert_avatar": m.expert_avatar} if m.expert_avatar else {}),
+                    # automation归属: workbuddy automation_runs.runs_json[].
+                    # conversationId 链出的父任务名；Dashboard 按它分组。
+                    **(
+                        {"automation": a.split(":", 1)[1]}
+                        if (a := next((n for n in m.notes if n.startswith("automation:")), None))
+                        else {}
+                    ),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),
