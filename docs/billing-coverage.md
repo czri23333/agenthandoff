@@ -231,6 +231,8 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     blobs（图片）、qoderworkcn tmp（空壳）——用量键零命中。
 46. IDE 全日志（2026-09-04）：Roaming/QoderCN/logs 354 文件 23MB
     （含 questWindow agent/renderer 日志）——用量键零命中。
+47. 国际版全日志（2026-09-04）：Roaming/Qoder/logs 362 文件 1.2MB——
+    用量键零命中。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
