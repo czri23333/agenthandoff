@@ -169,6 +169,9 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
 23. 残留目录全扫（2026-09-04）：`cache/experts`（agent 输出文本 +
     metadata.json，model 为空）、`tasks/`（Todo JSON）、`session-env/`
     （空目录）——225 文件 0.9MB 用量键零命中。
+24. 全库非零普查（2026-09-04）：4 store（.qoder-cn/.qoderworkcn/.qoderwork/
+    .qwenworkcn）× transcript+日志共 474 文件，正则扫 8 种 token 键的
+    非零值——零命中。这是全量结论（非抽样）：本地无任何非零 token 记录。
 
 1. quest/task 类逐消息 model+tokens：接受降级（9 处数据源穷尽，§1）。
    UI 以“本存储不记模型”+ `model_selector` 注记展示。
