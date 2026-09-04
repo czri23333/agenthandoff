@@ -132,7 +132,14 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
     runtime-config 行 model 为空串（CLI 靠服务端路由，本地不记）；
     `awareness/` 为记忆索引、`compression-v2/state.json` 为压缩状态机，
     均无用量；`workspace/modelMap` 仅 2 映射（auto，已回填）。
-    cockpit 的 dur_ms 逐消息耗时已超越官方可见维度。
+21. CLI 回显结构实证（2026-09-04，`qoderclicn -p --output-format json`
+    未登录探针）：顶层 `result` 事件确有一等 `usage{input_tokens,
+    output_tokens,cache_*,server_tool_use}` + `modelUsage{}` +
+    `total_cost_usd` 字段（未登录全零）。但 transcript 行类型仅
+    message/user/assistant/runtime-config/last-prompt（25 行枚举），
+    无 result 行落盘——用量只活在 stream-json 输出流，不进 transcript。
+    tool_result 内嵌 `usage:{used,limit}` 为记忆工具配额（653/4096），
+    非 LLM token。
 18. Electron 存储面全扫（2026-09-04）：Local Storage leveldb（3.5KB，
     无 aicoding 键）、Session Storage（1.9KB）、WebStorage CacheStorage
     19 文件（1MB，用量键零命中）、Preferences（仅 electron/spellcheck）。
@@ -157,3 +164,5 @@ messageId/conversationRequestId 均为 None，无关联键可追）。
    模型已 171/171（`model_level` 继承）+ `context_fill` 水位 + 跨源跳转。
 3. workbuddy 系/dsh 老 turn 逐消息 usage：接受现状（会话级配额 + 逐消息模型）。
    结项。
+
+> cockpit 的 dur_ms 逐消息耗时已超越官方可见维度（parser 实测优先，否则相邻时间戳推导；前端 ⏱ 芯片全覆盖）。
