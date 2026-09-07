@@ -486,3 +486,12 @@ def test_ide_task_execution_files_exact(tmp_path, monkeypatch):
     assert p._task_execution_files("task-1.session.execution") == ["src/own.ts"]
     assert p._task_execution_files("task-9.session.execution") == ["src/other.ts"]
     assert p._task_execution_files("plain-uuid") == []
+
+
+def test_request_interrupted_rows_are_dropped_as_noise():
+    """Official projection drops `[Request interrupted by user…]` user rows;
+    the parsers must never surface them as turns."""
+    from agent_handoff.parsers.base import Parser
+
+    assert Parser.is_noise("[Request interrupted by user before completing]")
+    assert not Parser.is_noise("Request a production review of this diff")

@@ -133,6 +133,20 @@ def test_cockpit_html_ships_with_the_package(client):
     assert 'src="/assets/' in r.text
 
 
+def test_built_js_serves_as_javascript_not_text_plain(client):
+    """Windows registries may map .js to text/plain; browsers then refuse the
+    module scripts and the cockpit boots blank. The server pins web types."""
+    from agent_handoff.server.app import _static_dir
+
+    d = _static_dir()
+    assert d is not None
+    names = sorted(p.name for p in (d / "assets").glob("*.js"))
+    assert names, "built frontend missing from the package"
+    r = client.get(f"/assets/{names[0]}")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/javascript"), r.headers["content-type"]
+
+
 def test_unknown_session_detail_is_404_not_500(client):
     assert client.get("/api/sessions/zcode/nope-nope/detail").status_code == 404
 
