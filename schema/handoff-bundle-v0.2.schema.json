@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/agenthandoff/agenthandoff/main/schema/handoff-bundle-v0.2.schema.json",
+  "title": "Agent Handoff Bundle",
+  "description": "Portable resumable state of one AI coding session (spec v0.2: v0.1 plus interruption evidence, extended meta, and verbatim carriers).",
+  "type": "object",
+  "required": ["bundle_version", "interruption", "meta", "objective", "state", "next_steps"],
+  "additionalProperties": true,
+  "properties": {
+    "bundle_version": { "const": "0.2" },
+    "interruption": {
+      "type": "object",
+      "required": ["kind", "detail", "pending_user_text"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "clean",
+            "user_pending",
+            "cancelled",
+            "context_exceeded",
+            "length_truncated",
+            "error",
+            "unknown"
+          ]
+        },
+        "detail": { "type": "string" },
+        "pending_user_text": { "type": "string" }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["cli", "session_id", "title"],
+      "additionalProperties": true,
+      "properties": {
+        "cli": { "type": "string" },
+        "session_id": { "type": "string" },
+        "title": { "type": "string" },
+        "cwd": { "type": "string" },
+        "started_at": { "type": ["string", "null"], "format": "date-time" },
+        "updated_at": { "type": ["string", "null"], "format": "date-time" },
+        "model": { "type": ["string", "null"] },
+        "tokens_in": { "type": ["integer", "null"], "minimum": 0 },
+        "tokens_out": { "type": ["integer", "null"], "minimum": 0 },
+        "source_path": { "type": "string" },
+        "provider": { "type": ["string", "null"] },
+        "origin": { "type": ["string", "null"] },
+        "parent_session_id": { "type": ["string", "null"] },
+        "expert_name": { "type": ["string", "null"] },
+        "expert_avatar": { "type": ["string", "null"] },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "task_type": { "type": ["string", "null"] },
+        "title_source": { "type": ["string", "null"] },
+        "permission": { "type": ["string", "null"] },
+        "attachments": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "objective": { "type": "string" },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "done": { "type": "array", "items": { "type": "string" } },
+        "in_progress": { "type": "array", "items": { "type": "string" } },
+        "blocked": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "directives": { "type": "array", "items": { "type": "string" } },
+    "files_touched": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "hits"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "hits": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "next_steps": { "type": "array", "items": { "type": "string" } },
+    "context_notes": { "type": "array", "items": { "type": "string" } },
+    "tool_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool", "calls"],
+        "additionalProperties": false,
+        "properties": {
+          "tool": { "type": "string" },
+          "calls": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["opener", "messages"],
+        "additionalProperties": false,
+        "properties": {
+          "opener": { "type": "string" },
+          "messages": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "recent": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "role": { "enum": ["user", "assistant"] },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "full_transcript": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "role": { "enum": ["user", "assistant"] },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "raw_files": { "type": "array", "items": { "type": "object" } },
+    "unfinished": { "type": "string" }
+  }
+}

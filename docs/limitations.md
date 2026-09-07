@@ -90,15 +90,12 @@ sampled away.
     store (Constitution: read-only). That rules out "resume inside the target
     agent natively", which some competing tools do offer. A trade, not an
     oversight — but a functional limit from a user's point of view.
-12. **The bundle schema is documented, not enforced.** No test validates a
-    rendered bundle against `schema/handoff-bundle-v0.1.schema.json`; the field
-    contract is held by the renderers and their unit tests only.
-13. **Everything rests on one user, one OS family, one toolchain.** CI covers
+12. **Everything rests on one user, one OS family, one toolchain.** CI covers
     3 OSes × 3 Pythons for code paths that are unit-testable, and the fixtures
     make that part reproducible — but the store *shapes* were sampled from a
     single machine, and a locale, filesystem or permission model unlike this one
     is still untested ground.
-14. **Not published on PyPI** (the badge was removed for that reason); install
+13. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
 
 ## How to check any of this yourself
