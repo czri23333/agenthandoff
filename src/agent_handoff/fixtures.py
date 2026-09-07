@@ -39,7 +39,7 @@ class Evidence:
     tools: int = 0
     files_touched: int = 0
     # File anchors merged from supplement sources (qodersec execution traces,
-    # CLI ai-stats telemetry), counted apart in notes like
+    # CLI ai-stats telemetry, exact-match task execution files), counted apart in notes like
     # `qodersec_anchors:407`. Native transcript anchors = files_touched minus
     # this, so drift reports stay interpretable when a supplement grows.
     supplement_files: int = 0
@@ -149,7 +149,7 @@ def measure(parser, limit_sessions: int = 6) -> Evidence:
             evidence.tools += sum(raw.tool_counts.values())
             evidence.files_touched += len(raw.files_touched)
             for note in raw.meta.notes:
-                for prefix in ("qodersec_anchors:", "aistats_files:"):
+                for prefix in ("qodersec_anchors:", "aistats_files:", "task_files:"):
                     if note.startswith(prefix):
                         try:
                             evidence.supplement_files += int(note[len(prefix):])
