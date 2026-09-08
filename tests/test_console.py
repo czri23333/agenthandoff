@@ -55,8 +55,10 @@ def test_matrix_command_writes_a_table_to_a_gbk_console(monkeypatch):
     assert "stable (fixture-proven)" in buffer.getvalue().decode("gbk")
 
 
-def test_list_unknown_cli_suggests_closest_and_doctor(capsys):
+def test_list_unknown_cli_suggests_closest_and_doctor(capsys, monkeypatch):
     """A typo'd --cli names candidates and the next command, not just an error."""
+    # Empty machine: no store available anywhere, yet candidates still print.
+    monkeypatch.setattr(cli, "available_parsers", lambda: [])
     assert cli.main(["list", "--cli", "qoder"]) == 1
     err = capsys.readouterr().err
     assert "has no available store" in err
