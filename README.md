@@ -66,9 +66,11 @@ Windows side automatically (`handoff doctor` shows them tagged `[wsl]`).
 ## Quick start
 
 ```bash
-# Not on PyPI yet — install straight from git (verified: metadata resolves):
+# Not on PyPI yet — install straight from git (verified end to end):
 pip install "git+https://github.com/czri23333/agenthandoff.git[zstd]"
-# or: pipx install / uv tool install from the same URL; from source: git clone + pip install -e ".[dev,zstd]"
+# or without pip: uv tool install "agenthandoff[zstd] @ git+https://github.com/czri23333/agenthandoff.git"
+# then: uv tool update-shell, restart the terminal, and run: handoff doctor
+# from source: git clone + pip install -e ".[dev,zstd]"
 handoff doctor                       # which CLI stores exist and are readable?
 handoff list                         # recent sessions across every CLI
 handoff list --cwd myproject -n 5

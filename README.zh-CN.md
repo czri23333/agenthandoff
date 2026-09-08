@@ -65,9 +65,11 @@ WSL 发行版内的会话存储会从 Windows 侧自动发现并读取（`handof
 ## 快速开始
 
 ```bash
-# 尚未发布到 PyPI —— 直接从 git 安装（已验证元数据可解析）：
+# 尚未发布到 PyPI —— 直接从 git 安装（已端到端验证）：
 pip install "git+https://github.com/czri23333/agenthandoff.git[zstd]"
-# 或同 URL pipx / uv tool install；源码：git clone 后 pip install -e ".[dev,zstd]"
+# 不用 pip：uv tool install "agenthandoff[zstd] @ git+https://github.com/czri23333/agenthandoff.git"
+# 然后：uv tool update-shell，重启终端，再跑：handoff doctor
+# 源码：git clone 后 pip install -e ".[dev,zstd]"
 handoff doctor                       # 本机有哪些 CLI 存储、哪些可读
 handoff list                         # 跨 CLI 列出最近会话
 handoff list --cwd myproject -n 5
