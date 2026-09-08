@@ -644,7 +644,10 @@ function SessionRow({
             {/* Official display rule: 60 chars + "…" (store keeps full text for
                 search/bundle fidelity); rows additionally CSS-ellipsis. */}
             <span className="ah-title block truncate" title={s.title}>
-              {s.title.length > 60 ? `${[...s.title].slice(0, 60).join("")}…` : s.title}
+              {(() => {
+                const chars = [...s.title];
+                return chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : s.title;
+              })()}
             </span>
             <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
               {s.session_id.slice(0, 8)}
