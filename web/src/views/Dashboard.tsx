@@ -143,7 +143,8 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             const byId = new Map(cur.map((s) => [`${s.cli}:${s.session_id}`, s]));
             for (const s of changed) byId.set(`${s.cli}:${s.session_id}`, s);
             return [...byId.values()].sort((a, b) =>
-              (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+              (b.updated_at ?? "").localeCompare(a.updated_at ?? "") ||
+              a.session_id.localeCompare(b.session_id),
             );
           });
           setUpdatedAt(Date.now());
@@ -320,7 +321,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       m.set(s.domain, list);
     }
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [visible, groupMode, t]);
+  }, [visible, groupMode]);
 
   const groupHeader = (key: string): string | undefined => {
     if (!key.startsWith("activity:")) return undefined;
@@ -539,7 +540,7 @@ function DomainGroup({
       >
         <span className="w-3 ah-faint">{collapsed ? "▸" : "▾"}</span>
         <span className="ah-title font-mono font-medium">{short}</span>
-        <Tooltip title={domain}>
+        <Tooltip title={header ?? domain}>
           <span className="ah-faint font-mono">
             {rows.length} {t("sessionsN")}
           </span>
@@ -640,7 +641,11 @@ function SessionRow({
         >
           <CliBadge cli={s.cli} origin={s.origin} />
           <span className="min-w-0 flex-1">
-            <span className="ah-title block truncate" title={s.title}>{s.title}</span>
+            {/* Official display rule: 60 chars + "…" (store keeps full text for
+                search/bundle fidelity); rows additionally CSS-ellipsis. */}
+            <span className="ah-title block truncate" title={s.title}>
+              {s.title.length > 60 ? `${[...s.title].slice(0, 60).join("")}…` : s.title}
+            </span>
             <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
               {s.session_id.slice(0, 8)}
               {s.git?.branch && (
@@ -669,6 +674,11 @@ function SessionRow({
           {s.task_type === "quest-task" && (
             <Tooltip title={t("questTaskHint")}>
               <span className="ah-accent hidden shrink-0 font-mono text-[11px] lg:inline">◈ {t("questTask")}</span>
+            </Tooltip>
+          )}
+          {s.archived === true && (
+            <Tooltip title={t("archivedHint")}>
+              <span className="ah-warn hidden shrink-0 font-mono text-[11px] lg:inline">🗄 {t("it_archived")}</span>
             </Tooltip>
           )}
           {s.task_type && s.task_type !== "quest-task" && s.task_type !== "interactive" && (

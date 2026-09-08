@@ -275,6 +275,9 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                         if (a := next((n for n in m.notes if n.startswith("automation:")), None))
                         else {}
                     ),
+                    # Task-panel entry whose session the readable snapshot no
+                    # longer lists (archived or deleted) — the product's own tag.
+                    **({"archived": True} if "snapshot_archived" in m.notes else {}),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),

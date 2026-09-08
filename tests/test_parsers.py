@@ -495,3 +495,84 @@ def test_request_interrupted_rows_are_dropped_as_noise():
 
     assert Parser.is_noise("[Request interrupted by user before completing]")
     assert not Parser.is_noise("Request a production review of this diff")
+
+
+def test_snapshot_missing_task_session_is_flagged_archived(tmp_path, monkeypatch):
+    """The product tags task-panel entries whose session is gone as
+    archived-or-deleted. A task transcript absent from both snapshot lists is
+    flagged — but only when the snapshot DB itself was readable."""
+    import json as _json
+    import sqlite3
+
+    from agent_handoff.parsers.jsonl_family import QodercnIdeParser
+
+    appdata = tmp_path / "appdata"
+    gs = appdata / "QoderCN" / "User" / "globalStorage"
+    gs.mkdir(parents=True)
+    con = sqlite3.connect(gs / "state.vscdb")
+    con.execute('CREATE TABLE ItemTable("key" TEXT, "value" TEXT)')
+    active = {"folders": {"p": {"tasks": [{"executionSessionId": "task-9", "title": "Active"}]}}}
+    con.execute(
+        'INSERT INTO ItemTable("key", "value") VALUES (?, ?)',
+        ("aicoding.questTaskListSnapshot", _json.dumps(active)),
+    )
+    con.execute(
+        'INSERT INTO ItemTable("key", "value") VALUES (?, ?)',
+        (
+            "aicoding.questArchivedTaskList",
+            _json.dumps([{"executionSessionId": "task-8", "title": "Old"}]),
+        ),
+    )
+    con.commit()
+    con.close()
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("AGENTHANDOFF_HOME", str(tmp_path))
+    root = tmp_path / ".qoder-cn" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    for sid in ("task-1.session.execution", "task-9.session.execution", "task-8.session.execution"):
+        (root / f"{sid}.jsonl").write_text(
+            _json.dumps(
+                {
+                    "type": "user",
+                    "sessionId": sid,
+                    "cwd": "D:/demo",
+                    "timestamp": "2026-08-30T10:00:00Z",
+                    "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    p = QodercnIdeParser(tmp_path / ".qoder-cn")
+    metas = {m.session_id: m for m in p.list_sessions()}
+    assert "snapshot_archived" in metas["task-1.session.execution"].notes
+    assert "snapshot_archived" not in metas["task-9.session.execution"].notes
+    assert "snapshot_archived" not in metas["task-8.session.execution"].notes
+
+
+def test_unreadable_snapshot_never_flags_archived(tmp_path, monkeypatch):
+    """No snapshot DB means unknown, never a badge — absence of evidence."""
+    import json as _json
+
+    from agent_handoff.parsers.jsonl_family import QodercnIdeParser
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "no-appdata-here"))
+    monkeypatch.setenv("AGENTHANDOFF_HOME", str(tmp_path))
+    root = tmp_path / ".qoder-cn" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    (root / "task-1.session.execution.jsonl").write_text(
+        _json.dumps(
+            {
+                "type": "user",
+                "sessionId": "task-1.session.execution",
+                "cwd": "D:/demo",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    p = QodercnIdeParser(tmp_path / ".qoder-cn")
+    metas = p.list_sessions()
+    assert metas and all("snapshot_archived" not in m.notes for m in metas)

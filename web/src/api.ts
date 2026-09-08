@@ -32,6 +32,8 @@ export interface SessionMeta {
   expert_avatar?: string;
   /** Parent task this session belongs to (workbuddy automation name). */
   automation?: string;
+  /** Task-panel session the readable snapshot no longer lists (archived or deleted). */
+  archived?: boolean;
 }
 
 export interface UsageModel {

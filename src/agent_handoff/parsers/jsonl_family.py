@@ -1859,6 +1859,9 @@ class QodercnIdeParser(JsonlSessionParser):
     def __init__(self, root: Path | None = None) -> None:
         super().__init__(root)
         self._quest_titles: dict[str, str] | None = None
+        self._quest_active: set[str] = set()
+        self._quest_archived: set[str] = set()
+        self._quest_db_readable = False
         self._frag_ids: set[str] = set()
         self._frag_groups: dict[str, list[str]] = {}
 
@@ -1941,6 +1944,17 @@ class QodercnIdeParser(JsonlSessionParser):
                 continue
             if Path(m.source_path).parent.name == "transcript":
                 m.task_type = "quest-task"
+        # The product tags a task-panel entry whose session is gone as
+        # archived-or-deleted. Mirror it: a task-execution transcript whose id
+        # the (readable) snapshot knows in neither list gets the badge. An
+        # unreadable snapshot means unknown — never a badge.
+        if self._quest_db_readable:
+            known = self._quest_active | self._quest_archived
+            for m in out:
+                if ".session.execution" in m.session_id:
+                    task_id = m.session_id.split(".session.execution")[0]
+                    if task_id and task_id not in known:
+                        m.notes = [*m.notes, "snapshot_archived"]
         out.sort(key=lambda m: m.updated_at or "", reverse=True)
         return out
 
@@ -2276,7 +2290,13 @@ class QodercnIdeParser(JsonlSessionParser):
             return {}
 
     def _load_quest_titles(self) -> dict[str, str]:
-        """Map executionSessionId -> title from the IDE global state DB."""
+        """Map executionSessionId -> title from the IDE global state DB.
+
+        Also records which task ids the snapshot knows (active vs archived
+        list) and whether the DB was readable at all: a task transcript with
+        no snapshot entry is only "archived or deleted" when the snapshot
+        itself could be read — absence of the DB means unknown, never a badge.
+        """
         if self._quest_titles is not None:
             return self._quest_titles
         titles: dict[str, str] = {}
@@ -2294,12 +2314,13 @@ class QodercnIdeParser(JsonlSessionParser):
             conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
             try:
                 rows = conn.execute(
-                    "SELECT value FROM ItemTable WHERE key IN "
+                    "SELECT key, value FROM ItemTable WHERE key IN "
                     "('aicoding.questTaskListSnapshot', 'aicoding.questArchivedTaskList')"
                 ).fetchall()
             finally:
                 conn.close()
-            for (blob,) in rows:
+            self._quest_db_readable = True
+            for key, blob in rows:
                 if not blob:
                     continue
                 try:
@@ -2315,11 +2336,17 @@ class QodercnIdeParser(JsonlSessionParser):
                             task_lists.append(fdata["tasks"])
                 elif isinstance(snap, list):
                     task_lists.append(snap)
+                if key == "aicoding.questTaskListSnapshot":
+                    known = self._quest_active
+                else:
+                    known = self._quest_archived
                 for tasks in task_lists:
                     for task in tasks:
                         if not isinstance(task, dict):
                             continue
                         sid = task.get("executionSessionId") or task.get("designSessionId")
+                        if sid:
+                            known.add(str(sid))
                         title = task.get("title") or task.get("name") or task.get("query")
                         # "Untitled" is the IDE's empty placeholder; it is worse
                         # than the transcript-derived title it would displace.
