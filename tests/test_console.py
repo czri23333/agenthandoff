@@ -53,3 +53,30 @@ def test_matrix_command_writes_a_table_to_a_gbk_console(monkeypatch):
     assert cli.main(["matrix"]) == 0
     stream.flush()
     assert "stable (fixture-proven)" in buffer.getvalue().decode("gbk")
+
+
+def test_list_unknown_cli_suggests_closest_and_doctor(capsys):
+    """A typo'd --cli names candidates and the next command, not just an error."""
+    assert cli.main(["list", "--cli", "qoder"]) == 1
+    err = capsys.readouterr().err
+    assert "has no available store" in err
+    assert "did you mean" in err and "qoderwork" in err
+    assert "handoff doctor" in err
+
+
+def test_resolve_unknown_cli_suggests_closest():
+    from agent_handoff import parsers as P
+
+    with pytest.raises(FileNotFoundError, match="did you mean"):
+        P.resolve_session("latest", cli="qoder")
+
+
+def test_resolve_unknown_session_points_at_next_steps(monkeypatch):
+    """A dead session id tells the user where to look next."""
+    from agent_handoff import parsers as P
+
+    monkeypatch.setattr(P, "all_parsers", lambda: [])
+    with pytest.raises(FileNotFoundError, match="handoff list -n 5"):
+        P.resolve_session("nosuchsession123")
+    with pytest.raises(FileNotFoundError, match="handoff search"):
+        P.resolve_session("nosuchsession123")

@@ -119,7 +119,13 @@ def _cmd_list(args: argparse.Namespace) -> int:
     if args.cli:
         parsers = [p for p in parsers if p.cli == args.cli]
         if not parsers:
+            import difflib
+
+            known = [p.cli for p in available_parsers()]
             print(f"error: cli '{args.cli}' has no available store", file=sys.stderr)
+            if hint := difflib.get_close_matches(args.cli, known, n=3):
+                print(f"did you mean: {', '.join(hint)}?", file=sys.stderr)
+            print("run 'handoff doctor' to see which stores exist on this machine", file=sys.stderr)
             return 1
 
     metas = []

@@ -116,7 +116,13 @@ def resolve_session(session_ref: str, cli: str | None = None) -> tuple[Parser, R
     if cli:
         candidates = [p for p in candidates if p.cli == cli]
         if not candidates:
-            raise FileNotFoundError(f"unknown or unavailable cli: {cli}")
+            import difflib
+
+            known = [p.cli for p in all_parsers()]
+            msg = f"unknown or unavailable cli: {cli}"
+            if hint := difflib.get_close_matches(cli, known, n=3):
+                msg += f" (did you mean: {', '.join(hint)}?)"
+            raise FileNotFoundError(msg)
 
     if session_ref == "latest":
         metas: list[SessionMeta] = []
@@ -153,5 +159,7 @@ def resolve_session(session_ref: str, cli: str | None = None) -> tuple[Parser, R
         raise FileNotFoundError(f"ambiguous session prefix '{session_ref}': {ids}")
 
     raise FileNotFoundError(
-        f"session '{session_ref}' not found in: " + ", ".join(p.cli for p in all_parsers())
+        f"session '{session_ref}' not found in any known store. "
+        "Try 'handoff list -n 5' for recent sessions, "
+        "or 'handoff search <text> --body' to find it by content."
     )
