@@ -111,7 +111,9 @@ positioning.
 ## The bundle format
 
 `spec/handoff-bundle-spec.md` defines the markdown bundle (v0.1) with a
-matching JSON Schema (`schema/handoff-bundle-v0.1.schema.json`). Any tool —
+matching JSON Schema (`schema/handoff-bundle-v0.1.schema.json`). Renderers
+emit v0.2, normatively described by `schema/handoff-bundle-v0.2.schema.json`
+and enforced by `tests/test_bundle_contract.py`. Any tool —
 including other agent CLIs — can emit or consume it. The format is
 deliberately boring: YAML metadata, plain lists, one objective, numbered
 next steps.
