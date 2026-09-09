@@ -29,7 +29,7 @@ from agent_handoff.exchange import (
     release as exchange_release,
 )
 from agent_handoff.locations import discover
-from agent_handoff.parsers import available_parsers, resolve_session
+from agent_handoff.parsers import all_parsers, available_parsers, resolve_session
 from agent_handoff.render import load_bundle, render_json, render_markdown
 from agent_handoff.resume import render_brief, render_full_brief
 from agent_handoff.summarize import build_full_transcript, summarize
@@ -119,7 +119,15 @@ def _cmd_list(args: argparse.Namespace) -> int:
     if args.cli:
         parsers = [p for p in parsers if p.cli == args.cli]
         if not parsers:
+            import difflib
+
+            # Suggest from every known id, not just this machine's stores:
+            # a newcomer typoing on an empty machine needs candidates too.
+            known = [p.cli for p in all_parsers()]
             print(f"error: cli '{args.cli}' has no available store", file=sys.stderr)
+            if hint := difflib.get_close_matches(args.cli, known, n=3):
+                print(f"did you mean: {', '.join(hint)}?", file=sys.stderr)
+            print("run 'handoff doctor' to see which stores exist on this machine", file=sys.stderr)
             return 1
 
     metas = []
