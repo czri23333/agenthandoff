@@ -25,6 +25,16 @@ def _first_line(text: str | None) -> str:
     return ""
 
 
+def _detail(bad: ET.Element) -> str:
+    """The informative tail: junit keeps the short repr in @message and the
+    full traceback in the body, where the assertion's own message (which rows
+    drifted, what differed) sits at the end."""
+    lines = [line.strip() for line in (bad.text or "").splitlines() if line.strip()]
+    if lines:
+        return " | ".join(lines[-6:])[:900]
+    return _first_line(bad.get("message"))
+
+
 def main(argv: list[str]) -> int:
     path = Path(argv[1] if len(argv) > 1 else "junit.xml")
     if not path.is_file():
@@ -41,9 +51,7 @@ def main(argv: list[str]) -> int:
         for bad in list(case.findall("failure")) + list(case.findall("error")):
             failing += 1
             name = f"{case.get('classname', '')}::{case.get('name', '')}".strip(":")
-            detail = (bad.get("message") or "").strip().splitlines()
-            summary = detail[0][:220] if detail else _first_line(bad.text)
-            print(f"::error title=pytest failure::{name} — {summary}")
+            print(f"::error title=pytest failure::{name} — {_detail(bad)}")
     print(f"{failing} failing test case(s) annotated")
     return 0
 
