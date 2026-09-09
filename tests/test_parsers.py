@@ -576,3 +576,33 @@ def test_unreadable_snapshot_never_flags_archived(tmp_path, monkeypatch):
     p = QodercnIdeParser(tmp_path / ".qoder-cn")
     metas = p.list_sessions()
     assert metas and all("snapshot_archived" not in m.notes for m in metas)
+def test_ide_telemetry_anchors_exact(tmp_path):
+    """ai-stats attributes only rows whose lineDetails carry this sessionId."""
+    import json as _json
+
+    stats = tmp_path / ".qoder-cli" / "ai-stats" / "projects" / "p"
+    stats.mkdir(parents=True)
+    (stats / "a.jsonl").write_text(
+        "\n".join(
+            [
+                _json.dumps(
+                    {
+                        "filePath": "src/own.ts",
+                        "lineDetails": [{"sessionId": "sid-1"}, {"sessionId": "sid-9"}],
+                    }
+                ),
+                _json.dumps({"filePath": "src/other.ts", "lineDetails": [{"sessionId": "sid-9"}]}),
+                _json.dumps({"lineDetails": [{"sessionId": "sid-1"}]}),
+                "{broken",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    p = QodercnIdeParser(tmp_path / ".qoder-cn")
+    projects = stats.parent
+    assert p.telemetry_anchors("sid-1", stats_dir=projects) == {"src/own.ts": 1}
+    assert p.telemetry_anchors("sid-9", stats_dir=projects) == {
+        "src/own.ts": 1,
+        "src/other.ts": 1,
+    }
+    assert p.telemetry_anchors("sid-missing", stats_dir=projects) == {}
