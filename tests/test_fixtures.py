@@ -113,6 +113,24 @@ def test_readme_and_matrix_json_are_current():
     assert not problems, "stale artifacts:\n  " + "\n  ".join(problems)
 
 
+def test_measure_ignores_listing_order(monkeypatch):
+    """The measured subset must be chosen by session id, not by enumeration order.
+
+    A fresh checkout stamps every fixture file with the same mtime, so a
+    parser's "newest first" listing is a full tie and falls back to filesystem
+    enumeration order - which differs between APFS, NTFS and ext4. That made the
+    committed evidence (matrix rows, conformance fingerprints) machine-dependent
+    and intermittently red on one CI leg only.
+    """
+    parser = _parser("codex")
+    baseline = fixtures.measure(parser)
+    original = type(parser).list_sessions
+    monkeypatch.setattr(
+        type(parser), "list_sessions", lambda self: list(reversed(original(self)))
+    )
+    assert fixtures.measure(parser) == baseline
+
+
 def test_every_unproven_reader_is_visible():
     """A reader with no fixture is listed as a gap, never silently ✅."""
     gaps = set(ah_matrix.unproven())
