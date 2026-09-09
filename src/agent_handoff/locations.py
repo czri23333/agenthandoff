@@ -136,7 +136,9 @@ def _appdata_sqlite(cli: str, *parts: str) -> StoreInfo | None:
     try:
         con = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=1)
         try:
-            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            tables = {
+                r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
             if "session_messages" in tables:
                 n = con.execute("SELECT COUNT(*) FROM session_messages").fetchone()[0]
                 detail = f"{n} message row(s)"

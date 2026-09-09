@@ -209,7 +209,9 @@ class QoderwakeParser(Parser):
             text = self.clean_text(praw)
             if not text or self.is_noise(text):
                 continue
-            messages.append(self.msg(role, praw, text=text, at=_norm_ts(created_at), model=convo_model))
+            messages.append(
+                self.msg(role, praw, text=text, at=_norm_ts(created_at), model=convo_model)
+            )
 
         return self.build_raw(meta, messages, [], Counter(), Counter())
 

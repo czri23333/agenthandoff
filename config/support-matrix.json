@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-04",
+  "generated": "2026-09-08",
   "rows": [
     {
       "cli": "zcode",
@@ -293,11 +293,9 @@
       "shape_only": false,
       "codec_missing": false,
       "conformance": false,
-      "empty_store": true,
-      "status": "empty",
-      "notes": [
-        "live store reads fine but holds zero sessions"
-      ]
+      "empty_store": false,
+      "status": "unverified",
+      "notes": []
     },
     {
       "cli": "cherrystudio",

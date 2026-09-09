@@ -219,7 +219,9 @@ def sessions(
         roots = _build_session_roots(cli, cwd, q)
         _sessions_cache[cache_key] = (now, roots)
     fingerprint = hashlib.sha1(
-        _json.dumps([(s.get("cli"), s.get("session_id"), s.get("updated_at")) for s in roots]).encode()
+        _json.dumps(
+            [(s.get("cli"), s.get("session_id"), s.get("updated_at")) for s in roots]
+        ).encode()
     ).hexdigest()
     if request.headers.get("if-none-match") == fingerprint:
         return Response(status_code=304)
@@ -231,7 +233,10 @@ def sessions(
         for s in changed:
             wanted[(s["cli"], s["session_id"])] = s
             parent = s.get("parent_session_id")
-            host = next((h for h in roots if h["cli"] == s["cli"] and h["session_id"] == parent), None)
+            host = next(
+                (h for h in roots if h["cli"] == s["cli"] and h["session_id"] == parent),
+                None,
+            )
             if host is not None:
                 wanted[(host["cli"], host["session_id"])] = host
         payload: dict = {"changed": list(wanted.values()), "snapshot": fingerprint}
@@ -370,8 +375,16 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
                 **({"model": m.model} if m.model else {}),
                 **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
                 **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
-                **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
-                **({"tokens_estimated": m.tokens_estimated} if m.tokens_estimated is not None else {}),
+                **(
+                    {"tokens_reasoning": m.tokens_reasoning}
+                    if m.tokens_reasoning is not None
+                    else {}
+                ),
+                **(
+                    {"tokens_estimated": m.tokens_estimated}
+                    if m.tokens_estimated is not None
+                    else {}
+                ),
                 **({"credits": m.credits} if m.credits is not None else {}),
                 **({"subagent": m.subagent} if m.subagent else {}),
                 # Verbatim source beside the cleaned text (None = cleaning

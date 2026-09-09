@@ -21,7 +21,10 @@ jobs:
       - name: Install
         run: pip install -e ".[dev,zstd,server]"
       - name: Test
-        run: pytest
+        run: pytest --junitxml=junit.xml
+      - name: Name the failing tests in the Checks tab
+        if: failure()
+        run: python scripts/ci_annotate_failures.py junit.xml
       - name: Lint
         run: ruff check .
       - name: Support matrix matches the fixtures

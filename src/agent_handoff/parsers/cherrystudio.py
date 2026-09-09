@@ -203,7 +203,9 @@ class CherryStudioParser(Parser):
                 sess = con.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
                 if sess is None:
                     return None
-                agent = con.execute("SELECT name FROM agents WHERE id=?", (sess["agent_id"],)).fetchone()
+                agent = con.execute(
+                    "SELECT name FROM agents WHERE id=?", (sess["agent_id"],)
+                ).fetchone()
                 rows = con.execute(
                     "SELECT role, content, created_at FROM session_messages "
                     "WHERE session_id=? ORDER BY created_at",
@@ -260,8 +262,16 @@ class CherryStudioParser(Parser):
                     text = self.clean_text(praw)
                     if text and not self.is_noise(text):
                         messages.append(
-                            self.msg("assistant", f"[思考] {praw}", text=f"[思考] {text}", at=at,
-                                     model=model_name or None, tokens_in=ti, tokens_out=to, dur_ms=mt)
+                            self.msg(
+                                "assistant",
+                                f"[思考] {praw}",
+                                text=f"[思考] {text}",
+                                at=at,
+                                model=model_name or None,
+                                tokens_in=ti,
+                                tokens_out=to,
+                                dur_ms=mt,
+                            )
                         )
                 elif btype == "main_text":
                     praw = _text(block.get("content"))
