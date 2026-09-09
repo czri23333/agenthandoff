@@ -7,6 +7,7 @@ shipped inside the wheel). See docs/decisions.md ADR-006/007/008.
 
 from __future__ import annotations
 
+import mimetypes
 import time
 from dataclasses import asdict
 from importlib import resources
@@ -52,6 +53,12 @@ from agent_handoff.threads import (
 )
 
 app = FastAPI(title="agenthandoff cockpit", version="0.1.0")
+
+# Windows MIME registries may map .js to text/plain, which makes browsers
+# refuse the module scripts and the cockpit boots blank. Pin the web types
+# process-wide (stdlib only; a no-op where the registry is already right).
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 
 def _parser_or_404(cli: str):
@@ -273,6 +280,9 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                         if (a := next((n for n in m.notes if n.startswith("automation:")), None))
                         else {}
                     ),
+                    # Task-panel entry whose session the readable snapshot no
+                    # longer lists (archived or deleted) — the product's own tag.
+                    **({"archived": True} if "snapshot_archived" in m.notes else {}),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),

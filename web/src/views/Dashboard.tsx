@@ -24,6 +24,28 @@ import { useFmt, useT, type TKey } from "../i18n";
  */
 type Mode = "titles" | "full";
 
+/* List grouping, mirroring the official sidebar views (workspace/activity/flat).
+ * Buckets derive from data shapes (domain config, updated_at) for every CLI —
+ * never from vendor-specific fields (ADR-009). */
+type GroupMode = "domain" | "activity" | "flat";
+
+type ActivityBucket = "today" | "yesterday" | "week" | "older" | "unknown";
+
+function activityBucket(updatedAt: string | null, now: number): ActivityBucket {
+  if (!updatedAt) return "unknown";
+  const t = Date.parse(updatedAt);
+  if (Number.isNaN(t)) return "unknown";
+  const day = 86_400_000;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const diff = midnight.getTime() - t;
+  if (diff < 0) return "today";
+  if (diff < day) return "today";
+  if (diff < 2 * day) return "yesterday";
+  if (diff < 7 * day) return "week";
+  return "older";
+}
+
 const DEBOUNCE_MS = 350;
 const POLL_MS = 30_000;
 
@@ -61,6 +83,22 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     }
   }, [collapsed]);
   const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
+  const [groupMode, setGroupMode] = useState<GroupMode>(() => {
+    // Refresh-safe like the fold state below.
+    try {
+      const v = sessionStorage.getItem("ah-groupmode");
+      return v === "activity" || v === "flat" ? v : "domain";
+    } catch {
+      return "domain";
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("ah-groupmode", groupMode);
+    } catch {
+      /* storage full/blocked: grouping just won't survive */
+    }
+  }, [groupMode]);
   const [, tick] = useState(0);
   const inputRef = useRef<GetRef<typeof Input.Search>>(null);
 
@@ -105,7 +143,8 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             const byId = new Map(cur.map((s) => [`${s.cli}:${s.session_id}`, s]));
             for (const s of changed) byId.set(`${s.cli}:${s.session_id}`, s);
             return [...byId.values()].sort((a, b) =>
-              (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+              (b.updated_at ?? "").localeCompare(a.updated_at ?? "") ||
+              a.session_id.localeCompare(b.session_id),
             );
           });
           setUpdatedAt(Date.now());
@@ -245,12 +284,36 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     if (!waiting.length) return t("needsReplyHint");
     return `${t("needsReplyHint")}：${waiting.map((s) => s.title).join(" / ")}${needsReplyCount > 8 ? " …" : ""}`;
   }, [sessions, needsReplyCount, t]);
-  const visible = titleFiltered.filter(
+  // Canonical order everywhere (initial load and delta merges alike):
+  // updated_at DESC, session_id ASC tiebreak — the official store order.
+  const sorted = useMemo(
+    () =>
+      [...titleFiltered].sort(
+        (a, b) =>
+          (b.updated_at ?? "").localeCompare(a.updated_at ?? "") ||
+          a.session_id.localeCompare(b.session_id),
+      ),
+    [titleFiltered],
+  );
+  const visible = sorted.filter(
     (s) =>
       (!domainFilter || s.domain === domainFilter) &&
       (!needsReplyOnly || s.needs_reply === true),
   );
   const grouped = useMemo(() => {
+    if (groupMode === "flat") return [["", visible] as [string, SessionMeta[]]];
+    if (groupMode === "activity") {
+      const now = Date.now();
+      const buckets = new Map<ActivityBucket, SessionMeta[]>();
+      for (const s of visible) {
+        const k = activityBucket(s.updated_at, now);
+        buckets.set(k, [...(buckets.get(k) ?? []), s]);
+      }
+      const order: ActivityBucket[] = ["today", "yesterday", "week", "older", "unknown"];
+      return order
+        .filter((k) => (buckets.get(k) ?? []).length > 0)
+        .map((k) => [`activity:${k}`, buckets.get(k) ?? []] as [string, SessionMeta[]]);
+    }
     const m = new Map<string, SessionMeta[]>();
     for (const s of visible) {
       const list = m.get(s.domain) ?? [];
@@ -258,7 +321,19 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       m.set(s.domain, list);
     }
     return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [visible]);
+  }, [visible, groupMode]);
+
+  const groupHeader = (key: string): string | undefined => {
+    if (!key.startsWith("activity:")) return undefined;
+    const labels: Record<string, string> = {
+      today: t("actToday"),
+      yesterday: t("actYesterday"),
+      week: t("actWeek"),
+      older: t("actOlder"),
+      unknown: t("actUnknown"),
+    };
+    return labels[key.slice("activity:".length)] ?? key;
+  };
 
   const freshSecs = updatedAt === null ? null : Math.round((Date.now() - updatedAt) / 1000);
   const unreadable = stores.filter((s) => !s.readable).length;
@@ -335,6 +410,18 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             }))}
           />
         </Tooltip>
+        <Tooltip title={t("groupBy")}>
+          <Segmented
+            size="small"
+            value={groupMode}
+            onChange={(v) => setGroupMode(v as GroupMode)}
+            options={[
+              { label: t("groupDomain"), value: "domain" },
+              { label: t("groupActivity"), value: "activity" },
+              { label: t("groupFlat"), value: "flat" },
+            ]}
+          />
+        </Tooltip>
         <Tooltip title={needsReplyHint}>
           <Button
             size="small"
@@ -397,23 +484,30 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             <FirstRun />
           </Empty>
         ) : (
-          grouped.map(([domain, rows]) => (
-            <DomainGroup
-              key={domain}
-              domain={domain}
-              rows={rows}
-              collapsed={collapsed.has(domain)}
-              onToggle={() =>
-                setCollapsed((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(domain)) next.delete(domain);
-                  else next.add(domain);
-                  return next;
-                })
-              }
-              onOpen={onOpen}
-            />
-          ))
+          groupMode === "flat" ? (
+            <ul className="m-0 list-none space-y-1.5 p-0">
+              <PagedRows rows={visible} onOpen={onOpen} resetKey={`flat:${visible.length}`} />
+            </ul>
+          ) : (
+            grouped.map(([domain, rows]) => (
+              <DomainGroup
+                key={domain}
+                domain={domain}
+                header={groupHeader(domain)}
+                rows={rows}
+                collapsed={collapsed.has(domain)}
+                onToggle={() =>
+                  setCollapsed((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(domain)) next.delete(domain);
+                    else next.add(domain);
+                    return next;
+                  })
+                }
+                onOpen={onOpen}
+              />
+            ))
+          )
         )}
       </div>
     </div>
@@ -422,12 +516,14 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
 
 function DomainGroup({
   domain,
+  header,
   rows,
   collapsed,
   onToggle,
   onOpen,
 }: {
   domain: string;
+  header?: string;
   rows: SessionMeta[];
   collapsed: boolean;
   onToggle: () => void;
@@ -435,14 +531,7 @@ function DomainGroup({
 }) {
   const t = useT();
   const short =
-    domain.split(/[\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
-  // Group paging (§2-1): a 200-row domain renders 50 rows + one expander
-  // instead of 200 rows. The expander is per-domain so task-tree parents
-  // stay mounted where the user left them.
-  const PAGE = 50;
-  const [shown, setShown] = useState(PAGE);
-  useEffect(() => setShown(PAGE), [domain, rows.length]);
-  const visible = rows.slice(0, shown);
+    header ?? (domain.split(/[\/]/).filter(Boolean).pop() || domain || t("noProjectPath"));
   return (
     <div className="mb-4">
       <button
@@ -451,7 +540,7 @@ function DomainGroup({
       >
         <span className="w-3 ah-faint">{collapsed ? "▸" : "▾"}</span>
         <span className="ah-title font-mono font-medium">{short}</span>
-        <Tooltip title={domain}>
+        <Tooltip title={header ?? domain}>
           <span className="ah-faint font-mono">
             {rows.length} {t("sessionsN")}
           </span>
@@ -459,22 +548,47 @@ function DomainGroup({
       </button>
       {!collapsed && (
         <ul className="m-0 list-none space-y-1.5 p-0">
-          {visible.map((s) => (
-            <SessionRow key={`${s.cli}:${s.session_id}`} s={s} onOpen={onOpen} />
-          ))}
-          {rows.length > shown && (
-            <li>
-              <button
-                onClick={() => setShown((n) => n + PAGE)}
-                className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
-              >
-                {t("showMore")} ({rows.length - shown})
-              </button>
-            </li>
-          )}
+          <PagedRows rows={rows} onOpen={onOpen} resetKey={`${domain}:${rows.length}`} />
         </ul>
       )}
     </div>
+  );
+}
+
+// Group paging (§2-1): a 200-row group renders 50 rows + one expander
+// instead of 200 rows. Shared by domain/activity groups and flat mode so no
+// view can mount the whole store at once.
+const PAGE = 50;
+
+function PagedRows({
+  rows,
+  onOpen,
+  resetKey,
+}: {
+  rows: SessionMeta[];
+  onOpen: (cli: string, sid: string) => void;
+  resetKey: string;
+}) {
+  const t = useT();
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => setShown(PAGE), [resetKey]);
+  const visible = rows.slice(0, shown);
+  return (
+    <>
+      {visible.map((s) => (
+        <SessionRow key={`${s.cli}:${s.session_id}`} s={s} onOpen={onOpen} />
+      ))}
+      {rows.length > shown && (
+        <li>
+          <button
+            onClick={() => setShown((n) => n + PAGE)}
+            className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+          >
+            {t("showMore")} ({rows.length - shown})
+          </button>
+        </li>
+      )}
+    </>
   );
 }
 
@@ -527,7 +641,14 @@ function SessionRow({
         >
           <CliBadge cli={s.cli} origin={s.origin} />
           <span className="min-w-0 flex-1">
-            <span className="ah-title block truncate">{s.title}</span>
+            {/* Official display rule: 60 chars + "…" (store keeps full text for
+                search/bundle fidelity); rows additionally CSS-ellipsis. */}
+            <span className="ah-title block truncate" title={s.title}>
+              {(() => {
+                const chars = [...s.title];
+                return chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : s.title;
+              })()}
+            </span>
             <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
               {s.session_id.slice(0, 8)}
               {s.git?.branch && (
@@ -556,6 +677,11 @@ function SessionRow({
           {s.task_type === "quest-task" && (
             <Tooltip title={t("questTaskHint")}>
               <span className="ah-accent hidden shrink-0 font-mono text-[11px] lg:inline">◈ {t("questTask")}</span>
+            </Tooltip>
+          )}
+          {s.archived === true && (
+            <Tooltip title={t("archivedHint")}>
+              <span className="ah-warn hidden shrink-0 font-mono text-[11px] lg:inline">🗄 {t("it_archived")}</span>
             </Tooltip>
           )}
           {s.task_type && s.task_type !== "quest-task" && s.task_type !== "interactive" && (
