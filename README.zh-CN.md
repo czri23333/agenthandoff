@@ -45,7 +45,7 @@
 | `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwork-app` | unknown | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwork-cn-app` | unknown | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `qwenwork-app` | unknown | ✓ | — | — | — | ⬜ 空库（已验证：零会话） |
+| `qwenwork-app` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `cherrystudio` | unknown | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `trae` | IDE SQLite；只读，绝不写入 | — | — | — | — | 🔜 路线图 |
 

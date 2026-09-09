@@ -268,7 +268,13 @@ class CodexParser(Parser):
             ptype = str(payload.get("type") or "")
             when = ts_to_iso(row.get("timestamp"))
 
-            def push(role: str, text: str, at: str | None, raw: str | None = None) -> None:
+            def push(
+                role: str,
+                text: str,
+                at: str | None,
+                raw: str | None = None,
+                model: str | None = None,
+            ) -> None:
                 """Append, dropping the duplicate an event stream always has.
 
                 Codex writes an assistant turn twice — once as ``response_item``
@@ -304,7 +310,7 @@ class CodexParser(Parser):
                     saw_completion = True
                 elif ptype == "agent_message":
                     body = payload.get("message") or payload.get("text")
-                    push("assistant", self._flatten(body), when)
+                    push("assistant", self._flatten(body), when, model=model)
                 elif ptype == "token_count":
                     info = payload.get("info") or {}
                     # Two different quantities live in one record.
@@ -325,16 +331,18 @@ class CodexParser(Parser):
                             # Settle onto the latest assistant turn that still
                             # has no billing; otherwise the next one takes it.
                             settled = False
+                            bill_in = bill["in"] if isinstance(bill["in"], int) else None
+                            bill_out = bill["out"] if isinstance(bill["out"], int) else None
                             for m in reversed(messages):
-                                if m.role == "assistant" and m.tokens_in is None and m.tokens_out is None:
-                                    m.tokens_in = bill["in"] if isinstance(bill["in"], int) else None
-                                    m.tokens_out = bill["out"] if isinstance(bill["out"], int) else None
+                                if m.role != "assistant":
+                                    continue
+                                if m.tokens_in is None and m.tokens_out is None:
+                                    m.tokens_in = bill_in
+                                    m.tokens_out = bill_out
                                     if model and not m.model:
                                         m.model = model
                                     settled = True
-                                    break
-                                if m.role == "assistant":
-                                    break
+                                break
                             if not settled:
                                 pending_tokens["pending"] = bill
                     cumulative = info.get("total_token_usage")
@@ -389,7 +397,7 @@ class CodexParser(Parser):
                         files[instruction] += 1
                     continue
                 if text and not self.is_noise(text):
-                    push(str(role), text, when, raw)
+                    push(str(role), text, when, raw, model=model)
                 for tb in tool_blocks:
                     name = str(tb.get("name") or "tool")
                     tools[name] += 1
@@ -398,7 +406,7 @@ class CodexParser(Parser):
                         files[path] += 1
             elif ptype == "agent_message":
                 body = payload.get("text") or payload.get("message")
-                push("assistant", self._flatten(body), when)
+                push("assistant", self._flatten(body), when, model=model)
             elif ptype in ("function_call", "custom_tool_call"):
                 name = str(payload.get("name") or "tool")
                 tools[name] += 1
