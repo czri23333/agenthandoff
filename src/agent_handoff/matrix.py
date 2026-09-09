@@ -125,6 +125,13 @@ def derive_status(row: Row) -> str:
 
 
 def build_rows() -> list[Row]:
+    """Support rows as a pure function of fixtures + reader registry.
+
+    Committed artifacts (support-matrix.json, README tables) derive from
+    these rows, so they must say the same thing on every machine: no live
+    store may influence them. Live-only verdicts (verified-empty stores)
+    belong to with_live_overlay(), never here.
+    """
     rows: list[Row] = []
     registered = set()
     for parser in all_parsers():
@@ -142,14 +149,6 @@ def build_rows() -> list[Row]:
         row.fixture_ok = evidence.proven
         row.shape_only = evidence.shape_only
         row.codec_missing = evidence.codec_missing
-        if not evidence.present:
-            try:
-                live = parser.list_sessions() if parser.available() else None
-                if live is not None and len(live) == 0:
-                    row.empty_store = True
-                    row.notes.append("live store reads fine but holds zero sessions")
-            except (OSError, ValueError):
-                pass
         if evidence.error:
             row.notes.append(evidence.error)
         if evidence.sampled:
@@ -161,6 +160,34 @@ def build_rows() -> list[Row]:
             rows.append(
                 Row(cli=cli, store=ROADMAP[cli], reader=False, status="roadmap")
             )
+    return rows
+
+
+def with_live_overlay(rows: list[Row]) -> list[Row]:
+    """Annotate verified-empty live stores onto fixture-derived rows.
+
+    Only the live `handoff matrix` command calls this: a store that exists
+    and reads fine but holds zero sessions upgrades its row to `empty`.
+    Committed evidence must never pass through here.
+    """
+    wanted = {r.cli for r in rows if not r.fixtures and not r.empty_store}
+    if not wanted:
+        return rows
+    by_cli = {p.cli: p for p in all_parsers() if p.cli in wanted}
+    for row in rows:
+        if row.fixtures or row.empty_store:
+            continue
+        parser = by_cli.get(row.cli)
+        if parser is None:
+            continue
+        try:
+            live = parser.list_sessions() if parser.available() else None
+            if live is not None and len(live) == 0:
+                row.empty_store = True
+                row.notes.append("live store reads fine but holds zero sessions")
+                row.status = derive_status(row)
+        except (OSError, ValueError):
+            pass
     return rows
 
 

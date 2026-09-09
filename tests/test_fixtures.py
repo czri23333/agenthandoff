@@ -119,3 +119,36 @@ def test_every_unproven_reader_is_visible():
     for parser in all_parsers():
         if parser.cli not in PRESENT:
             assert parser.cli in gaps, f"{parser.cli} has no fixture and is not flagged"
+
+
+def test_matrix_ignores_live_stores(monkeypatch, tmp_path):
+    """Committed evidence must say the same thing on every machine.
+
+    Regression: build_rows() used to probe live stores for fixture-less
+    CLIs, so the committed matrix matched no single machine (empty-store
+    verdicts from one author machine leaked into artifacts that failed on
+    store-less CI runners and vice versa).
+    """
+    import os
+
+    def snapshot() -> list[tuple]:
+        return sorted(
+            (r.cli, r.status, r.empty_store, tuple(r.notes)) for r in ah_matrix.build_rows()
+        )
+
+    live = snapshot()
+    empty = tmp_path / "no-stores-here"
+    empty.mkdir()
+    monkeypatch.setenv("AGENTHANDOFF_HOME", str(empty))
+    monkeypatch.setenv("APPDATA", str(empty))
+    if "HOME" in os.environ:
+        monkeypatch.setenv("HOME", str(empty))
+    assert snapshot() == live
+
+
+def test_live_overlay_stays_out_of_committed_rows():
+    """The verified-empty verdict exists, but only the live command may add it."""
+    rows = ah_matrix.build_rows()
+    assert all(not r.empty_store for r in rows)
+    overlaid = ah_matrix.with_live_overlay([r for r in rows])
+    assert all(r.status == ah_matrix.derive_status(r) for r in overlaid)

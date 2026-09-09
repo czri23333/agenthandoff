@@ -16,6 +16,7 @@ in a terminal.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,10 +152,8 @@ def measure(parser, limit_sessions: int = 6) -> Evidence:
             for note in raw.meta.notes:
                 for prefix in ("qodersec_anchors:", "aistats_files:", "task_files:"):
                     if note.startswith(prefix):
-                        try:
+                        with contextlib.suppress(ValueError):
                             evidence.supplement_files += int(note[len(prefix):])
-                        except ValueError:
-                            pass
     except (OSError, ValueError) as exc:
         evidence.error = f"{type(exc).__name__}: {exc}"
     return evidence
