@@ -1,4 +1,4 @@
-'''Parser tests against synthetic stores (see CONTRIBUTING: happy path + corrupt input).'''
+"""Parser tests against synthetic stores (see CONTRIBUTING: happy path + corrupt input)."""
 
 from __future__ import annotations
 
@@ -22,6 +22,9 @@ def test_zcode_happy(zcode_store):
     metas = p.list_sessions()
     assert [m.session_id for m in metas] == ["sess_a"]
     assert metas[0].title == "Fix login loop"
+    assert metas[0].task_type == "interactive"
+    assert metas[0].title_source == "first_input"
+    assert metas[0].permission == "yolo"
     raw = p.load("sess_a")
     assert raw is not None
     roles = [(m.role, m.text) for m in raw.messages]
@@ -30,6 +33,49 @@ def test_zcode_happy(zcode_store):
     assert raw.tool_counts["Edit"] == 1
     assert [t.content for t in raw.todos if t.status == "in_progress"] == ["patch middleware"]
     assert raw.meta.tokens_in == 30 and raw.meta.tokens_out == 15  # summed across turns
+    assert raw.meta.task_type == "interactive"
+    assert raw.meta.attachments == []
+
+
+def test_zcode_attachments_and_goal_verdict(zcode_store):
+    """file parts land in attachments; goal_verification folds its verdict in."""
+    import json
+    import sqlite3
+
+    db = zcode_store / "zcode" / "cli" / "db" / "db.sqlite"
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO part VALUES ('m1file','m1','sess_a',?,4)",
+        (
+            json.dumps(
+                {
+                    "type": "file",
+                    "filename": "spec.html",
+                    "url": "C:/dl/spec.html",
+                    "source": {"path": "C:/dl/spec.html"},
+                }
+            ),
+        ),
+    )
+    con.execute(
+        "INSERT INTO part VALUES ('m2goal','m2','sess_a',?,5)",
+        (
+            json.dumps(
+                {
+                    "type": "timeline",
+                    "timelineType": "goal_verification",
+                    "verification": {"passed": True, "nextAction": "Ship it"},
+                }
+            ),
+        ),
+    )
+    con.commit()
+    con.close()
+    p = ZcodeParser(db)
+    raw = p.load("sess_a")
+    assert raw is not None
+    assert raw.meta.attachments == ["C:/dl/spec.html"]
+    assert any("[目标核验 ✓] Ship it" in m.text for m in raw.messages)
 
 
 def test_zcode_missing_session(zcode_store):
@@ -59,6 +105,39 @@ def test_codebuddy_dialect(codebuddy_store):
     assert raw.messages[1].role == "assistant"
 
 
+def test_codebuddy_job_state(tmp_path):
+    """jobs/<short>/state.json state surfaces via peek_status (working/idle)."""
+    import json
+
+    from agent_handoff.parsers.jsonl_family import CodebuddyParser
+
+    root = tmp_path / ".codebuddy" / "projects" / "d--demo"
+    root.mkdir(parents=True)
+    (root / "aaa111.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "message",
+                "role": "user",
+                "sessionId": "aaa111",
+                "cwd": "D:/demo",
+                "timestamp": 1756548000000,
+                "content": [{"type": "input_text", "text": "hi"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    jobs = tmp_path / ".codebuddy" / "jobs" / "a1b2c3"
+    jobs.mkdir(parents=True)
+    (jobs / "state.json").write_text(
+        json.dumps({"sessionId": "aaa111", "name": "Agent", "state": "working"}),
+        encoding="utf-8",
+    )
+    p = CodebuddyParser(tmp_path / ".codebuddy")
+    assert p.peek_status("aaa111") == "working"
+    assert p.peek_status("nope") is None
+
+
 def test_qoder_and_qwen_share_dialect(tmp_path):
     for cls, dirname, text in [
         (QoderworkParser, ".qoderwork", "qoder ask"),
@@ -71,8 +150,11 @@ def test_qoder_and_qwen_share_dialect(tmp_path):
         root.mkdir(parents=True)
         rows = [
             {"type": "runtime-config", "sessionId": "s1", "timestamp": 1},
-            {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
-             "message": {"role": "user", "content": [{"type": "text", "text": text}]}},
+            {
+                "type": "user",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            },
         ]
         with open(root / "s1.jsonl", "w", encoding="utf-8") as f:
             for r in rows:
@@ -96,10 +178,19 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     root.mkdir(parents=True)
     turn = [
         {"type": "runtime-config", "sessionId": "aaa111", "timestamp": 1},
-        {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
-         "message": {"role": "user", "content": [{"type": "text", "text": "fix the login loop"}]}},
-        {"type": "assistant", "timestamp": "2026-08-30T10:00:01Z",
-         "message": {"role": "assistant", "content": [{"type": "text", "text": "found it"}]}},
+        {
+            "type": "user",
+            "timestamp": "2026-08-30T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": "fix the login loop"}],
+            },
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-08-30T10:00:01Z",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "found it"}]},
+        },
     ]
     with open(root / "aaa111.jsonl", "w", encoding="utf-8") as fh:
         for r in turn:
@@ -109,14 +200,36 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     # a tool_use - the exact shape qoder writes for a browser/automation run.
     loop = [
         {"type": "runtime-config", "sessionId": "bbb222", "timestamp": 1},
-        {"type": "user", "timestamp": "2026-08-30T10:01:00Z",
-         "message": {"role": "user", "content": [
-             {"content": "browser said no", "is_error": False,
-              "tool_use_id": "t1", "type": "tool_result"}]}},
-        {"type": "assistant", "timestamp": "2026-08-30T10:01:01Z",
-         "message": {"role": "assistant", "content": [
-             {"id": "c1", "input": {"url": "https://example.test"},
-              "name": "browser_open", "type": "tool_use"}]}},
+        {
+            "type": "user",
+            "timestamp": "2026-08-30T10:01:00Z",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "content": "browser said no",
+                        "is_error": False,
+                        "tool_use_id": "t1",
+                        "type": "tool_result",
+                    }
+                ],
+            },
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-08-30T10:01:01Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "id": "c1",
+                        "input": {"url": "https://example.test"},
+                        "name": "browser_open",
+                        "type": "tool_use",
+                    }
+                ],
+            },
+        },
     ]
     with open(root / "bbb222.jsonl", "w", encoding="utf-8") as fh:
         for r in loop:
@@ -144,10 +257,16 @@ def test_qoder_shared_store_splits_families(tmp_path):
         rootdir.mkdir(parents=True, exist_ok=True)
         rows = [
             {"type": "runtime-config", "sessionId": sid, "timestamp": 1},
-            {"type": "user", "timestamp": "2026-08-30T10:00:00Z",
-             "message": {"role": "user", "content": [{"type": "text", "text": text}]}},
-            {"type": "assistant", "timestamp": "2026-08-30T10:00:01Z",
-             "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}},
+            {
+                "type": "user",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-08-30T10:00:01Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+            },
         ]
         with open(rootdir / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for row in rows:
@@ -161,9 +280,7 @@ def test_qoder_shared_store_splits_families(tmp_path):
         "bbb222",
         "wake group ask",
     )
-    write_session(
-        store / "C--u--qoderworkcn-workspace-m1", "ccc333", "ccc333", "work ask"
-    )
+    write_session(store / "C--u--qoderworkcn-workspace-m1", "ccc333", "ccc333", "work ask")
 
     from agent_handoff.parsers.qoderwake import _WakeShared
 
@@ -191,6 +308,18 @@ def test_dsh_roll(dsh_store):
     assert len(raw.messages) == 2
 
 
+def test_dsh_usage_sums_once_per_turn(dsh_store):
+    """usage() sums turn-level usage rows, not fanned-out messages."""
+    from agent_handoff.parsers.dsh import DshParser
+
+    p = DshParser(dsh_store / "dsh" / "sessions")
+    u = p.usage("11112222")
+    assert u is not None
+    assert u["totals"] == {"calls": 1, "tokens_in": 5, "tokens_out": 0}
+    assert u["models"][0]["calls"] == 1
+    assert p.usage("nope") is None
+
+
 def test_codex_rollout(codex_store):
     p = CodexParser(codex_store / "codex" / "sessions")
     metas = p.list_sessions()
@@ -216,3 +345,144 @@ def test_account_config_count(tmp_path):
     single = tmp_path / ".qoderwork"
     (single / ".models" / "019f3554-c9cc-4000-8000-000000000000").mkdir(parents=True)
     assert _count_account_configs(single) == 1
+
+
+def test_cherrystudio_happy(cherrystudio_store):
+    from agent_handoff.parsers.cherrystudio import CherryStudioParser
+
+    p = CherryStudioParser(cherrystudio_store / "agents.db")
+    metas = p.list_sessions()
+    assert [m.session_id for m in metas] == ["sess_cs"]
+    assert metas[0].title == "Demo chat"
+    raw = p.load("sess_cs")
+    assert raw is not None
+    assert [(m.role, m.text) for m in raw.messages] == [
+        ("user", "hello cherry"),
+        ("assistant", "hi there"),
+    ]
+    assert p.raw_archive("sess_cs")[0]["path"] == "cherrystudio/sess_cs.records.jsonl"
+    assert p.load("nope") is None
+
+
+def test_cherrystudio_usage(cherrystudio_store):
+    """usage() aggregates per-model tokens + TTFT from message rows."""
+    import json as _json
+    import sqlite3
+
+    from agent_handoff.parsers.cherrystudio import CherryStudioParser
+
+    db = cherrystudio_store / "agents.db"
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO session_messages VALUES ('r3','sess_cs','assistant',?,"
+        " '2026-07-05T08:19:50.000Z')",
+        (
+            _json.dumps(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "model": {"name": "glm-5.2"},
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                        "metrics": {"time_first_token_millsec": 2000},
+                    },
+                    "blocks": [{"type": "main_text", "content": "and more"}],
+                }
+            ),
+        ),
+    )
+    con.commit()
+    con.close()
+    p = CherryStudioParser(db)
+    u = p.usage("sess_cs")
+    assert u is not None
+    assert u["totals"] == {"calls": 1, "tokens_in": 100, "tokens_out": 50}
+    assert u["models"][0]["model"] == "glm-5.2"
+    assert u["models"][0]["avg_ttft_ms"] == 2000
+    assert p.usage("nope") is None
+
+
+def test_qoderapp_happy(qoderapp_store):
+    from agent_handoff.parsers.qoderapp import (
+        QoderworkAppParser,
+        QoderworkCnAppParser,
+        QwenworkAppParser,
+    )
+
+    for cls in (QoderworkAppParser, QoderworkCnAppParser, QwenworkAppParser):
+        p = cls(qoderapp_store / "agents.db")
+        metas = p.list_sessions()
+        assert [m.session_id for m in metas] == ["chat1"]
+        raw = p.load("chat1")
+        assert raw is not None
+        assert raw.messages[0].text == "hello task"
+        assert any(m.text.startswith("[思考]") for m in raw.messages)
+        assert raw.tool_counts["Read"] == 1
+        assert raw.files_touched["src/a.ts"] == 1
+        assert p.raw_archive("chat1")[0]["path"] == "qoderapp/chat1.records.jsonl"
+
+
+def test_qoderwork_execution_anchors(tmp_path):
+    import json as _json
+
+    state = tmp_path / ".qodersec" / "state" / "proj"
+    state.mkdir(parents=True)
+    (state / "task-1.session.execution.json").write_text(
+        _json.dumps({"touched_paths": ["src/a.ts", "src/b.ts"]}), encoding="utf-8"
+    )
+    (state / "task-2.session.execution.json.lock").write_text("locked", encoding="utf-8")
+    (state / "task-3.session.execution.json").write_text("{broken", encoding="utf-8")
+
+    root = tmp_path / ".qoderwork" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    (root / "sess1.jsonl").write_text(
+        _json.dumps(
+            {
+                "type": "user",
+                "sessionId": "sess1",
+                "cwd": "D:/demo",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    p = QoderworkParser(tmp_path / ".qoderwork")
+    anchors = p.execution_anchors(state_dir=tmp_path / ".qodersec" / "state")
+    assert anchors == {"src/a.ts": 1, "src/b.ts": 1}
+
+
+def test_ide_task_execution_files_exact(tmp_path, monkeypatch):
+    """task sessions merge only their own execution record's touched paths."""
+    import json as _json
+
+    from agent_handoff.parsers.jsonl_family import QodercnIdeParser
+
+    state = tmp_path / ".qodersec" / "state" / "proj"
+    state.mkdir(parents=True)
+    (state / "task-1.session.execution.json").write_text(
+        _json.dumps({"touched_paths": ["src/own.ts"]}), encoding="utf-8"
+    )
+    (state / "task-9.session.execution.json").write_text(
+        _json.dumps({"touched_paths": ["src/other.ts"]}), encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENTHANDOFF_HOME", str(tmp_path))
+    root = tmp_path / ".qoder-cn" / "projects" / "C--x"
+    root.mkdir(parents=True)
+    (root / "task-1.session.execution.jsonl").write_text(
+        _json.dumps(
+            {
+                "type": "user",
+                "sessionId": "task-1.session.execution",
+                "cwd": "D:/demo",
+                "timestamp": "2026-08-30T10:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    p = QodercnIdeParser(tmp_path / ".qoder-cn")
+    assert p._task_execution_files("task-1.session.execution") == ["src/own.ts"]
+    assert p._task_execution_files("task-9.session.execution") == ["src/other.ts"]
+    assert p._task_execution_files("plain-uuid") == []

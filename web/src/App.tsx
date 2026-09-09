@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Layout, Segmented, Tooltip, Typography } from "antd";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
 import { setThemeMode, useTheme, type ThemeMode } from "./theme";
 import Dashboard from "./views/Dashboard";
-import SessionDetail from "./views/SessionDetail";
-import Threads from "./views/Threads";
-import Inbox from "./views/Inbox";
-import Doctor from "./views/Doctor";
-import MemoryExport from "./views/MemoryExport";
+// Route-split (§4-2): the 1.4MB bundle was every view up front. Dashboard
+// stays in the entry chunk; the rest load on first visit with a fallback
+// that matches the list skeleton.
+const SessionDetail = lazy(() => import("./views/SessionDetail"));
+const Threads = lazy(() => import("./views/Threads"));
+const Inbox = lazy(() => import("./views/Inbox"));
+const Doctor = lazy(() => import("./views/Doctor"));
+const MemoryExport = lazy(() => import("./views/MemoryExport"));
 
 // Hash routing: every view and session is a shareable, bookmarkable URL — also
 // the reason keyboard/automation can reach any screen without clicking.
@@ -184,13 +187,30 @@ export default function App() {
           {view.name === "dashboard" && (
             <Dashboard onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })} />
           )}
-          {view.name === "detail" && (
-            <SessionDetail cli={view.cli} sid={view.sid} onBack={goBack} />
+          {view.name !== "dashboard" && (
+            <Suspense
+              fallback={
+                <div className="space-y-2 px-5 py-3">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="ah-skeleton h-11" />
+                  ))}
+                </div>
+              }
+            >
+              {view.name === "detail" && (
+                <SessionDetail
+                  cli={view.cli}
+                  sid={view.sid}
+                  onBack={goBack}
+                  onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })}
+                />
+              )}
+              {view.name === "threads" && <Threads />}
+              {view.name === "inbox" && <Inbox />}
+              {view.name === "doctor" && <Doctor />}
+              {view.name === "memory" && <MemoryExport />}
+            </Suspense>
           )}
-          {view.name === "threads" && <Threads />}
-          {view.name === "inbox" && <Inbox />}
-          {view.name === "doctor" && <Doctor />}
-          {view.name === "memory" && <MemoryExport />}
         </div>
       </Layout.Content>
     </Layout>

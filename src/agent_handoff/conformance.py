@@ -129,6 +129,7 @@ def parse_shape(evidence: fixtures.Evidence) -> dict:
         "nonempty_messages": evidence.nonempty,
         "tool_calls": evidence.tools,
         "file_anchors": evidence.files_touched,
+        "supplement_files": evidence.supplement_files,
         "source_messages": evidence.source_messages,
         "shape_only": evidence.shape_only,
         "sampled": evidence.sampled,
@@ -223,14 +224,23 @@ def diff(baseline: dict, current: dict, parse_comparable: bool = True) -> dict[s
         changed,
     )
     base_parse, now_parse = baseline.get("parse", {}), current.get("parse", {})
-    for field in ("sessions", "nonempty_messages", "tool_calls", "file_anchors"):
+    for field in (
+        "sessions",
+        "nonempty_messages",
+        "tool_calls",
+        "file_anchors",
+        "supplement_files",
+    ):
         if not parse_comparable:
             break
         before, after = base_parse.get(field, 0), now_parse.get(field, 0)
         if after < before:
             lost.append(f"parse: {field} fell {before} -> {after}")
         elif after > before:
-            gained.append(f"parse: {field} rose {before} -> {after}")
+            # Supplement growth (execution traces, telemetry) is an honest
+            # addition, not parser drift — say which side moved.
+            tag = "supplement" if field == "supplement_files" else "parse"
+            gained.append(f"{tag}: {field} rose {before} -> {after}")
     if not now_store and base_store:
         lost.append("store: the fixture is gone; nothing can be verified")
     return {"lost": lost, "added": gained, "changed": changed}

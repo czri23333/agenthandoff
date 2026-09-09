@@ -1,0 +1,53 @@
+{
+  "cli": "qoderwork-cn-app",
+  "with_root": "qoderwork-cn-app\\agents.db",
+  "mirrors": "%APPDATA%/QoderWork CN/data/agents.db",
+  "sessions": [
+    "zekaya24ad023d179af085",
+    "helatoja8e5e8c9f4d108d0d"
+  ],
+  "files": [
+    {
+      "rel": "agents.db",
+      "bytes": 659456,
+      "sampled": false,
+      "sqlite": {
+        "rows": 112,
+        "tables": 21,
+        "capped": [],
+        "unfiltered": [
+          "__drizzle_migrations",
+          "projects",
+          "app_settings",
+          "scheduled_tasks",
+          "channel_pairings",
+          "channel_pairings_v2",
+          "nudge_logs",
+          "skill_evolution_suggestions",
+          "byok_custom_models",
+          "mcp_oauth_tokens",
+          "knowledge_bases",
+          "ms365_auth_states",
+          "mcp_oauth_tokens_by_user",
+          "google_oauth_tokens",
+          "voice_input_hotwords",
+          "voice_input_history"
+        ],
+        "empty": [
+          "sub_chats",
+          "task_run_logs",
+          "rc_session_mappings"
+        ]
+      }
+    }
+  ],
+  "redacted_keys": [
+    "key"
+  ],
+  "scrubbed_hits": 191,
+  "sampled_records": false,
+  "source_messages": 169,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

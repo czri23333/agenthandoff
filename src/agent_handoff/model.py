@@ -68,7 +68,23 @@ class SessionMeta:
     provider: str | None = None
     origin: str | None = None
     parent_session_id: str | None = None
+    # Assistant identity as the product shows it (workbuddy
+    # assistant-display snapshots: expert name + avatar URL). Display-only;
+    # never a credential, URLs point at the vendor's public CDN.
+    expert_name: str | None = None
+    expert_avatar: str | None = None
     notes: list[str] = field(default_factory=list)
+    # Task kind as the store reports it (zcode: interactive | subagent_child …).
+    # Drives grouping: the app itself separates child runs from conversations.
+    task_type: str | None = None
+    # How the title was produced (zcode: generated | first_input …). A
+    # first_input title is the user's own words; generated is the model's.
+    title_source: str | None = None
+    # Permission mode the session ran under (zcode: {"mode":"yolo"|"plan"…}).
+    permission: str | None = None
+    # Files the user attached to the conversation (zcode file parts:
+    # filename + path). Distinct from files a tool touched mid-run.
+    attachments: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -87,10 +103,28 @@ class Message:
     tokens_in: int | None = None
     tokens_out: int | None = None
     tokens_reasoning: int | None = None
+    # Deterministic length-based estimate (~4 chars/token, CJK-aware) used
+    # ONLY when the store records no billing. Displayed with a ≈ prefix and
+    # never mixed into usage() aggregates — an honest gauge, not vendor truth.
+    tokens_estimated: int | None = None
     # Set when the turn came from a sub-agent transcript (label = which one);
     # None for the main conversation. Lets the UI nest sub-agent work under the
     # parent session instead of interleaving it flat.
     subagent: str | None = None
+    # Measured cost of this turn in the vendor's own billing unit, keyed by
+    # the request id the store records (workbuddy session_usage.credit_json:
+    # conversationRequestId -> credits). Per-request attribution, never split.
+    credits: float | None = None
+    # Measured elapsed ms for this turn from the store's own clocks (e.g.
+    # CherryStudio metrics.time_completion_millsec). A verifiable cost proxy
+    # where token billing is absent. Server fills it from timestamps when the
+    # store records none.
+    dur_ms: int | None = None
+    # The turn exactly as the store holds it, before clean_text/is_noise
+    # trimming. None means the parser kept everything (nothing was trimmed)
+    # or the dialect has no trimmable wrappers — either way text IS verbatim.
+    # Lets the cockpit offer a 原文 view without re-reading the store.
+    raw_text: str | None = None
 
 
 @dataclass
@@ -227,7 +261,13 @@ class HandoffBundle:
                 "provider": self.meta.provider,
                 "origin": self.meta.origin,
                 "parent_session_id": self.meta.parent_session_id,
+                "expert_name": self.meta.expert_name,
+                "expert_avatar": self.meta.expert_avatar,
                 "notes": self.meta.notes,
+                "task_type": self.meta.task_type,
+                "title_source": self.meta.title_source,
+                "permission": self.meta.permission,
+                "attachments": list(self.meta.attachments),
             },
             "objective": self.objective,
             "state": {

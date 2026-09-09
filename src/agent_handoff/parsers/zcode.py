@@ -24,6 +24,45 @@ from agent_handoff.model import (
 from agent_handoff.parsers.base import Parser
 
 
+def _permission_mode(raw) -> str | None:
+    """The mode the session ran under (yolo | plan …), from the JSON blob."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw).get("mode") or None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _match_child(children, prompt: str, desc: str) -> str | None:
+    """Match an Agent tool call to the child session it spawned.
+
+    The child title is the head of the same prompt, so a prompt-prefix match
+    is exact. Falls back to creation-time order (a call spawns its child
+    within seconds); returns None when nothing matches honestly.
+    """
+    prompt = (prompt or "").strip()
+    desc = (desc or "").strip()
+    if not children:
+        return None
+    if prompt:
+        for ch in children:
+            # The child title is a truncation of this same prompt
+            # (often ending in …); match on the shared head.
+            title = str(ch["title"] or "").rstrip("…. ").strip()
+            if len(title) >= 20 and prompt.startswith(title[:60]):
+                return str(ch["id"])
+            head = prompt[:120]
+            if title and (title.startswith(head) or head.startswith(title[:60])):
+                return str(ch["id"])
+    if desc:
+        for ch in children:
+            title = str(ch["title"] or "")
+            if title and (desc in title or title[:40] in desc):
+                return str(ch["id"])
+    return None
+
+
 class ZcodeParser(Parser):
     cli = "zcode"
 
@@ -44,7 +83,8 @@ class ZcodeParser(Parser):
         out: list[SessionMeta] = []
         with self._connect() as con:
             rows = con.execute(
-                "SELECT id, title, directory, time_created, time_updated "
+                "SELECT id, title, directory, time_created, time_updated, parent_id, "
+                "task_type, title_source, permission "
                 "FROM session ORDER BY time_updated DESC"
             ).fetchall()
         for r in rows:
@@ -57,6 +97,10 @@ class ZcodeParser(Parser):
                     started_at=ts_to_iso(r["time_created"]),
                     updated_at=ts_to_iso(r["time_updated"]),
                     source_path=str(self.db_path),
+                    parent_session_id=r["parent_id"] or None,
+                    task_type=r["task_type"] or None,
+                    title_source=r["title_source"] or None,
+                    permission=_permission_mode(r["permission"]),
                 )
             )
         return out
@@ -94,7 +138,8 @@ class ZcodeParser(Parser):
             return None
         with self._connect() as con:
             sess = con.execute(
-                "SELECT id, title, directory, time_created, time_updated, parent_id "
+                "SELECT id, title, directory, time_created, time_updated, parent_id, "
+                "task_type, title_source, permission "
                 "FROM session WHERE id=?",
                 (session_id,),
             ).fetchone()
@@ -105,11 +150,23 @@ class ZcodeParser(Parser):
             files: Counter[str] = Counter()
             tools: Counter[str] = Counter()
             compactions: list[CompactionEvent] = []
+            attachments: list[str] = []
+            # (time_created, Message): sub-agent spawn calls, merged into the
+            # timeline in chronological order after the main pass.
+            agent_msgs: list[tuple[int, Message]] = []
             model: str | None = None
             tokens_in = tokens_out = 0
 
             msg_rows = con.execute(
                 "SELECT id, data, time_created FROM message WHERE session_id=? ORDER BY sequence",
+                (session_id,),
+            ).fetchall()
+            # Children of this session (sub-agent runs): an Agent tool call in
+            # the parent timeline spawns one of these. Matching the call's
+            # prompt against the child title puts the sub-agent run back where
+            # the product shows it — as a call inside the parent conversation.
+            children = con.execute(
+                "SELECT id, title, time_created, time_updated FROM session WHERE parent_id=?",
                 (session_id,),
             ).fetchall()
             # Batch-load all parts in one query — a per-message query here is
@@ -136,12 +193,15 @@ class ZcodeParser(Parser):
                     continue
 
                 texts: list[str] = []
+                raws: list[str] = []
                 for pdata in parts_by_msg.get(m["id"], []):
                     ptype = pdata.get("type")
                     if ptype == "text":
-                        t = self.clean_text(pdata.get("text") or "")
+                        praw = pdata.get("text") or ""
+                        t = self.clean_text(praw)
                         if t and not self.is_noise(t):
                             texts.append(t)
+                            raws.append(praw)
                     elif ptype == "compaction":
                         if pdata.get("timelineStatus") not in (None, "completed"):
                             continue  # failed/aborted attempts are noise
@@ -166,18 +226,103 @@ class ZcodeParser(Parser):
                         if isinstance(tool_input, dict):
                             for path in self.extract_paths(tool_input):
                                 files[path] += 1
+                        if tool_name == "Agent" and isinstance(tool_input, dict):
+                            # A sub-agent spawn: keep it in the parent timeline
+                            # as a call message (the product shows it inline),
+                            # linked to the child session it created.
+                            desc = str(tool_input.get("description") or "").strip()
+                            prompt = str(tool_input.get("prompt") or "")
+                            status = str(state.get("status") or "")
+                            child_id = _match_child(children, prompt, desc)
+                            if status == "completed":
+                                mark = "✓"
+                            elif not status or status == "running":
+                                mark = "…"
+                            else:
+                                mark = "✗"
+                            call_text = f"[子代理 {mark}] {desc or 'subagent'}"
+                            if child_id:
+                                call_text += f" → {child_id}"
+                            call_id = pdata.get("callID") or "unknown"
+                            agent_ref = child_id or f"agent:{call_id}"
+                            agent_msgs.append(
+                                (
+                                    m["time_created"],
+                                    self.msg(
+                                        "assistant",
+                                        prompt or desc,
+                                        text=call_text,
+                                        at=ts_to_iso(m["time_created"]),
+                                        model=mdata.get("modelID") or None,
+                                        subagent=agent_ref,
+                                    ),
+                                )
+                            )
+                    elif ptype == "file":
+                        # A file the user attached: filename + path are both on
+                        # the row. Record it as an attachment (not a tool touch).
+                        src = pdata.get("source") or {}
+                        for cand in (
+                            pdata.get("url"),
+                            pdata.get("filename"),
+                            src.get("path") if isinstance(src, dict) else None,
+                        ):
+                            if isinstance(cand, str) and cand.strip():
+                                if cand not in attachments:
+                                    attachments.append(cand)
+                                files[cand] += 1
+                                break
+                    elif ptype == "timeline":
+                        # Goal-verification separators carry the product's own
+                        # verdict on its target (passed/nextAction). Fold the
+                        # verdict into the message flow so the handoff keeps
+                        # what the app itself concluded.
+                        gv = pdata.get("verification") or {}
+                        passed = gv.get("passed")
+                        verdict = str(gv.get("nextAction") or gv.get("reason") or "").strip()
+                        if verdict:
+                            mark = "✓" if passed else "✗"
+                            texts.append(f"[目标核验 {mark}] {self.clean_text(verdict)[:400]}")
+                        elif pdata.get("timelineType") == "model_change":
+                            # Model-switch separators are visible in the
+                            # product timeline; without them the handoff
+                            # misattributes turns across the switch.
+                            frm = (pdata.get("fromModel") or {}).get("modelID") or "?"
+                            to = (pdata.get("toModel") or {}).get("modelID") or "?"
+                            if frm != to:
+                                texts.append(f"[模型切换] {frm} → {to}")
 
                 if role == "assistant" and mdata.get("modelID"):
                     model = mdata["modelID"]
                 tok = mdata.get("tokens")
+                msg_in = msg_out = msg_reason = None
                 if isinstance(tok, dict):
                     tokens_in += int(tok.get("input") or tok.get("inputTokens") or 0)
                     tokens_out += int(tok.get("output") or tok.get("outputTokens") or 0)
+                    msg_in = tok.get("input") or tok.get("inputTokens") or None
+                    msg_out = tok.get("output") or tok.get("outputTokens") or None
+                    msg_reason = tok.get("reasoning") or tok.get("reasoningTokens") or None
 
                 if texts:
                     messages.append(
-                        Message(role=role, text="\n".join(texts), at=ts_to_iso(m["time_created"]))
+                        self.msg(
+                            role,
+                            "\n".join(raws),
+                            text="\n".join(texts),
+                            at=ts_to_iso(m["time_created"]),
+                            model=mdata.get("modelID") or None,
+                            tokens_in=msg_in,
+                            tokens_out=msg_out,
+                            tokens_reasoning=msg_reason,
+                        )
                     )
+
+            if agent_msgs:
+                # Sub-agent spawns join the parent timeline where the product
+                # shows them: as calls inside the conversation, in time order.
+                for _, am in sorted(agent_msgs, key=lambda t: t[0] or 0):
+                    messages.append(am)
+                messages.sort(key=lambda x: x.at or "")
 
             todos = [
                 TodoItem(
@@ -215,10 +360,51 @@ class ZcodeParser(Parser):
             source_path=str(self.db_path),
             provider=provider_row[0] if provider_row else None,
             parent_session_id=sess["parent_id"],
+            task_type=sess["task_type"] or None,
+            title_source=sess["title_source"] or None,
+            permission=_permission_mode(sess["permission"]),
+            attachments=attachments,
         )
         raw = self.build_raw(meta, messages, todos, files, tools, interruption)
         raw.compactions = compactions
         return raw
+
+    def tool_detail(self, session_id: str) -> list[dict] | None:
+        """Per-call tool ledger from the product's own tool_usage table.
+
+        Each row carries what the transcript cannot: duration, exit code,
+        bytes in/out, truncation, retries, approval and side-effect scope —
+        the same numbers the product's UI shows for a tool call.
+        """
+        if not self.available():
+            return None
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT tool_name, status, duration_ms, exit_code, "
+                    "output_bytes, truncated, retry_count, approval_status, "
+                    "read_only, destructive, error_type "
+                    "FROM tool_usage WHERE session_id=? ORDER BY started_at",
+                    (session_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return None
+        return [
+            {
+                "tool": r[0],
+                "status": r[1],
+                "duration_ms": r[2],
+                "exit_code": r[3],
+                "output_bytes": r[4],
+                "truncated": bool(r[5]),
+                "retries": r[6],
+                "approval": r[7],
+                "read_only": bool(r[8]),
+                "destructive": bool(r[9]),
+                "error": r[10],
+            }
+            for r in rows
+        ]
 
     def usage(self, session_id: str) -> dict | None:
         """Aggregate the store's model_usage table: tokens, cache, latency.
@@ -247,8 +433,19 @@ class ZcodeParser(Parser):
 
         models = []
         tot_in = tot_out = tot_calls = 0
-        for (model, calls, tin, tout, reasoning, cw, cr, avg_dur, avg_ttft,
-             sum_out, sum_decode_ms) in rows:
+        for (
+            model,
+            calls,
+            tin,
+            tout,
+            reasoning,
+            cw,
+            cr,
+            avg_dur,
+            avg_ttft,
+            sum_out,
+            sum_decode_ms,
+        ) in rows:
             models.append(
                 {
                     "model": model,

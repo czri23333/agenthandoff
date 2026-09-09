@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_handoff.locations import home
-from agent_handoff.model import Message, RawSession, SessionMeta, ts_to_iso
+from agent_handoff.model import CompactionEvent, Message, RawSession, SessionMeta, ts_to_iso
 from agent_handoff.parsers.base import Parser
 
 try:  # optional extra
@@ -171,8 +171,43 @@ class DshParser(Parser):
         cwd = ""
         created = updated = None
         parent = None
+        # Non-null only: agent identity (who ran), model + window (what ran),
+        # the turn-end verdict (why it stopped — e.g. a 429 quota death).
+        agent_label: str | None = None
+        agent_provider: str | None = None
+        agent_model: str | None = None
+        req_model: str | None = None
+        context_window: int | None = None
+        turn_end: dict | None = None
+        turns_text: dict = {}
+        turns_usage: dict = {}
+        turns_reason: dict = {}
+        turns_seen_index: dict = {}
+        turns_tools: dict = {}
+        compactions: list[CompactionEvent] = []
+        # Turns carrying a finished assistant/message row: their chunk rows
+        # are streaming pre-images of the same content — drop the chunks.
+        # Pre-scan first: chunks usually arrive BEFORE the finished row.
+        # Single decompression shared with the main loop below.
+        try:
+            _all = _decompress(path).decode("utf-8", errors="replace").splitlines()
+        except (OSError, ValueError):
+            _all = []
+        has_finished: set[str] = set()
+        for _line in _all:
+            _line = _line.strip()
+            if not _line:
+                continue
+            try:
+                _row = json.loads(_line)
+            except json.JSONDecodeError:
+                continue
+            if _row.get("type") == "assistant/message":
+                _data = _row.get("data") or {}
+                if _data.get("turn") is not None:
+                    has_finished.add(str(_data.get("turn")))
 
-        for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
+        for line in _all:
             line = line.strip()
             if not line:
                 continue
@@ -190,23 +225,239 @@ class DshParser(Parser):
             elif t == "session/title":
                 title = (row.get("data") or {}).get("title") or title
             elif t == "user/message":
-                text = self.clean_text(
-                    "\n".join(
-                        b.get("text") or ""
-                        for b in (row.get("data") or {}).get("content") or []
-                        if isinstance(b, dict) and b.get("type") == "text"
+                praw = "\n".join(
+                    b.get("text") or ""
+                    for b in (row.get("data") or {}).get("content") or []
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+                text = self.clean_text(praw)
+                if text and not self.is_noise(text):
+                    messages.append(
+                        self.msg("user", praw, text=text, at=ts_to_iso(row.get("time")))
+                    )
+            elif t == "subagent/descriptor":
+                data = row.get("data") or {}
+                agent_label = str(data.get("label") or "") or agent_label
+                agent_provider = str(data.get("agentProvider") or "") or agent_provider
+                agent_model = str(data.get("agentModel") or "") or agent_model
+            elif t == "request/header":
+                header = (row.get("data") or {}).get("header") or {}
+                cfg = header.get("config") or {}
+                req_model = str(cfg.get("model") or "") or req_model
+            elif t == "request/context":
+                data = row.get("data") or {}
+                req_model = str(data.get("model") or "") or req_model
+                window = data.get("contextWindow")
+                if isinstance(window, int):
+                    context_window = window
+            elif t == "turn/end":
+                turn_end = row.get("data") or turn_end
+            elif t == "compaction/prune":
+                # Tokens the compaction shadowed away: real measured cost
+                # of what context management discarded.
+                data = row.get("data") or {}
+                shadowed = data.get("shadowedTokenCount")
+                if isinstance(shadowed, int) and shadowed > 0:
+                    compactions.append(
+                        CompactionEvent(
+                            at=ts_to_iso(row.get("time")),
+                            reason="prune",
+                            pre_tokens=shadowed,
+                            auto=True,
+                        )
+                    )
+            elif t == "assistant/message":
+                # Finished message blocks: the product's own assembled turns
+                # (reasoning/tool-call/text). Prefer these over the chunk
+                # stream; chunks remain as fallback for sessions without them.
+                # Turn keys vary (int in messages, str in chunks): normalize.
+                data = row.get("data") or {}
+                turn = data.get("turn")
+                if turn is not None:
+                    has_finished.add(str(turn))
+                msg = data.get("message") or {}
+                for b in msg.get("content") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    btype = b.get("type")
+                    if btype == "reasoning":
+                        praw = b.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_reason.setdefault(turn, []).append((text, praw))
+                    elif btype == "tool-call":
+                        name = str(b.get("name") or "tool")
+                        tools[name] += 1
+                        args = b.get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except ValueError:
+                                args = {}
+                        if isinstance(args, dict):
+                            for pth in self.extract_paths(args):
+                                files[pth] += 1
+                        arg = ""
+                        if isinstance(args, dict):
+                            for k in ("file_path", "path", "command", "description"):
+                                v = args.get(k)
+                                if isinstance(v, str) and v.strip():
+                                    arg = f" {v.strip()[:80]}"
+                                    break
+                        turns_tools.setdefault(turn, []).append(f"[工具 {name}]{arg}")
+                    elif btype == "text":
+                        praw = b.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_text.setdefault(turn, []).append(
+                                (ts_to_iso(row.get("time")), text, praw)
+                            )
+                            turns_seen_index[turn, len(turns_text[turn])] = True
+            elif t == "assistant/chunk":
+                data = row.get("data") or {}
+                chunk = data.get("chunk") or {}
+                turn = data.get("turn")
+                if (
+                    turn is not None
+                    and str(turn) in has_finished
+                    and (chunk.get("type") or "") != "usage"
+                ):
+                    continue  # finished row already covers this turn's content
+                ctype = chunk.get("type")
+                if ctype == "usage":
+                    u = chunk.get("usage") or {}
+                    turns_usage[turn] = u
+                elif ctype in ("text", "text-delta"):
+                    praw = chunk.get("text") or chunk.get("delta") or ""
+                    text = self.clean_text(praw)
+                    if text:
+                        turns_text.setdefault(turn, []).append(
+                            (ts_to_iso(row.get("time")), text, praw)
+                        )
+                        turns_seen_index[turn, chunk.get("index")] = True
+                elif ctype == "reasoning-delta":
+                    praw = chunk.get("text") or ""
+                    text = self.clean_text(praw)
+                    if text:
+                        turns_reason.setdefault(turn, []).append((text, praw))
+                elif ctype == "block-end":
+                    block = chunk.get("block") or {}
+                    btype = block.get("type")
+                    if btype == "text" and not turns_seen_index.get((turn, chunk.get("index"))):
+                        praw = block.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_text.setdefault(turn, []).append(
+                                (ts_to_iso(row.get("time")), text, praw)
+                            )
+                    elif btype == "reasoning" and not turns_seen_index.get(
+                        (turn, chunk.get("index"))
+                    ):
+                        praw = block.get("text") or ""
+                        text = self.clean_text(praw)
+                        if text:
+                            turns_reason.setdefault(turn, []).append((text, praw))
+
+        # One assistant turn = one message: the product streams a reply as
+        # many text chunks plus a usage chunk keyed by the same turn number.
+        # Merging both fixes chunk fragmentation AND attributes per-message
+        # billing (input/output/reasoning) plus the request model. Reasoning
+        # deltas ride along as [思考] turns, the same convention as the
+        # CherryStudio parser.
+        # Turn keys vary (int in finished rows, str in chunks, None when
+        # absent): normalize everything through str for lookup consistency.
+        def _tkey(t):
+            return None if t is None else str(t)
+
+        _text2 = {}
+        for t, v in turns_text.items():
+            _text2.setdefault(_tkey(t), []).extend(v)
+        turns_text = _text2
+        _reason2 = {}
+        for t, v in turns_reason.items():
+            _reason2.setdefault(_tkey(t), []).extend(v)
+        turns_reason = _reason2
+        _tools2 = {}
+        for t, v in turns_tools.items():
+            _tools2.setdefault(_tkey(t), []).extend(v)
+        turns_tools = _tools2
+        _usage2 = {}
+        for t, v in turns_usage.items():
+            _usage2.setdefault(_tkey(t), v)
+        turns_usage = _usage2
+        has_finished = {str(t) for t in has_finished}
+        live_turns = set(list(turns_text) + list(turns_reason) + list(turns_tools))
+        for turn in sorted(live_turns, key=lambda k: (k is None, k)):
+            parts = turns_text.get(turn, [])
+            at = next((a for a, _, _ in parts if a), None)
+            u = turns_usage.get(turn) or {}
+            msg_in = u.get("inputTokens")
+            msg_out = u.get("outputTokens")
+            msg_reason = u.get("reasoningTokens")
+            model = req_model or agent_model or None
+            if parts:
+                messages.append(
+                    self.msg(
+                        "assistant",
+                        "\n".join(r for _, _, r in parts),
+                        text="\n".join(t for _, t, _ in parts),
+                        at=at,
+                        model=model,
+                        tokens_in=msg_in if isinstance(msg_in, int) else None,
+                        tokens_out=msg_out if isinstance(msg_out, int) else None,
+                        tokens_reasoning=msg_reason if isinstance(msg_reason, int) else None,
                     )
                 )
-                if text and not self.is_noise(text):
-                    messages.append(Message(role="user", text=text, at=ts_to_iso(row.get("time"))))
-            elif t == "assistant/chunk":
-                chunk = ((row.get("data") or {}).get("chunk")) or {}
-                if chunk.get("type") == "text":
-                    text = self.clean_text(chunk.get("text") or chunk.get("delta") or "")
-                    if text:
-                        messages.append(
-                            Message(role="assistant", text=text, at=ts_to_iso(row.get("time")))
-                        )
+            for tool_line in turns_tools.get(turn, []):
+                # Tool rows carry no billing of their own: the turn's usage
+                # lives on the text/thinking turns (else usage() would sum
+                # one request N times for N tool calls).
+                messages.append(
+                    self.msg(
+                        "assistant",
+                        tool_line,
+                        text=tool_line,
+                        at=at,
+                        model=model,
+                    )
+                )
+            reason_pairs = turns_reason.get(turn, [])
+            reason_text = "".join(t for t, _ in reason_pairs).strip()
+            if reason_text:
+                # Same-request billing when this turn has its own usage;
+                # otherwise the second pass below backfills from the nearest
+                # settled turn (old turns carry no usage chunk).
+                messages.append(
+                    self.msg(
+                        "assistant",
+                        f"[思考] {''.join(r for _, r in reason_pairs).strip()}",
+                        text=f"[思考] {reason_text}", at=at, model=model,
+                        tokens_in=msg_in if isinstance(msg_in, int) else None,
+                        tokens_out=msg_out if isinstance(msg_out, int) else None,
+                        tokens_reasoning=msg_reason if isinstance(msg_reason, int) else None,
+                    )
+                )
+
+        # Second pass: tokenless [思考] turns take the model of the nearest
+        # settled turn (same session, same serving model) — but NEVER its
+        # tokens. Token inheritance across turns misattributes one request's
+        # spend to another; None stays honest absence.
+        messages.sort(key=lambda m: m.at or "")
+        settled = [m for m in messages if m.role == "assistant" and m.model]
+        if settled:
+            for m in messages:
+                if (
+                    m.role == "assistant"
+                    and m.tokens_in is None
+                    and m.tokens_out is None
+                    and (m.text or "").startswith("[思考]")
+                    and m.at
+                    and not m.model
+                ):
+                    nxt = next((s for s in settled if (s.at or "") >= (m.at or "")), None)
+                    if nxt is None:
+                        continue
+                    m.model = nxt.model
 
         meta = SessionMeta(
             cli=self.cli,
@@ -217,9 +468,122 @@ class DshParser(Parser):
             updated_at=updated,
             source_path=str(path),
             parent_session_id=parent,
+            model=req_model or agent_model or None,
+            notes=_dsh_notes(agent_label, agent_provider, agent_model, req_model, context_window),
         )
-        return self.build_raw(meta, messages, [], files, tools)
+        raw = self.build_raw(meta, messages, [], files, tools)
+        raw.interruption = _dsh_interruption(turn_end)
+        raw.compactions = compactions
+        return raw
+
+    def usage(self, session_id: str) -> dict | None:
+        """Per-model tokens summed once per turn (not per message).
+
+        A turn fans out into text/thinking/tool rows sharing one usage
+        chunk — summing messages would bill one request N times. Aggregate
+        the turn-level usage rows instead.
+        """
+        if not self.available() or not self.codec_ok():
+            return None
+        path = self._resolve(session_id)
+        if path is None:
+            return None
+        import json
+
+        seen: dict = {}
+        model: str | None = None
+        for line in _decompress(path).decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = row.get("type")
+            if t == "request/context":
+                data = row.get("data") or {}
+                if isinstance(data.get("model"), str) and data["model"]:
+                    model = data["model"]
+            data = row.get("data") or {}
+            chunk = data.get("chunk") or {}
+            if row.get("type") == "assistant/chunk" and chunk.get("type") == "usage":
+                u = chunk.get("usage") or {}
+                if data.get("turn") not in seen:
+                    seen[data.get("turn")] = u
+        if not seen:
+            return None
+        tot_in = tot_out = tot_reason = calls = 0
+        for u in seen.values():
+            i, o, r = u.get("inputTokens"), u.get("outputTokens"), u.get("reasoningTokens")
+            if isinstance(i, int):
+                tot_in += i
+            if isinstance(o, int):
+                tot_out += o
+            if isinstance(r, int):
+                tot_reason += r
+            calls += 1
+        name = model or "unknown"
+        return {
+            "models": [
+                {
+                    "model": name,
+                    "calls": calls,
+                    "tokens_in": tot_in,
+                    "tokens_out": tot_out,
+                    "reasoning": tot_reason,
+                    "cache_write": 0,
+                    "cache_read": 0,
+                    "avg_ttft_ms": None,
+                    "tok_per_s": None,
+                }
+            ],
+            "totals": {"calls": calls, "tokens_in": tot_in, "tokens_out": tot_out},
+        }
 
     def _resolve(self, session_id: str) -> Path | None:
         hits = list(self.root.rglob(f"{session_id}/session.jsonl.zstd"))
         return hits[0] if hits else None
+
+
+def _dsh_notes(
+    label: str | None,
+    provider: str | None,
+    agent_model: str | None,
+    req_model: str | None,
+    window: int | None,
+) -> list[str]:
+    """Agent identity + model + window the roll declares about itself."""
+    notes: list[str] = []
+    if label:
+        notes.append(f"agent:{label}")
+    if provider:
+        notes.append(f"agent_provider:{provider}")
+    if agent_model and agent_model != req_model:
+        notes.append(f"agent_model:{agent_model}")
+    if window:
+        notes.append(f"context_window:{window}")
+    return notes
+
+
+def _dsh_interruption(turn_end: dict | None):
+    """The turn-end verdict is the store's own account of why a run stopped —
+    including quota deaths (e.g. GoUsageLimitError) that no row count reveals.
+    """
+    from agent_handoff.model import Interruption
+
+    if not turn_end:
+        return Interruption()
+    reason = turn_end.get("reason") or {}
+    kind = str(reason.get("kind") or "")
+    if kind == "error":
+        err = reason.get("error") or {}
+        msg = str(err.get("message") or "")[:300]
+        if " sage " in f" {msg} ".lower() or "limit" in msg.lower() or "429" in msg:
+            return Interruption(kind="error", detail=f"quota/limit: {msg[:200]}")
+        return Interruption(kind="error", detail=msg[:200])
+    if kind in ("complete", "completed", "done", "finished"):
+        return Interruption(kind="clean")
+    if kind:
+        return Interruption(kind="unknown", detail=f"turn_end:{kind}")
+    return Interruption()

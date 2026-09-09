@@ -43,7 +43,23 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const [searchError, setSearchError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [bundleStale, setBundleStale] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    // Refresh-safe: domain fold state survives a reload within the tab.
+    try {
+      const raw = sessionStorage.getItem("ah-collapsed");
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("ah-collapsed", JSON.stringify([...collapsed]));
+    } catch {
+      /* storage full/blocked: fold state just won't survive */
+    }
+  }, [collapsed]);
   const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
   const [, tick] = useState(0);
   const inputRef = useRef<GetRef<typeof Input.Search>>(null);
@@ -63,15 +79,76 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     [cliFilter],
   );
 
+  // Incremental poll (§4-3): ask only for sessions changed since the newest
+  // updated_at we hold, then merge. A changed child arrives with its parent
+  // shell so the tree mounts without a full reload.
+  const pollDelta = useCallback(async () => {
+    setSessions((prev) => {
+      if (!prev) {
+        void load();
+        return prev;
+      }
+      const newest = prev.reduce<string>(
+        (acc, s) => ((s.updated_at ?? "") > acc ? (s.updated_at ?? acc) : acc),
+        "",
+      );
+      if (!newest) {
+        void load();
+        return prev;
+      }
+      void api
+        .sessionsDelta(newest, { cli: cliFilter || undefined })
+        .then(({ changed }) => {
+          if (!changed.length) return;
+          setSessions((cur) => {
+            if (!cur) return cur;
+            const byId = new Map(cur.map((s) => [`${s.cli}:${s.session_id}`, s]));
+            for (const s of changed) byId.set(`${s.cli}:${s.session_id}`, s);
+            return [...byId.values()].sort((a, b) =>
+              (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+            );
+          });
+          setUpdatedAt(Date.now());
+        })
+        .catch(() => {
+          /* transient: the next tick retries, manual refresh reloads */
+        });
+      return prev;
+    });
+  }, [cliFilter, load]);
+
   useEffect(() => {
     load();
-    const poll = setInterval(() => load(), POLL_MS);
+    const poll = setInterval(() => pollDelta(), POLL_MS);
     const clock = setInterval(() => tick((n) => n + 1), 1000);
+    // Stale-bundle guard: a tab left open across a server upgrade keeps
+    // rendering (and requesting) with the old JS. When index.html points at
+    // a different entry chunk, tell the user a reload picks it up instead of
+    // silently showing yesterday's UI against today's API.
+    let stopped = false;
+    const guard = setInterval(async () => {
+      try {
+        const r = await fetch("/", { cache: "no-store" });
+        const html = await r.text();
+        const m = html.match(/\/assets\/(index-[^"]+\.js)/);
+        const current = m?.[1] ?? "";
+        const boot = (window as unknown as { __ahEntry?: string }).__ahEntry ?? "";
+        if (!boot && current) {
+          (window as unknown as { __ahEntry?: string }).__ahEntry = current;
+        } else if (boot && current && boot !== current && !stopped) {
+          stopped = true;
+          setBundleStale(true);
+        }
+      } catch {
+        /* offline/transient: next tick retries */
+      }
+    }, POLL_MS * 4);
     return () => {
       clearInterval(poll);
       clearInterval(clock);
+      clearInterval(guard);
     };
-  }, [load]);
+  }, [load, pollDelta]);
 
   /* keyboard "/" from App.tsx */
   useEffect(() => {
@@ -163,6 +240,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     () => (sessions ?? []).filter((s) => s.needs_reply === true).length,
     [sessions],
   );
+  const needsReplyHint = useMemo(() => {
+    const waiting = (sessions ?? []).filter((s) => s.needs_reply === true).slice(0, 8);
+    if (!waiting.length) return t("needsReplyHint");
+    return `${t("needsReplyHint")}：${waiting.map((s) => s.title).join(" / ")}${needsReplyCount > 8 ? " …" : ""}`;
+  }, [sessions, needsReplyCount, t]);
   const visible = titleFiltered.filter(
     (s) =>
       (!domainFilter || s.domain === domainFilter) &&
@@ -204,6 +286,14 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
 
   return (
     <div className="flex h-full flex-col">
+      {bundleStale && (
+        <button
+          onClick={() => location.reload()}
+          className="ah-warn w-full py-1.5 text-center font-mono text-[12px]"
+        >
+          {t("bundleStale")}
+        </button>
+      )}
       <div className="ah-bar ah-toolbar px-4 py-2.5">
         <Segmented
           size="small"
@@ -245,7 +335,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             }))}
           />
         </Tooltip>
-        <Tooltip title={t("needsReplyHint")}>
+        <Tooltip title={needsReplyHint}>
           <Button
             size="small"
             type={needsReplyOnly ? "primary" : "default"}
@@ -307,89 +397,203 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             <FirstRun />
           </Empty>
         ) : (
-          grouped.map(([domain, rows]) => {
-            const isCollapsed = collapsed.has(domain);
-            const short =
-              domain.split(/[\\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
-            return (
-              <div key={domain} className="mb-4">
-                <button
-                  onClick={() =>
-                    setCollapsed((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(domain)) next.delete(domain);
-                      else next.add(domain);
-                      return next;
-                    })
-                  }
-                  className="mb-1.5 flex w-full items-baseline gap-2 text-left"
-                >
-                  <span className="w-3 ah-faint">{isCollapsed ? "▸" : "▾"}</span>
-                  <span className="ah-title font-mono font-medium">{short}</span>
-                  <Tooltip title={domain}>
-                    <span className="ah-faint font-mono">
-                      {rows.length} {t("sessionsN")}
-                    </span>
-                  </Tooltip>
-                </button>
-                {!isCollapsed && (
-                  <ul className="m-0 list-none space-y-1.5 p-0">
-                    {rows.map((s) => (
-                      <li key={`${s.cli}:${s.session_id}`} className="row-enter">
-                        <button
-                          onClick={() => onOpen(s.cli, s.session_id)}
-                          className="ah-row group flex w-full items-center gap-3 px-3 py-2 text-left"
-                        >
-                          <CliBadge cli={s.cli} origin={s.origin} />
-                          <span className="min-w-0 flex-1">
-                            <span className="ah-title block truncate">{s.title}</span>
-                            <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
-                              {s.session_id.slice(0, 8)}
-                              {s.git?.branch && (
-                                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
-                              )}
-                              {s.cwd && (
-                                <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>
-                              )}
-                            </span>
-                          </span>
-                          {s.parent_session_id && (
-                            <Tooltip title={`${t("subSession")} · ${s.parent_session_id}`}>
-                              <span className="ah-faint hidden shrink-0 font-mono xl:inline">⤷ {t("subSession")}</span>
-                            </Tooltip>
-                          )}
-                          {s.provider && (
-                            <Tooltip title={t("provider")}>
-                              <span className="ah-faint hidden shrink-0 font-mono lg:inline">
-                                {(s.provider as string).slice(0, 18)}
-                              </span>
-                            </Tooltip>
-                          )}
-                          {/* Below sm these two fixed columns starved the title to
-                          zero width; the title is the only thing that identifies a
-                          row, so the columns give way first. */}
-                          <span className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden">
-                            {relTime(s.updated_at)}
-                          </span>
-                          {s.needs_reply === true && (
-                            <Tooltip title={t("needsReplyHint")}>
-                              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
-                            </Tooltip>
-                          )}
-                          <span className="w-24 shrink-0 text-right max-sm:hidden">
-                            <StatusTag kind={s.status} />
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })
+          grouped.map(([domain, rows]) => (
+            <DomainGroup
+              key={domain}
+              domain={domain}
+              rows={rows}
+              collapsed={collapsed.has(domain)}
+              onToggle={() =>
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(domain)) next.delete(domain);
+                  else next.add(domain);
+                  return next;
+                })
+              }
+              onOpen={onOpen}
+            />
+          ))
         )}
       </div>
     </div>
+  );
+}
+
+function DomainGroup({
+  domain,
+  rows,
+  collapsed,
+  onToggle,
+  onOpen,
+}: {
+  domain: string;
+  rows: SessionMeta[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onOpen: (cli: string, sid: string) => void;
+}) {
+  const t = useT();
+  const short =
+    domain.split(/[\/]/).filter(Boolean).pop() || domain || t("noProjectPath");
+  // Group paging (§2-1): a 200-row domain renders 50 rows + one expander
+  // instead of 200 rows. The expander is per-domain so task-tree parents
+  // stay mounted where the user left them.
+  const PAGE = 50;
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => setShown(PAGE), [domain, rows.length]);
+  const visible = rows.slice(0, shown);
+  return (
+    <div className="mb-4">
+      <button
+        onClick={onToggle}
+        className="mb-1.5 flex w-full items-baseline gap-2 text-left"
+      >
+        <span className="w-3 ah-faint">{collapsed ? "▸" : "▾"}</span>
+        <span className="ah-title font-mono font-medium">{short}</span>
+        <Tooltip title={domain}>
+          <span className="ah-faint font-mono">
+            {rows.length} {t("sessionsN")}
+          </span>
+        </Tooltip>
+      </button>
+      {!collapsed && (
+        <ul className="m-0 list-none space-y-1.5 p-0">
+          {visible.map((s) => (
+            <SessionRow key={`${s.cli}:${s.session_id}`} s={s} onOpen={onOpen} />
+          ))}
+          {rows.length > shown && (
+            <li>
+              <button
+                onClick={() => setShown((n) => n + PAGE)}
+                className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+              >
+                {t("showMore")} ({rows.length - shown})
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SessionRow({
+  s,
+  onOpen,
+  depth = 0,
+}: {
+  s: SessionMeta;
+  onOpen: (cli: string, sid: string) => void;
+  depth?: number;
+}) {
+  const t = useT();
+  const openKey = `ah-open:${s.cli}:${s.session_id}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return sessionStorage.getItem(openKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleOpen = () => {
+    setOpen((v) => {
+      try {
+        if (v) sessionStorage.removeItem(openKey);
+        else sessionStorage.setItem(openKey, "1");
+      } catch {
+        /* ignore */
+      }
+      return !v;
+    });
+  };
+  const kids = s.children ?? [];
+  return (
+    <li className="row-enter">
+      <div className="flex items-stretch gap-1">
+        {depth > 0 && <span className="ah-faint w-4 shrink-0 select-none self-center">└</span>}
+        {kids.length > 0 && (
+          <button
+            onClick={toggleOpen}
+            className="ah-faint w-7 shrink-0 select-none self-center"
+            title={open ? t("collapseSubs") : t("expandSubs")}
+          >
+            {open ? "▾" : `▸${kids.length}`}
+          </button>
+        )}
+        <button
+          onClick={() => onOpen(s.cli, s.session_id)}
+          className="ah-row group flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
+        >
+          <CliBadge cli={s.cli} origin={s.origin} />
+          <span className="min-w-0 flex-1">
+            <span className="ah-title block truncate">{s.title}</span>
+            <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
+              {s.session_id.slice(0, 8)}
+              {s.git?.branch && (
+                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
+              )}
+              {s.cwd && (
+                <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>
+              )}
+              {kids.length > 0 && !open && (
+                <span className="ml-1.5">· {kids.length} {t("subSessions")}</span>
+              )}
+            </span>
+          </span>
+          {s.parent_session_id && depth === 0 && (
+            <Tooltip title={`${t("subSession")} · ${s.parent_session_id}`}>
+              <span className="ah-faint hidden shrink-0 font-mono xl:inline">⤷ {t("subSession")}</span>
+            </Tooltip>
+          )}
+          {s.automation && (
+            <Tooltip title={`${t("automation")} · ${s.automation}`}>
+              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-pill)] px-2 py-px font-mono text-[11px] lg:inline">
+                ⚙ {s.automation.length > 18 ? `${s.automation.slice(0, 17)}…` : s.automation}
+              </span>
+            </Tooltip>
+          )}
+          {s.task_type === "quest-task" && (
+            <Tooltip title={t("questTaskHint")}>
+              <span className="ah-accent hidden shrink-0 font-mono text-[11px] lg:inline">◈ {t("questTask")}</span>
+            </Tooltip>
+          )}
+          {s.task_type && s.task_type !== "quest-task" && s.task_type !== "interactive" && (
+            <Tooltip title={`${t("taskKind")} · ${s.task_type}`}>
+              <span className="ah-faint hidden shrink-0 font-mono text-[11px] lg:inline">⬣ {t(`kind_${s.task_type}` as Parameters<typeof t>[0])}</span>
+            </Tooltip>
+          )}
+          {s.provider && (
+            <Tooltip title={t("provider")}>
+              <span className="ah-faint hidden shrink-0 font-mono lg:inline">
+                {(s.provider as string).slice(0, 18)}
+              </span>
+            </Tooltip>
+          )}
+          <span
+            className="ah-faint w-16 shrink-0 text-right font-mono max-sm:hidden"
+            title={s.updated_at ?? undefined}
+          >
+            {relTime(s.updated_at)}
+          </span>
+          {s.needs_reply === true && (
+            <Tooltip title={t("needsReplyHint")}>
+              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
+            </Tooltip>
+          )}
+          <span className="w-24 shrink-0 text-right max-sm:hidden">
+            <StatusTag kind={s.status} />
+          </span>
+        </button>
+      </div>
+      {open && kids.length > 0 && (
+        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
+          {kids.map((k) => (
+            <SessionRow key={`${k.cli}:${k.session_id}`} s={k} onOpen={onOpen} depth={depth + 1} />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -439,7 +643,12 @@ function HitList({
                   <Highlight text={h.title} query={query} />
                 </span>
                 <span className="ah-faint shrink-0 font-mono">{h.score}</span>
-                <span className="ah-faint w-16 shrink-0 text-right font-mono">{relTime(h.updated_at)}</span>
+                <span
+                  className="ah-faint w-16 shrink-0 text-right font-mono"
+                  title={h.updated_at ?? undefined}
+                >
+                  {relTime(h.updated_at)}
+                </span>
               </span>
               <span className="flex w-full items-center gap-2">
                 {h.matched && (

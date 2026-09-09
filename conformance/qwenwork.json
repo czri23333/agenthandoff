@@ -6,13 +6,14 @@
   "parse": {
     "file_anchors": 0,
     "files": 3,
-    "messages": 2,
-    "nonempty_messages": 2,
+    "messages": 3,
+    "nonempty_messages": 3,
     "proven": true,
     "sampled": false,
     "sessions": 1,
     "shape_only": false,
     "source_messages": 2,
+    "supplement_files": 0,
     "tool_calls": 0,
     "unusable": false
   },

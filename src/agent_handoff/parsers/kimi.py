@@ -96,23 +96,37 @@ class KimiParser(Parser):
 
         messages: list[Message] = []
         files, tools = {}, {}
+        toolset: list[str] = []
         wire = session_dir / "agents" / "main" / "wire.jsonl"
         if wire.exists():
             for row in read_jsonl(wire):
+                if row.get("type") == "tools.set_active_tools":
+                    names = row.get("names") or []
+                    toolset = [str(n) for n in names if isinstance(n, str)]
+                    continue
                 inner = row.get("message") if isinstance(row.get("message"), dict) else row
                 role = inner.get("role") or ""
                 if role not in ("user", "assistant"):
                     continue
                 text, tool_blocks = as_text_blocks(inner.get("content"))
+                raw = text
                 text = self.clean_text(text)
                 if text and not self.is_noise(text):
-                    messages.append(Message(role=role, text=text))
+                    messages.append(self.msg(role, raw, text=text))
                 for tb in tool_blocks:
                     name = str(tb.get("name") or tb.get("tool") or "tool")
                     tools[name] = tools.get(name, 0) + 1
                     ti = tb.get("input") if isinstance(tb.get("input"), dict) else {}
                     for p in self.extract_paths(ti):
                         files[p] = files.get(p, 0) + 1
+
+        # The active toolset is the one honest capability signal a session
+        # with no dialogue rows still carries — record it, and say the
+        # emptiness is measured, not a parse failure.
+        if toolset:
+            meta.notes = [*meta.notes, f"tools:{','.join(toolset[:40])}"]
+        if not messages:
+            meta.notes = [*meta.notes, "empty_wire:no_dialogue_rows"]
 
         return self.build_raw(meta, messages, [], files, tools)
 

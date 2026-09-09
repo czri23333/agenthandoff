@@ -113,9 +113,60 @@ def test_readme_and_matrix_json_are_current():
     assert not problems, "stale artifacts:\n  " + "\n  ".join(problems)
 
 
+def test_measure_ignores_listing_order(monkeypatch):
+    """The measured subset must be chosen by session id, not by enumeration order.
+
+    A fresh checkout stamps every fixture file with the same mtime, so a
+    parser's "newest first" listing is a full tie and falls back to filesystem
+    enumeration order - which differs between APFS, NTFS and ext4. That made the
+    committed evidence (matrix rows, conformance fingerprints) machine-dependent
+    and intermittently red on one CI leg only.
+    """
+    parser = _parser("codex")
+    baseline = fixtures.measure(parser)
+    original = type(parser).list_sessions
+    monkeypatch.setattr(
+        type(parser), "list_sessions", lambda self: list(reversed(original(self)))
+    )
+    assert fixtures.measure(parser) == baseline
+
+
 def test_every_unproven_reader_is_visible():
     """A reader with no fixture is listed as a gap, never silently ✅."""
     gaps = set(ah_matrix.unproven())
     for parser in all_parsers():
         if parser.cli not in PRESENT:
             assert parser.cli in gaps, f"{parser.cli} has no fixture and is not flagged"
+
+
+def test_matrix_ignores_live_stores(monkeypatch, tmp_path):
+    """Committed evidence must say the same thing on every machine.
+
+    Regression: build_rows() used to probe live stores for fixture-less
+    CLIs, so the committed matrix matched no single machine (empty-store
+    verdicts from one author machine leaked into artifacts that failed on
+    store-less CI runners and vice versa).
+    """
+    import os
+
+    def snapshot() -> list[tuple]:
+        return sorted(
+            (r.cli, r.status, r.empty_store, tuple(r.notes)) for r in ah_matrix.build_rows()
+        )
+
+    live = snapshot()
+    empty = tmp_path / "no-stores-here"
+    empty.mkdir()
+    monkeypatch.setenv("AGENTHANDOFF_HOME", str(empty))
+    monkeypatch.setenv("APPDATA", str(empty))
+    if "HOME" in os.environ:
+        monkeypatch.setenv("HOME", str(empty))
+    assert snapshot() == live
+
+
+def test_live_overlay_stays_out_of_committed_rows():
+    """The verified-empty verdict exists, but only the live command may add it."""
+    rows = ah_matrix.build_rows()
+    assert all(not r.empty_store for r in rows)
+    overlaid = ah_matrix.with_live_overlay([r for r in rows])
+    assert all(r.status == ah_matrix.derive_status(r) for r in overlaid)

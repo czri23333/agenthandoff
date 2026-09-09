@@ -16,6 +16,7 @@ in a terminal.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,11 @@ class Evidence:
     nonempty: int = 0
     tools: int = 0
     files_touched: int = 0
+    # File anchors merged from supplement sources (qodersec execution traces,
+    # CLI ai-stats telemetry), counted apart in notes like
+    # `qodersec_anchors:407`. Native transcript anchors = files_touched minus
+    # this, so drift reports stay interpretable when a supplement grows.
+    supplement_files: int = 0
     source_messages: int = 0
     sampled: bool = False
     codec_missing: bool = False
@@ -134,7 +140,12 @@ def measure(parser, limit_sessions: int = 6) -> Evidence:
             return evidence
         metas = scoped.list_sessions()
         evidence.sessions = len(metas)
-        for meta in metas[:limit_sessions]:
+        # Deterministic subset. A fresh checkout stamps every fixture file with
+        # the same mtime, so a parser's newest-first listing is a full tie and
+        # falls back to filesystem enumeration order (APFS, NTFS and ext4 all
+        # differ). Measuring "the first six" by that order made the committed
+        # evidence machine-dependent; session id is stable everywhere.
+        for meta in sorted(metas, key=lambda m: m.session_id)[:limit_sessions]:
             raw = scoped.load(meta.session_id)
             if raw is None:
                 evidence.error = f"{meta.session_id} is listed but does not load"
@@ -143,6 +154,11 @@ def measure(parser, limit_sessions: int = 6) -> Evidence:
             evidence.nonempty += sum(1 for m in raw.messages if m.text.strip())
             evidence.tools += sum(raw.tool_counts.values())
             evidence.files_touched += len(raw.files_touched)
+            for note in raw.meta.notes:
+                for prefix in ("qodersec_anchors:", "aistats_files:"):
+                    if note.startswith(prefix):
+                        with contextlib.suppress(ValueError):
+                            evidence.supplement_files += int(note[len(prefix):])
     except (OSError, ValueError) as exc:
         evidence.error = f"{type(exc).__name__}: {exc}"
     return evidence

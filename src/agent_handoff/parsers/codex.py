@@ -255,6 +255,12 @@ class CodexParser(Parser):
         requests = 0
         saw_completion = False
         model: str | None = None
+        pending_tokens: dict = {}
+        # Non-null only: the store's own quota truth, collaboration state and
+        # the permissions the run was fenced with.
+        rate_limits: dict | None = None
+        world_agents: str | None = None
+        turn_policy: dict[str, str] = {}
 
         for row in rows:
             rtype = row.get("type")
@@ -262,13 +268,22 @@ class CodexParser(Parser):
             ptype = str(payload.get("type") or "")
             when = ts_to_iso(row.get("timestamp"))
 
-            def push(role: str, text: str, at: str | None) -> None:
+            def push(
+                role: str,
+                text: str,
+                at: str | None,
+                raw: str | None = None,
+                model: str | None = None,
+            ) -> None:
                 """Append, dropping the duplicate an event stream always has.
 
                 Codex writes an assistant turn twice — once as ``response_item``
                 (the API-visible message) and once as ``event_msg`` (the UI
                 notification). Taking both doubles every reply, which quietly
                 doubles the weight of assistant prose in any downstream summary.
+                A pending per-request billing (from the preceding token_count
+                event) settles onto the next assistant turn; the product emits
+                usage after the request it measures.
                 """
                 if not text:
                     return
@@ -276,7 +291,16 @@ class CodexParser(Parser):
                 same = bool(last) and last.role == "assistant" and last.text.strip() == text.strip()
                 if role == "assistant" and same:
                     return
-                messages.append(Message(role=role, text=text, at=at))
+                msg = self.msg(role, raw if raw is not None else text, text=text, at=at)
+                if role == "assistant":
+                    if model:
+                        msg.model = model
+                    pending = pending_tokens.get("pending")
+                    if pending:
+                        msg.tokens_in = pending.get("in")
+                        msg.tokens_out = pending.get("out")
+                        pending_tokens.pop("pending", None)
+                messages.append(msg)
 
             if rtype == "event_msg":
                 if ptype == "task_started":
@@ -286,7 +310,7 @@ class CodexParser(Parser):
                     saw_completion = True
                 elif ptype == "agent_message":
                     body = payload.get("message") or payload.get("text")
-                    push("assistant", self._flatten(body), when)
+                    push("assistant", self._flatten(body), when, model=model)
                 elif ptype == "token_count":
                     info = payload.get("info") or {}
                     # Two different quantities live in one record.
@@ -299,18 +323,63 @@ class CodexParser(Parser):
                     recent = info.get("last_token_usage")
                     if isinstance(recent, dict):
                         last_tokens.update({k: v for k, v in recent.items() if isinstance(v, int)})
+                        bill = {
+                            "in": recent.get("input_tokens"),
+                            "out": recent.get("output_tokens"),
+                        }
+                        if isinstance(bill["in"], int) or isinstance(bill["out"], int):
+                            # Settle onto the latest assistant turn that still
+                            # has no billing; otherwise the next one takes it.
+                            settled = False
+                            bill_in = bill["in"] if isinstance(bill["in"], int) else None
+                            bill_out = bill["out"] if isinstance(bill["out"], int) else None
+                            for m in reversed(messages):
+                                if m.role != "assistant":
+                                    continue
+                                if m.tokens_in is None and m.tokens_out is None:
+                                    m.tokens_in = bill_in
+                                    m.tokens_out = bill_out
+                                    if model and not m.model:
+                                        m.model = model
+                                    settled = True
+                                break
+                            if not settled:
+                                pending_tokens["pending"] = bill
                     cumulative = info.get("total_token_usage")
                     if isinstance(cumulative, dict):
                         total_tokens.update(
                             {k: v for k, v in cumulative.items() if isinstance(v, int)}
                         )
                     requests += 1
+                elif ptype in ("rate_limits", "rate_limit"):
+                    # The store's own quota truth. Only non-null claims count:
+                    # a row of nulls is "no signal", not "no quota".
+                    info = payload.get("info") if isinstance(payload.get("info"), dict) else payload
+                    kept = {k: v for k, v in info.items() if v is not None and k != "type"}
+                    if kept:
+                        rate_limits = kept
+                continue
+
+            if rtype == "world_state":
+                # The multi-agent collaboration state the product keeps.
+                state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
+                agents = state.get("agents_md")
+                if isinstance(agents, dict) and agents.get("text"):
+                    world_agents = str(agents["text"])[:2000]
+                elif isinstance(state.get("text"), str) and state["text"].strip():
+                    world_agents = state["text"][:2000]
                 continue
 
             if rtype == "turn_context":
                 candidate = payload.get("model")
                 if isinstance(candidate, str) and candidate:
                     model = candidate
+                # The permissions this turn ran fenced with (what the app shows
+                # for the turn: sandbox/approval/collaboration posture).
+                for key in ("sandbox_policy", "approval_policy", "collaboration_mode"):
+                    val = payload.get(key)
+                    if val and key not in turn_policy:
+                        turn_policy[key] = str(val)[:120]
                 continue
 
             if rtype != "response_item":
@@ -321,13 +390,14 @@ class CodexParser(Parser):
                 if role not in ("user", "assistant"):
                     continue  # developer/system rows are harness injections
                 text, tool_blocks = as_text_blocks(payload.get("content"))
+                raw = text
                 text = self.clean_text(text)
                 if text.startswith(_INJECTED_PREFIXES):
                     for instruction in _instruction_paths(text):
                         files[instruction] += 1
                     continue
                 if text and not self.is_noise(text):
-                    push(str(role), text, when)
+                    push(str(role), text, when, raw, model=model)
                 for tb in tool_blocks:
                     name = str(tb.get("name") or "tool")
                     tools[name] += 1
@@ -336,24 +406,51 @@ class CodexParser(Parser):
                         files[path] += 1
             elif ptype == "agent_message":
                 body = payload.get("text") or payload.get("message")
-                push("assistant", self._flatten(body), when)
+                push("assistant", self._flatten(body), when, model=model)
             elif ptype in ("function_call", "custom_tool_call"):
                 name = str(payload.get("name") or "tool")
                 tools[name] += 1
                 args = payload.get("arguments")
                 if isinstance(args, str):
+                    # Exit code / wall time live on the paired output row; the
+                    # arguments arrive as a JSON string, not a dict.
                     try:
                         args = json.loads(args)
                     except ValueError:
+                        cmd = self._shell_command(args)
+                        if cmd:
+                            for path in _clean_paths(self.extract_paths({"command": cmd})):
+                                files[path] += 1
                         args = {}
                 if isinstance(args, dict):
                     for path in _clean_paths(self.extract_paths(args)):
                         files[path] += 1
+            elif ptype == "function_call_output":
+                # "Exit code: 0\nWall time: 0.2 seconds\nOutput:\n…" — the
+                # product's own execution record. Non-zero exits and slow
+                # walls are failure signal, so keep them as notes.
+                out = str(payload.get("output") or "")
+                head = out[:200]
+                code = re.search(r"Exit code:\s*(-?\d+)", head)
+                wall = re.search(r"Wall time:\s*([\d.]+)\s*seconds", head)
+                if code and code.group(1) != "0":
+                    tools[f"exit:{code.group(1)}"] += 1
+                if wall:
+                    try:
+                        if float(wall.group(1)) >= 60:
+                            tools["slow_call>=60s"] += 1
+                    except ValueError:
+                        pass
 
         if model and not meta.model:
             meta.model = model
         if context_window:
             meta.notes = [*meta.notes, f"context_window:{context_window}"]
+        for key, val in turn_policy.items():
+            meta.notes = [*meta.notes, f"{key}:{val}"]
+        if rate_limits:
+            claims = ", ".join(f"{k}={v}" for k, v in rate_limits.items())
+            meta.notes = [*meta.notes, f"rate_limits:{claims}"]
         interruption = self._end_state(meta, messages, saw_completion, context_window, last_tokens)
         self._usage_cache[meta.session_id] = {
             "last_tokens": last_tokens,
@@ -362,7 +459,24 @@ class CodexParser(Parser):
             "context_window": context_window,
             "model": meta.model,
         }
-        return self.build_raw(meta, messages, [], files, tools, interruption)
+        raw = self.build_raw(meta, messages, [], files, tools, interruption)
+        if world_agents:
+            # Collaboration snapshot the product keeps (AGENTS.md excerpt).
+            # A head fits notes; the full text stays in raw_archive verbatim.
+            head = " ".join(world_agents.split())[:400]
+            raw.meta.notes = [*raw.meta.notes, f"world_state:{head}"]
+        return raw
+
+    @staticmethod
+    def _shell_command(args: str) -> str:
+        """Pull the command out of a JSON-encoded arguments string."""
+        m = re.search(r'"command"\s*:\s*"((?:[^"\\]|\\.)*)"', args)
+        if not m:
+            return ""
+        try:
+            return json.loads(f'"{m.group(1)}"')
+        except ValueError:
+            return m.group(1)
 
     @staticmethod
     def _flatten(content) -> str:
@@ -370,9 +484,7 @@ class CodexParser(Parser):
             return content.strip()
         if isinstance(content, list):
             parts = [
-                str(b.get("text") or b.get("content") or "")
-                for b in content
-                if isinstance(b, dict)
+                str(b.get("text") or b.get("content") or "") for b in content if isinstance(b, dict)
             ]
             return "\n".join(p for p in parts if p).strip()
         return ""

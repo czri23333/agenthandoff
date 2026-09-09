@@ -25,26 +25,30 @@ output, so bundles are diffable and trustworthy.
 ## Supported CLIs
 
 <!-- MATRIX BEGIN: generated, do not edit -->
-This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 8 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
+This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 11 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
 
 | CLI | store | reader | fixtures | proven from fixtures | fingerprint | status |
 |---|---|---|---|---|---|---|
 | `zcode` | SQLite (read-only URI) | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ stable (fixture-proven) |
 | `claude` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `codebuddy` | JSONL dir | ✓ | 25 | 23 ses / 110 msg | ✓ | ✅ stable (fixture-proven) |
+| `codebuddy` | JSONL dir | ✓ | 25 | 15 ses / 343 msg | ✓ | ✅ stable (fixture-proven) |
 | `codebuddy-cn` | JSONL dir | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
-| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 34 msg | ✓ | ✅ stable (fixture-proven) |
-| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 31 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork` | JSONL dir | ✓ | 4 | 2 ses / 4 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork-cn` | JSONL dir | ✓ | 25 | 2 ses / 295 msg | ✓ | ✅ stable (fixture-proven) |
+| `qodercn-ide` | JSONL dir | ✓ | 25 | 3 ses / 262 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
+| `qwenwork` | JSONL dir | ✓ | 3 | 1 ses / 3 msg | ✓ | ✅ stable (fixture-proven) |
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
-| `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 7 msg | ✓ | ✅ stable (fixture-proven) |
+| `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ stable (fixture-proven) |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |
-| `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ stable (fixture-proven) |
+| `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 439 msg | ✓ | ✅ stable (fixture-proven) |
 | `opencode` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `qoderwork-app` | unknown | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
+| `qoderwork-cn-app` | unknown | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ stable (fixture-proven) |
+| `qwenwork-app` | unknown | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `cherrystudio` | unknown | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ stable (fixture-proven) |
 | `trae` | IDE SQLite; read-only only, never written | — | — | — | — | 🔜 roadmap |
 
 Legend: stable = a fixture parses to real dialogue; shape only = the source store held no conversation to sample; unverified = reader exists, no fixture yet; fixture fails = the fixture does not parse; roadmap = no reader; unavailable = needs an optional codec here.

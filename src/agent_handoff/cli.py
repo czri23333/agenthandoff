@@ -704,10 +704,10 @@ def _cmd_search(args: argparse.Namespace) -> int:
 
 
 def _cmd_matrix(args: argparse.Namespace) -> int:
-    """The support matrix, computed from the fixtures in this repo."""
+    """The support matrix: fixture evidence plus this machine's live stores."""
     from agent_handoff import matrix as ah_matrix
 
-    rows = ah_matrix.build_rows()
+    rows = ah_matrix.with_live_overlay(ah_matrix.build_rows())
     if args.json:
         print(
             json.dumps(

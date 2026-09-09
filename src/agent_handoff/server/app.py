@@ -12,8 +12,8 @@ from dataclasses import asdict
 from importlib import resources
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -66,6 +66,19 @@ def _raw_or_404(cli: str, sid: str):
     if raw is None:
         raise HTTPException(404, f"session not found: {sid}")
     return raw
+
+
+def _tool_detail_or_none(cli: str, sid: str) -> list[dict] | None:
+    """Per-call tool ledger when the parser keeps one (zcode tool_usage)."""
+    parser = _parser_or_404(cli)
+    fn = getattr(parser, "tool_detail", None)
+    if fn is None:
+        return None
+    try:
+        rows = fn(sid)
+    except Exception:
+        return None
+    return rows or None
 
 
 # -- read APIs ----------------------------------------------------------------
@@ -173,13 +186,62 @@ def _git_info(cwd: str) -> dict:
 
 
 @app.get("/api/sessions")
-def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = None):
+def sessions(
+    request: Request,
+    cli: str | None = None,
+    cwd: str | None = None,
+    q: str | None = None,
+    since: str | None = None,
+):
+    """Full list, or the delta when `since` (an updated_at ISO string) is given.
+
+    The 30s poll ships `since=<newest updated_at it has>` and gets back only
+    sessions changed after that point (`{changed, snapshot}`); unchanged polls
+    cost bytes, not 344KB. Conditional GET via `If-None-Match` returns 304
+    when the full-list fingerprint is unchanged.
+    """
+    import hashlib
+    import json as _json
+
     cache_key = f"{cli}|{cwd}|{q}"
     now = time.monotonic()
     hit = _sessions_cache.get(cache_key)
     if hit and now - hit[0] < _CACHE_TTL:
-        return hit[1]
+        roots = hit[1]
+    else:
+        roots = _build_session_roots(cli, cwd, q)
+        _sessions_cache[cache_key] = (now, roots)
+    fingerprint = hashlib.sha1(
+        _json.dumps(
+            [(s.get("cli"), s.get("session_id"), s.get("updated_at")) for s in roots]
+        ).encode()
+    ).hexdigest()
+    if request.headers.get("if-none-match") == fingerprint:
+        return Response(status_code=304)
+    if since:
+        changed = [s for s in roots if (s.get("updated_at") or "") > since]
+        # Children nest under parents; a changed child must arrive with its
+        # parent shell so the frontend can mount it without a full reload.
+        wanted: dict[tuple[str, str], dict] = {}
+        for s in changed:
+            wanted[(s["cli"], s["session_id"])] = s
+            parent = s.get("parent_session_id")
+            host = next(
+                (h for h in roots if h["cli"] == s["cli"] and h["session_id"] == parent),
+                None,
+            )
+            if host is not None:
+                wanted[(host["cli"], host["session_id"])] = host
+        payload: dict = {"changed": list(wanted.values()), "snapshot": fingerprint}
+        resp = JSONResponse(payload)
+        resp.headers["ETag"] = fingerprint
+        return resp
+    resp = JSONResponse(roots)
+    resp.headers["ETag"] = fingerprint
+    return resp
 
+
+def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
     out = []
     for p in all_parsers():
         if cli and p.cli != cli:
@@ -201,6 +263,16 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
                     "provider": m.provider,
                     "origin": m.origin,
                     "parent_session_id": m.parent_session_id,
+                    **({"task_type": m.task_type} if m.task_type else {}),
+                    **({"expert_name": m.expert_name} if m.expert_name else {}),
+                    **({"expert_avatar": m.expert_avatar} if m.expert_avatar else {}),
+                    # automation归属: workbuddy automation_runs.runs_json[].
+                    # conversationId 链出的父任务名；Dashboard 按它分组。
+                    **(
+                        {"automation": a.split(":", 1)[1]}
+                        if (a := next((n for n in m.notes if n.startswith("automation:")), None))
+                        else {}
+                    ),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),
@@ -224,8 +296,25 @@ def sessions(cli: str | None = None, cwd: str | None = None, q: str | None = Non
     canonical = {k: max(v, key=v.get) for k, v in merge.items()}
     for s in out:
         s["domain"] = canonical[s["domain"].casefold()]
-    _sessions_cache[cache_key] = (now, out)
-    return out
+    # Parent → children tree, the way the products themselves nest sub-agent
+    # runs under their spawner: a child whose parent id matches a listed
+    # session id moves under it (same cli; cross-cli ids never collide
+    # because stores mint disjoint id spaces — verified on this machine).
+    by_id = {(s["cli"], s["session_id"]): s for s in out}
+    roots: list[dict] = []
+    for s in out:
+        parent = s.get("parent_session_id")
+        host = by_id.get((s["cli"], parent)) if parent else None
+        if host is not None and host is not s:
+            host.setdefault("children", []).append(s)
+        else:
+            roots.append(s)
+    for host in by_id.values():
+        kids = host.get("children")
+        if kids:
+            kids.sort(key=lambda k: k.get("updated_at") or "")
+            host["child_count"] = len(kids)
+    return roots
 
 
 @app.get("/api/sessions/{cli}/{sid}/detail")
@@ -236,20 +325,65 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
     # Transcript with honest compaction markers: long sessions get compacted
     # many times and everything before a marker exists only as a summary.
     # Hiding that would present a truncated history as complete.
-    stream: list[dict] = [
-        {
-            "role": m.role,
-            "text": m.text[:2000],
-            "at": m.at,
-            # per-turn billing: which model answered, what it cost in tokens
-            **({"model": m.model} if m.model else {}),
-            **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
-            **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
-            **({"tokens_reasoning": m.tokens_reasoning} if m.tokens_reasoning is not None else {}),
-            **({"subagent": m.subagent} if m.subagent else {}),
-        }
-        for m in raw.messages
-    ]
+    # Per-turn elapsed time (ms since the previous turn): a verifiable,
+    # store-grounded cost proxy where token billing is absent (qoder family
+    # bills in the cloud; the transcript keeps only timestamps). Computed
+    # from the store's own clocks, never estimated.
+    def _dur_ms(cur: str | None, prev: str | None) -> int | None:
+        try:
+            from datetime import datetime as _dt
+
+            if not cur or not prev:
+                return None
+            c = _dt.fromisoformat(cur.replace("Z", "+00:00"))
+            p = _dt.fromisoformat(prev.replace("Z", "+00:00"))
+            d = (c - p).total_seconds() * 1000
+            return int(d) if 0 <= d < 86400 * 1000 else None
+        except (ValueError, TypeError):
+            return None
+
+    stream: list[dict] = []
+    _prev_at: str | None = None
+    for m in raw.messages:
+        # Parser-measured duration wins (store clocks); otherwise derive
+        # from adjacent timestamps. Both are measurements, never estimates.
+        # A derived 0ms means same-timestamp batch rows (one message fanned
+        # out), not a real measurement — leave it absent.
+        _own = m.dur_ms if isinstance(m.dur_ms, int) and m.dur_ms >= 0 else None
+        _derived = _dur_ms(m.at, _prev_at)
+        _d = _own if _own is not None else (_derived if _derived else None)
+        stream.append(
+            {
+                "role": m.role,
+                # Verbatim: the cockpit must show exactly what the store holds.
+                # Truncation is a display decision and belongs to the frontend
+                # (TranscriptRow expands to the full text on click).
+                "text": m.text,
+                "at": m.at,
+                **({"dur_ms": _d} if _d is not None else {}),
+                # per-turn billing: which model answered, what it cost in tokens
+                **({"model": m.model} if m.model else {}),
+                **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
+                **({"tokens_out": m.tokens_out} if m.tokens_out is not None else {}),
+                **(
+                    {"tokens_reasoning": m.tokens_reasoning}
+                    if m.tokens_reasoning is not None
+                    else {}
+                ),
+                **(
+                    {"tokens_estimated": m.tokens_estimated}
+                    if m.tokens_estimated is not None
+                    else {}
+                ),
+                **({"credits": m.credits} if m.credits is not None else {}),
+                **({"subagent": m.subagent} if m.subagent else {}),
+                # Verbatim source beside the cleaned text (None = cleaning
+                # changed nothing); the cockpit offers a 原文 view off this.
+                **({"raw_text": m.raw_text} if m.raw_text else {}),
+            }
+        )
+        if m.at:
+            _prev_at = m.at
     markers: list[dict] = [
         {
             "role": "compaction",
@@ -261,7 +395,10 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         for n, c in enumerate(raw.compactions, 1)
     ]
     if markers:
-        stream = sorted(stream + markers, key=lambda x: x["at"] or "")[-400:]
+        # Verbatim like the turns: a 1000-turn session must read as 1000
+        # turns, not the last 400. Paging/virtualization is the frontend's
+        # job; the API must not silently drop history.
+        stream = sorted(stream + markers, key=lambda x: x["at"] or "")
 
     # The same measurement `handoff watch` ladder-steps, read-only: the UI must
     # not show a fuller or emptier session than the snapshots claim.
@@ -296,6 +433,7 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         "usage": _parser_or_404(cli).usage(sid),
         "compactions": len(raw.compactions),
         "messages": stream[::-1],
+        "tool_detail": _tool_detail_or_none(cli, sid),
     }
 
 

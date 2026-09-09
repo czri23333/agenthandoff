@@ -191,6 +191,12 @@ class Parser(ABC):
     @staticmethod
     def is_noise(text: str) -> bool:
         head = text.lstrip()[:60]
+        # The product timeline shows data-role="user-context" reminders as
+        # regular user turns (only compact-summary gets special handling
+        # there); dropping the whole turn hides real conversation. Compact
+        # summaries stay noise — they duplicate history the transcript keeps.
+        if head.startswith("<system-reminder"):
+            return 'data-role="user-context"' not in text.lstrip()[:120]
         return any(head.startswith(m) for m in _NOISE_MARKERS)
 
     @staticmethod
@@ -201,6 +207,98 @@ class Parser(ABC):
         for tag in _ENV_WRAPPERS:
             text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", text, flags=re.S)
         return text.strip()
+
+    def msg(self, role: str, raw: str, **kw) -> Message:
+        """Build a turn keeping the verbatim source beside the cleaned text.
+
+        ``raw`` is the turn exactly as the store holds it; ``text`` (in kw)
+        is the cleaned display form. When cleaning changed nothing, raw_text
+        stays None — text IS verbatim. Callers that synthesize prefixes
+        ([思考]/[工具]) pass the assembled string as both.
+        """
+        text = kw.get("text", "")
+        kw["raw_text"] = raw if raw != text else None
+        m = Message(role=role, **kw)
+        # Honest gauge: length-based estimate when the store records nothing.
+        # CJK chars carry ~1 token each; latin ~4 chars per token. Displayed
+        # with ≈, never aggregated as vendor truth.
+        if (
+            m.tokens_in is None
+            and m.tokens_out is None
+            and m.tokens_estimated is None
+            and text.strip()
+        ):
+            cjk = sum(
+                1
+                for ch in text
+                if "\u4e00" <= ch <= "\u9fff"
+                or "\u3400" <= ch <= "\u4dbf"
+                or "\uf900" <= ch <= "\ufaff"
+            )
+            latin = max(0, len(text) - cjk)
+            m.tokens_estimated = cjk + max(1, latin // 4) if text.strip() else None
+        return m
+
+    @staticmethod
+    def apply_cloud_overlay(messages: list, session_id: str) -> int:
+        """Attribute user-exported cloud billing to turns by timestamp.
+
+        Reads ``~/.agenthandoff/cloud-usage/<sid>.json`` (see
+        ``_cloud_overlay`` contract in jsonl_family); each cloud turn fills
+        model/tokens of the nearest unattributed assistant message within
+        ±2s. Returns the number of attributed messages. Absent file = 0,
+        zero impact.
+        """
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+
+            from agent_handoff.locations import home as _home
+        except ImportError:
+            return 0
+        try:
+            path = _home() / ".agenthandoff" / "cloud-usage" / f"{session_id}.json"
+            if not path.is_file():
+                return 0
+            data = _json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            turns = data.get("turns") if isinstance(data, dict) else None
+            if not isinstance(turns, list):
+                return 0
+        except (OSError, ValueError):
+            return 0
+        hit = 0
+        for t in turns:
+            if not isinstance(t, dict):
+                continue
+            try:
+                tat = _dt.fromisoformat(str(t.get("at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            best = None
+            best_d = 2.0
+            for m in messages:
+                if m.role != "assistant" or not m.at:
+                    continue
+                if m.tokens_in is not None or m.tokens_out is not None:
+                    continue
+                try:
+                    mat = _dt.fromisoformat(str(m.at).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                d = abs((mat - tat).total_seconds())
+                if d < best_d:
+                    best, best_d = m, d
+            if best is None:
+                continue
+            if t.get("model"):
+                best.model = best.model or str(t["model"])
+            for k, f in (("tokens_in", "tokens_in"), ("tokens_out", "tokens_out"),
+                         ("reasoning", "tokens_reasoning")):
+                v = t.get(k)
+                if isinstance(v, int) and getattr(best, f) is None:
+                    setattr(best, f, v)
+            hit += 1
+        return hit
 
     @staticmethod
     def build_raw(
@@ -251,7 +349,12 @@ def read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
 
 
 def as_text_blocks(content) -> tuple[str, list[dict]]:
-    """Split an assistant/user content payload into (plain_text, tool_blocks)."""
+    """Split an assistant/user content payload into (plain_text, tool_blocks).
+
+    `thinking` blocks (IDE task transcripts) fold into the text with a
+    [思考] prefix — the product timeline shows them, dropping them loses
+    turns. Same convention as the jsonl_family reasoning rows.
+    """
     if isinstance(content, str):
         return content, []
     texts: list[str] = []
@@ -264,6 +367,10 @@ def as_text_blocks(content) -> tuple[str, list[dict]]:
             t = block.get("text") or block.get("content") or ""
             if isinstance(t, str):
                 texts.append(t)
+        elif btype == "thinking":
+            t = block.get("thinking") or block.get("text") or block.get("content") or ""
+            if isinstance(t, str) and t.strip():
+                texts.append(f"[思考] {t}")
         elif btype in ("tool_use", "toolCall", "tool-call", "tool"):
             tools.append(block)
     return "\n".join(t for t in texts if t), tools

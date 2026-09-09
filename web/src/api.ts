@@ -11,6 +11,12 @@ export interface SessionMeta {
   provider: string | null;
   origin: string | null;
   parent_session_id: string | null;
+  children?: SessionMeta[];
+  child_count?: number;
+  task_type?: string | null; // interactive | subagent_child … (zcode)
+  title_source?: string | null; // generated | first_input … (zcode)
+  permission?: string | null; // yolo | plan … (zcode/opencode)
+  attachments?: string[]; // files the user attached (zcode file parts)
   status: string | null; // proven end-state, null = unknown
   needs_reply?: boolean | null; // ends on an un-answered user message (null = unknown)
   domain: string; // config-driven project grouping (ADR-009)
@@ -19,6 +25,13 @@ export interface SessionMeta {
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
+  /** Provenance notes (supplement counts, linked sessions, tool failures…). */
+  notes?: string[];
+  /** Assistant identity as the product shows it (expert name + avatar URL). */
+  expert_name?: string;
+  expert_avatar?: string;
+  /** Parent task this session belongs to (workbuddy automation name). */
+  automation?: string;
 }
 
 export interface UsageModel {
@@ -43,6 +56,8 @@ export interface TranscriptMessage {
   role: string;
   text: string;
   at: string | null;
+  /** ms since the previous turn (store-clock cost proxy where tokens are absent). */
+  dur_ms?: number;
   /** Which model answered this turn (assistant turns only, when the store records it). */
   model?: string;
   /** Input tokens this turn cost (only when the store records it). */
@@ -51,8 +66,14 @@ export interface TranscriptMessage {
   tokens_out?: number;
   /** Reasoning tokens this turn cost (only when the store records it). */
   tokens_reasoning?: number;
+  /** Vendor billing units this turn cost (workbuddy per-request credits). */
+  credits?: number;
+  /** Length-based estimate, shown with ≈, never vendor truth. */
+  tokens_estimated?: number;
   /** Sub-agent that produced this turn (absent = main conversation). */
   subagent?: string;
+  /** Verbatim source before cleaning (absent = cleaning changed nothing). */
+  raw_text?: string;
 }
 
 export interface StoreInfo {
@@ -94,8 +115,23 @@ export interface Budget {
   last_snapshot: string;
 }
 
+export interface ToolCallRow {
+  tool: string;
+  status: string | null;
+  duration_ms: number | null;
+  exit_code: number | null;
+  output_bytes: number | null;
+  truncated: boolean;
+  retries: number | null;
+  approval: string | null;
+  read_only: boolean;
+  destructive: boolean;
+  error: string | null;
+}
+
 export interface SessionDetail {
   bundle: BundleData;
+  tool_detail?: ToolCallRow[] | null;
   markdown: string;
   brief: string;
   interruption: Interruption;
@@ -222,6 +258,14 @@ export const api = {
   sessions: (filters: { cli?: string; cwd?: string; q?: string } = {}) => {
     const p = new URLSearchParams(Object.entries(filters).filter(([, v]) => v) as [string, string][]);
     return get<SessionMeta[]>(`/api/sessions?${p}`);
+  },
+  /** Incremental poll: sessions changed after `since` (+ snapshot ETag). */
+  sessionsDelta: (since: string, filters: { cli?: string; cwd?: string; q?: string } = {}) => {
+    const p = new URLSearchParams({
+      ...(Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) as Record<string, string>),
+      since,
+    });
+    return get<{ changed: SessionMeta[]; snapshot: string }>(`/api/sessions?${p}`);
   },
   detail: (cli: string, sid: string, lang = "en", maxChars = 12000) =>
     get<SessionDetail>(

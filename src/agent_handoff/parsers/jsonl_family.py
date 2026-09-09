@@ -130,6 +130,7 @@ def _family_of_path(root: Path, path: str) -> str | None:
                 return family
     return None
 
+
 # Cache of absorbed add_user_message fragments per store, keyed by the store
 # root and invalidated by the newest file mtime, so repeated dashboard loads do
 # not rescan every real session just to de-duplicate a handful of turn fragments.
@@ -250,7 +251,7 @@ class JsonlSessionParser(Parser):
                 ai_title = ai_title or str(r["aiTitle"])[:80]
             if r.get("type") == "summary" and r.get("summary"):
                 title = title or str(r["summary"])[:80]
-            role, text, _tools = self._row_content(r)
+            role, text, _raw, _tools = self._row_content(r)
             if role == "user" and text and not self.is_noise(text):
                 started = _iso(r.get("timestamp")) or started
                 if not title:
@@ -338,7 +339,7 @@ class JsonlSessionParser(Parser):
         head = self._group_files(paths, session_id)[0]
         rows = _tail_rows(head, max_bytes=16384)
         for r in reversed(rows):
-            role, text, _tools = self._row_content(r)
+            role, text, _raw, _tools = self._row_content(r)
             if role in ("user", "assistant") and text and not self.is_noise(text):
                 return role == "user"
         return None
@@ -361,9 +362,7 @@ class JsonlSessionParser(Parser):
             if cached:
                 return self._group_files(cached, session_id)
         found = [
-            p
-            for p in self._iter_jsonl()
-            if p.stem == session_id or p.parent.name == session_id
+            p for p in self._iter_jsonl() if p.stem == session_id or p.parent.name == session_id
         ]
         if found:
             return self._group_files(found, session_id)
@@ -371,16 +370,163 @@ class JsonlSessionParser(Parser):
 
     # -- extraction ---------------------------------------------------------
 
-    def _row_content(self, row: dict) -> tuple[str, str, list[dict]]:
-        """Return (role, plain_text, tool_blocks) for one JSONL row."""
+    def _apply_log_models(self, raw: RawSession) -> int:
+        """Attribute serving models + measured durations from session logs.
+
+        Segment rows carry ``{ts, type:model.response.completed, data:{model,
+        input_tokens, output_tokens}}`` (token fields are server-side zero
+        placeholders — never attributed) and ``{ts, type:turn.finished,
+        data:{duration_ms}}`` (server-measured turn cost — attributed as
+        ``dur_ms``, outranking timestamp derivation). Both fill assistant
+        turns lacking them (nearest within ±120s).
+        Test/fixture trees (root outside the real home) never touch disk.
+        Shared by the work-CLI mixin and the IDE parser: both stores keep
+        ``<store>/logs/sessions/<sid>/segments/*.jsonl``.
+        """
+        try:
+            rooted = self.root.resolve().is_relative_to(home().resolve())
+        except (OSError, ValueError):
+            return 0
+        if not rooted or not self.projects_dirname:
+            return 0
+        # Walk up from root to the hidden-store dir.
+        store = None
+        rp = self.root
+        for _ in range(4):
+            if rp.name == self.projects_dirname:
+                store = rp
+                break
+            rp = rp.parent
+        if store is None:
+            return 0
+        logs = store / "logs" / "sessions"
+        if not logs.is_dir():
+            return 0
+        sid = raw.meta.session_id
+        # Task sessions append .session.execution to the transcript name;
+        # the log dir uses the bare task id.
+        sid_bare = sid.split(".session.execution")[0]
+        # Turn-precise attribution: transcript promptId == log turn_id, so
+        # each log turn (model + duration) maps to the transcript turn that
+        # shares its id; timestamp proximity (±120s) is only the fallback.
+        # Build at->promptId from the transcript files backing this session.
+        at_to_prompt: dict[str, str] = {}
+        try:
+            for path in self._resolve_group(sid):
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    pid = row.get("promptId")
+                    ts = row.get("timestamp")
+                    if pid and ts:
+                        iso = ts_to_iso(ts)
+                        if iso:
+                            at_to_prompt.setdefault(iso, str(pid))
+        except (OSError, ValueError):
+            pass
+        events: list[tuple] = []
+        durs: list[tuple] = []
+        turn_ids: dict[str, list[tuple]] = {}
+        seen: set[str] = set()
+        for key in ({sid, sid_bare}):
+            for seg in sorted(logs.rglob(f"{key}/segments/*.jsonl")):
+                if str(seg) in seen:
+                    continue
+                seen.add(str(seg))
+                try:
+                    text = seg.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    data = row.get("data") or {}
+                    tid = str(row.get("turn_id") or "")
+                    if row.get("type") == "model.response.completed":
+                        model = str(data.get("model") or "").strip()
+                        at = _parse_iso_local(row.get("ts"))
+                        if model and at is not None:
+                            events.append((at, model))
+                            if tid:
+                                turn_ids.setdefault(tid, []).append((at, model, None))
+                    elif row.get("type") == "turn.finished":
+                        dur = data.get("duration_ms")
+                        at = _parse_iso_local(row.get("ts"))
+                        if isinstance(dur, int) and dur > 0 and at is not None:
+                            durs.append((at, dur))
+                            if tid:
+                                turn_ids.setdefault(tid, []).append((at, None, dur))
+        hit = 0
+        if events or turn_ids:
+            for m in raw.messages:
+                if m.role != "assistant" or m.model or not m.at:
+                    continue
+                # Exact first: same turn id on both sides.
+                pid = at_to_prompt.get(m.at or "")
+                exact = None
+                if pid:
+                    for _at, model, _ in turn_ids.get(pid, []):
+                        if model:
+                            exact = model
+                            break
+                if exact is not None:
+                    m.model = exact
+                    hit += 1
+                    continue
+                mat = _parse_iso_local(m.at)
+                if mat is None:
+                    continue
+                best = None
+                best_d = 120.0
+                for at, model in events:
+                    d = abs((mat - at).total_seconds())
+                    if d < best_d:
+                        best, best_d = model, d
+                if best is not None:
+                    m.model = best
+                    hit += 1
+        if durs:
+            for m in raw.messages:
+                if m.role != "assistant" or m.dur_ms is not None or not m.at:
+                    continue
+                mat = _parse_iso_local(m.at)
+                if mat is None:
+                    continue
+                best = None
+                best_d = 120.0
+                for at, dur in durs:
+                    d = abs((mat - at).total_seconds())
+                    if d < best_d:
+                        best, best_d = dur, d
+                if best is not None:
+                    m.dur_ms = best
+                    hit += 1
+        return hit
+
+    def _row_content(self, row: dict) -> tuple[str, str, str, list[dict]]:
+        """Return (role, plain_text, raw_text, tool_blocks) for one JSONL row."""
         rtype = row.get("type")
         if rtype not in (None, "message", "user", "assistant"):
-            return "", "", []
+            return "", "", "", []
         inner = row.get("message") if isinstance(row.get("message"), dict) else {}
         role = row.get("role") or inner.get("role") or ""
         content = row.get("content") if row.get("content") is not None else inner.get("content")
         text, tools = as_text_blocks(content)
-        return role, self.clean_text(text), tools
+        return role, self.clean_text(text), text, tools
 
     @staticmethod
     def _row_billing(row: dict) -> tuple[str, dict]:
@@ -436,12 +582,49 @@ class JsonlSessionParser(Parser):
         files: Counter[str] = Counter()
         tools: Counter[str] = Counter()
         todos: list[TodoItem] = []
+        tool_failures: list[str] = []
         cwd = ""
         title = ""
         started = None
         newest_at: str | None = None
         newest_mtime = 0.0
         seen_ids: set[tuple[str, str]] = set()
+        # callId -> claimed tool name, so result rows join back to the call.
+        pending_calls: dict[str, str] = {}
+        # Billing that rides on non-message rows (workbuddy puts usage on
+        # function_call rows, which never become Messages): settled onto the
+        # next assistant turn, same as the codex token_count flow.
+        pending_billing: dict = {}
+        # Exact attribution: usage rows and message rows share
+        # providerData.conversationRequestId — key billing by it so out-of-order
+        # files can't misattribute one request's spend to another.
+        billing_by_req: dict[str, dict] = {}
+        # Session-serving model from runtime-config rows (IDE family); turns
+        # without their own billing inherit it.
+        runtime_model: str = ""
+        # Row-level provider signals that never surface as turns: compacted
+        # summaries, errors, and the agent surface (cli vs IDE).
+        row_errors: list[str] = []
+        compacted_summaries = 0
+        agent_surfaces: set[str] = set()
+        # Session-level pre-scan: does ANY row carry real text? A session of
+        # pure tool_use/tool_result rows is an internal tool loop — its tool
+        # rows stay dropped so load() is honestly empty. Byte-capped.
+        _has_text = False
+        _scanned = 0
+        for _path in paths:
+            if _has_text or _scanned > 1_000_000:
+                break
+            try:
+                _raw = _path.read_bytes()[:200_000] if _path.is_file() else b""
+            except OSError:
+                continue
+            _scanned += len(_raw)
+            for _row in read_jsonl(_path, limit=400):
+                _role, _text, _, _ = self._row_content(_row)
+                if _role in ("user", "assistant") and _text and not self.is_noise(_text):
+                    _has_text = True
+                    break
 
         for path in paths:
             try:
@@ -450,15 +633,124 @@ class JsonlSessionParser(Parser):
                 continue
             sub_label = self._subagent_label(path)
             for row in read_jsonl(path):
-                if row.get("type") == "summary":
+                rtype = row.get("type")
+                if rtype == "summary":
                     continue
                 cwd = cwd or (row.get("cwd") or "")
                 at = _iso(row.get("timestamp"))
                 started = started or at
                 if at and (newest_at is None or at > newest_at):
                     newest_at = at
+                self._collect_row_signals(row, agent_surfaces, row_errors)
+                if rtype == "runtime-config" and isinstance(row.get("model"), str) and row["model"]:
+                    # The IDE records the serving model per session here
+                    # (e.g. qmodel_38max); transcripts carry no per-turn
+                    # billing, so assistant turns inherit this below.
+                    runtime_model = row["model"]
+                if row.get("isCompacted") or row.get("isSummary"):
+                    # A turn the product already replaced with a summary: count
+                    # it, count its text only if there is real prose in it.
+                    compacted_summaries += 1
 
-                role, text, tool_blocks = self._row_content(row)
+                if rtype == "reasoning":
+                    # The model's own thinking. rawContent carries the text;
+                    # content is usually empty.
+                    rtext, rraw = self._reasoning_text(row)
+                    if rtext:
+                        model = self._row_billing(row)[0]
+                        messages.append(
+                            self.msg(
+                                "assistant",
+                                f"[思考] {rraw}",
+                                text=f"[思考] {rtext}",
+                                at=at,
+                                model=model or None,
+                                subagent=sub_label,
+                            )
+                        )
+                    continue
+                if rtype == "function_call":
+                    name = str(row.get("name") or "tool")
+                    call_id = str(row.get("callId") or "")
+                    if call_id:
+                        pending_calls[call_id] = name
+                    tools[name] += 1
+                    args = self._tool_args(row)
+                    for p in self.extract_paths(args):
+                        files[p] += 1
+                    _m, _t = self._row_billing(row)
+                    if _t.get("in") is not None or _t.get("out") is not None:
+                        # usage rows often come in runs (tool-loop tails):
+                        # accumulate, the next assistant turn takes the sum.
+                        acc = pending_billing.get("pending") or {}
+                        for k in ("in", "out", "reasoning", "cache_read"):
+                            v = _t.get(k)
+                            if isinstance(v, int):
+                                acc[k] = acc.get(k, 0) + v
+                        pending_billing["pending"] = acc
+                        # Exact key when present: providerData.conversationRequestId
+                        # is shared by the usage row and its request's turns.
+                        pd = row.get("providerData")
+                        req = pd.get("conversationRequestId") if isinstance(pd, dict) else None
+                        if isinstance(req, str) and req:
+                            prev = billing_by_req.get(req) or {}
+                            for k in ("in", "out", "reasoning", "cache_read"):
+                                v = _t.get(k)
+                                if isinstance(v, int):
+                                    prev[k] = prev.get(k, 0) + v
+                            billing_by_req[req] = prev
+                    continue
+                if rtype == "function_call_result":
+                    name = str(row.get("name") or "")
+                    call_id = str(row.get("callId") or "")
+                    if not name and call_id:
+                        name = pending_calls.get(call_id, "tool")
+                    if name:
+                        status = str(row.get("status") or "")
+                        out = row.get("output")
+                        otext = ""
+                        if isinstance(out, dict):
+                            otext = str(out.get("text") or "")[:300]
+                        elif isinstance(out, str):
+                            otext = out[:300]
+                        if status and status != "completed":
+                            tool_failures.append(f"{name}:{status}")
+                            disp = f"[工具{name} {status}] {self.clean_text(otext)[:300]}"
+                            messages.append(
+                                self.msg(
+                                    "assistant",
+                                    f"[工具{name} {status}] {otext}",
+                                    text=disp,
+                                    at=at,
+                                    subagent=sub_label,
+                                )
+                            )
+                        elif _has_text:
+                            # Successful calls are visible collapsible cards in
+                            # the product timeline — dropping them hides the
+                            # work. One folded line; the full output stays in
+                            # raw_text for the 原文 view.
+                            mark = "✓" if status == "completed" else ""
+                            disp = f"[工具{name} {mark}]".strip()
+                            summary = self.clean_text(otext)[:160]
+                            if summary:
+                                disp += f" {summary}"
+                            messages.append(
+                                self.msg(
+                                    "assistant",
+                                    otext,
+                                    text=disp,
+                                    at=at,
+                                    subagent=sub_label,
+                                )
+                            )
+                    continue
+                if rtype == "file-history-snapshot":
+                    for fp in self._snapshot_files(row):
+                        files[fp] += 1
+                    continue
+
+                role, text, raw_text, tool_blocks = self._row_content(row)
                 if not role:
                     continue
                 for tb in tool_blocks:
@@ -478,17 +770,84 @@ class JsonlSessionParser(Parser):
                                         priority=str(t.get("priority") or ""),
                                     )
                                 )
+                    # IDE task transcripts carry tool calls as their own rows
+                    # (the product timeline shows them as collapsible cards).
+                    # Fold each into a one-line [工具 name] turn — unless the
+                    # WHOLE session has no real text at all, in which case it
+                    # is an internal tool loop that stays honestly empty
+                    # (see test_qoder_tool_loop_hidden_but_loadable).
+                    if isinstance(tb, dict) and tb.get("type") == "tool_use" and _has_text:
+                        arg = ""
+                        if isinstance(tool_input, dict):
+                            for k in ("file_path", "path", "command", "pattern", "query"):
+                                v = tool_input.get(k)
+                                if isinstance(v, str) and v.strip():
+                                    arg = f" {v.strip()[:80]}"
+                                    break
+                        tool_line = f"[工具 {name}]{arg}"
+                        model_tb, _ = self._row_billing(row)
+                        messages.append(
+                            self.msg(
+                                "assistant",
+                                json.dumps(tb, ensure_ascii=False),
+                                text=tool_line,
+                                at=at,
+                                model=model_tb or runtime_model or None,
+                                subagent=sub_label,
+                            )
+                        )
                 if text and not self.is_noise(text):
                     key = (role, text)
                     if key in seen_ids:
                         continue  # the same turn mirrored into a companion file
                     seen_ids.add(key)
-                    if role == "user" and not title:
+                    # System-context reminders are real turns but never
+                    # titles — the product shows the ai-title / first real
+                    # prompt instead.
+                    if (
+                        role == "user"
+                        and not title
+                        and not text.lstrip().startswith("<system-reminder")
+                    ):
                         title = text[:80]
                     model, tokens = self._row_billing(row)
+                    if not model:
+                        model = runtime_model
+                    if (
+                        role == "assistant"
+                        and tokens.get("in") is None
+                        and tokens.get("out") is None
+                    ):
+                        # Exact first: same conversationRequestId as a usage row.
+                        pd = row.get("providerData")
+                        req = pd.get("conversationRequestId") if isinstance(pd, dict) else None
+                        exact = billing_by_req.get(req) if isinstance(req, str) else None
+                        pend = exact or pending_billing.get("pending")
+                        if pend:
+                            # The usage row bills the whole request: the text
+                            # turn takes it, and so do the run-up thinking
+                            # turns of the same request that have none yet.
+                            tokens = {
+                                **tokens,
+                                **{k: v for k, v in pend.items() if tokens.get(k) is None},
+                            }
+                            for m in reversed(messages):
+                                if m.role != "assistant":
+                                    break
+                                if m.tokens_in is None and m.tokens_out is None:
+                                    m.tokens_in = pend.get("in")
+                                    m.tokens_out = pend.get("out")
+                                    reasoning = pend.get("reasoning")
+                                    if reasoning is not None and m.tokens_reasoning is None:
+                                        m.tokens_reasoning = reasoning
+                                elif m.text and not m.text.startswith("[思考]"):
+                                    break
+                            if not exact:
+                                pending_billing.pop("pending", None)
                     messages.append(
-                        Message(
-                            role=role,
+                        self.msg(
+                            role,
+                            raw_text,
                             text=text,
                             at=at,
                             model=model or None,
@@ -502,6 +861,55 @@ class JsonlSessionParser(Parser):
         if len({m.at for m in messages if m.at}) > 1 and all(m.at for m in messages):
             messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
 
+        # Second pass after the chronological sort: thinking turns stranded by
+        # cross-file disorder take the model of the nearest settled turn —
+        # but NEVER its tokens. Cross-turn token inheritance misattributes
+        # one request's spend to another; None stays honest absence.
+        # Only [思考] turns qualify — text turns without billing mean the store
+        # recorded no usage row for that request (honest absence).
+        settled: list = []
+        for m in messages:
+            if m.role == "assistant" and m.model:
+                settled.append(m)
+        if settled:
+            for m in messages:
+                if (
+                    m.role == "assistant"
+                    and m.tokens_in is None
+                    and m.tokens_out is None
+                    and (m.text or "").startswith("[思考]")
+                    and m.at
+                    and not m.model
+                ):
+                    nxt = next((s for s in settled if (s.at or "") >= (m.at or "")), None)
+                    if nxt is None:
+                        continue
+                    m.model = nxt.model
+
+        # Cloud-billing overlay (user-supplied): qoder-family per-turn billing
+        # lives in the cloud; after the user exports it to
+        # ~/.agenthandoff/cloud-usage/<sid>.json it is attributed here by
+        # timestamp (±2s). Absent file = zero impact.
+        self.apply_cloud_overlay(messages, session_id)
+
+        # Session-dominant model backfill: tool-result rows carry no
+        # providerData, but they execute inside this session's calls — label
+        # them with the session's own dominant model so every row shows the
+        # serving model. Tokens stay absent (honest).
+        dom = Counter(m.model for m in messages if m.role == "assistant" and m.model)
+        if dom:
+            top, ntop = dom.most_common(1)[0]
+            if ntop >= 2:
+                for m in messages:
+                    if m.role == "assistant" and not m.model:
+                        m.model = top
+
+        notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
+        if agent_surfaces:
+            notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
+        if compacted_summaries:
+            notes.append(f"compacted_turns:{compacted_summaries}")
+        notes.extend(f"row_error:{e}" for e in row_errors[:5])
         meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,
@@ -511,9 +919,71 @@ class JsonlSessionParser(Parser):
             updated_at=newest_at or _mtime_iso(newest_mtime),
             source_path=str(paths[0]),
             origin=self._origin(),
+            notes=notes,
         )
         return self.build_raw(meta, messages, todos, files, tools)
 
+    @staticmethod
+    def _collect_row_signals(row: dict, surfaces: set[str], errors: list[str]) -> None:
+        """providerData side-channels that never become turns.
+
+        ``agent`` (cli vs IDE) names the product surface; ``error`` records
+        why a turn died (e.g. Interrupted by user); usage doubles
+        (rawUsage + usage) are left to _row_billing.
+        """
+        pd = row.get("providerData")
+        if not isinstance(pd, dict):
+            return
+        agent = pd.get("agent")
+        if isinstance(agent, str) and agent.strip():
+            surfaces.add(agent.strip())
+        err = pd.get("error")
+        if isinstance(err, dict):
+            msg = str(err.get("message") or "").strip()
+            if msg and msg not in errors:
+                errors.append(msg[:160])
+
+    @staticmethod
+    def _reasoning_text(row: dict) -> tuple[str, str]:
+        """The model's thinking: rawContent[].text (content is usually empty).
+
+        Returns (cleaned, raw): the 2000-char cap and cleaning apply to the
+        display form only; the raw form stays whole for the 原文 view.
+        """
+        for key in ("rawContent", "content"):
+            blocks = row.get(key) or []
+            if not isinstance(blocks, list):
+                continue
+            parts = [
+                str(b.get("text") or "")
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") in ("reasoning_text", "text")
+            ]
+            raw = "\n".join(p for p in parts if p).strip()
+            if raw:
+                return raw[:2000], raw
+        return "", ""
+
+    @staticmethod
+    def _tool_args(row: dict) -> dict:
+        """function_call carries input as arguments (dict or JSON string)."""
+        args = row.get("arguments")
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+                return parsed if isinstance(parsed, dict) else {}
+            except ValueError:
+                return {}
+        return row.get("input") if isinstance(row.get("input"), dict) else {}
+
+    @staticmethod
+    def _snapshot_files(row: dict) -> list[str]:
+        """trackedFileBackups maps a path to its backup — keys ARE the paths."""
+        snap = row.get("snapshot") or {}
+        backups = snap.get("trackedFileBackups") or {}
+        return [str(k) for k in backups if isinstance(k, str) and k.strip()]
 
     def usage(self, session_id: str) -> dict | None:
         """Per-model token accounting aggregated from the turns themselves.
@@ -635,7 +1105,35 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             if jt:
                 m.title = jt
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
+        # Pure tool loops (edit-and-resend orphans: zero real user messages)
+        # are not conversations — the product UI never lists them, so neither
+        # do we. Still loadable by id for debugging.
+        metas = [m for m in metas if m.title != _TOOLLOOP_TITLE]
         return metas
+
+    def _job_dirs(self) -> list:
+        """Candidate jobs/ dirs: own store plus the codebuddy shared one.
+
+        WorkBuddy reuses CodeBuddy's job runtime (same shortId dir names,
+        same state.json schema); its own tree has no jobs/ dir. Resolved
+        from the store dirname (not root.parent: tests may aim root at the
+        store itself instead of its projects/ child).
+        """
+        from agent_handoff.locations import home
+
+        dirs = []
+        if self.projects_dirname:
+            # Walk up from root until the hidden-store dir is found.
+            rp = self.root
+            for _ in range(4):
+                if rp.name == self.projects_dirname:
+                    dirs.append(rp / "jobs")
+                    break
+                rp = rp.parent
+        shared = home() / ".codebuddy" / "jobs"
+        if all(shared != d for d in dirs):
+            dirs.append(shared)
+        return [d for d in dirs if d.is_dir()]
 
     def _job_titles(self) -> dict[str, str]:
         """sessionId -> official agent name from ``jobs/*/state.json``.
@@ -644,19 +1142,47 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         highest-priority source, above ai-title rows and first-user fallback.
         """
         out: dict[str, str] = {}
-        jobs_dir = self.root.parent / "jobs"
-        if not jobs_dir.is_dir():
-            return out
-        for state in jobs_dir.glob("*/state.json"):
-            try:
-                d = json.loads(state.read_text(encoding="utf-8", errors="replace"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            sid = d.get("sessionId")
-            name = d.get("name")
-            if sid and name:
-                out[sid] = str(name)[:80]
+        for jobs_dir in self._job_dirs():
+            for state in jobs_dir.glob("*/state.json"):
+                try:
+                    d = json.loads(state.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                sid = d.get("sessionId")
+                name = d.get("name")
+                if sid and name:
+                    out[sid] = str(name)[:80]
         return out
+
+    def _job_states(self) -> dict[str, str]:
+        """sessionId -> live job state from ``jobs/*/state.json``.
+
+        The product UI shows background agents as working/idle; the state
+        field is that same signal. Cached per call site (see peek_status).
+        """
+        out: dict[str, str] = {}
+        for jobs_dir in self._job_dirs():
+            for state in jobs_dir.glob("*/state.json"):
+                try:
+                    d = json.loads(state.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                sid = d.get("sessionId")
+                st = d.get("state")
+                if sid and isinstance(st, str) and st:
+                    out[sid] = st
+        return out
+
+    def peek_status(self, session_id: str) -> str | None:
+        """codebuddy-family job state (working/idle/…) or None.
+
+        One glob over small state.json files — cheap enough for list views,
+        same cost class as _job_titles which list_sessions already pays.
+        """
+        try:
+            return self._job_states().get(session_id)
+        except OSError:
+            return None
 
     def _cb_peek_dir(
         self, sid: str, agent_files: list[Path], scan_files: list[Path] | None = None
@@ -671,7 +1197,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         ai_title = ""
         started = updated = None
         stamp_files: list[Path] = []
-        for path in (scan_files or agent_files):
+        for path in scan_files or agent_files:
             stamp_files.append(path)
             for r in read_jsonl(path, limit=800):
                 cwd = cwd or (r.get("cwd") or "")
@@ -679,7 +1205,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                     ai_title = ai_title or str(r["aiTitle"])[:80]
                 if r.get("type") == "summary" and r.get("summary"):
                     title = title or str(r["summary"])[:80]
-                role, text, _tools = self._row_content(r)
+                role, text, _raw, _tools = self._row_content(r)
                 if role == "user" and text and not self.is_noise(text):
                     if not title:
                         if text.startswith("<conversation_history_summary"):
@@ -735,6 +1261,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                     jt = self._job_titles().get(session_id)
                     if jt:
                         raw.meta.title = jt
+                    self._apply_db_overlay(raw)
                 return raw
 
         # Layout 1: flat file — fall back to the base class resolver.
@@ -743,7 +1270,16 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             jt = self._job_titles().get(session_id)
             if jt:
                 raw.meta.title = jt
+            self._apply_db_overlay(raw)
         return raw
+
+    def _apply_db_overlay(self, raw) -> None:
+        """Copy store-level overlays (kind/expert) onto a loaded session.
+
+        list_sessions() applies _db_kinds/_db_experts; load() builds a fresh
+        meta from the transcript, so re-apply here to keep both views honest.
+        Base implementation is a no-op; WorkbuddyParser overrides it.
+        """
 
     def _find_session_dir(self, session_id: str) -> Path | None:
         """Locate a session dir by name under any project."""
@@ -841,6 +1377,8 @@ class WorkbuddyParser(_CodebuddyHybridParser):
     def list_sessions(self) -> list[SessionMeta]:
         metas = super().list_sessions()  # already carries jsonl ai-title rows
         db = self._db_titles()
+        kinds = self._db_kinds()
+        autos = self._db_automations()
         for m in metas:
             # The AI-generated title written into the transcript is the title
             # the product shows; the db sessions.title (often the raw first
@@ -849,7 +1387,299 @@ class WorkbuddyParser(_CodebuddyHybridParser):
                 t = db.get(m.session_id)
                 if t:
                     m.title = t
+            # Session kind as the product organises it: playground /
+            # background-automation / working-source (working/craft/design/
+            # coding) / plain craft. Drives the cockpit kind badge.
+            k = kinds.get(m.session_id)
+            if k:
+                m.task_type = k
+            # Automation归属: automation_runs.runs_json[].conversationId
+            # links background runs to their automation (tts/LUFS/每日检查…).
+            # Recorded as a note; the server groups by it so no session is
+            # 主-less in the cockpit.
+            a = autos.get(m.session_id)
+            if a:
+                m.notes = [*m.notes, f"automation:{a}"]
+        experts = self._db_experts()
+        for m in metas:
+            ex = experts.get(m.session_id)
+            if ex:
+                m.expert_name, m.expert_avatar = ex
         return metas
+
+    def _apply_db_overlay(self, raw) -> None:
+        # Same overlays list_sessions() applies: kind + expert always win
+        # (store-level facts); the db title only fills gaps so the
+        # transcript's own ai-title / job-title keeps priority.
+        sid = raw.meta.session_id
+        experts = self._db_experts()
+        ex = experts.get(sid)
+        if ex:
+            raw.meta.expert_name, raw.meta.expert_avatar = ex
+        k = self._db_kinds().get(sid)
+        if k:
+            raw.meta.task_type = k
+        if not raw.meta.title or raw.meta.title == sid or len(raw.meta.title) <= 8:
+            t = self._db_titles().get(sid)
+            if t:
+                raw.meta.title = t
+        # Per-request credit attribution: session_usage.credit_json maps
+        # conversationRequestId -> credits (100% key match verified). The
+        # request id rides on providerData but _load_paths drops it, so
+        # re-resolve: credit goes to the first assistant text turn at/after
+        # the request's own timestamp. Tokens stay absent (honest).
+        credits = self._db_credits(sid)
+        if credits:
+            self._attribute_credits(raw, sid, credits)
+
+    def _db_credits(self, session_id: str) -> dict[str, float]:
+        """session request credits from workbuddy.db.session_usage."""
+        try:
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return {}
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                row = conn.execute(
+                    "SELECT credit_json FROM session_usage WHERE session_id=?",
+                    (session_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if not row or not row[0]:
+                return {}
+            data = json.loads(row[0])
+            return {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))}
+        except (OSError, ValueError):
+            return {}
+
+    def _attribute_credits(self, raw, session_id: str, credits: dict[str, float]) -> None:
+        """Attach per-request credits to turns by request timestamp.
+
+        Transcript rows carry providerData.conversationRequestId (= the
+        credit key) plus their own timestamp; match each credit to the
+        earliest assistant text turn at/after its request time. One credit
+        lands on exactly one turn (no splitting, no double count).
+        """
+        try:
+            paths = self._resolve_group(session_id)
+        except (OSError, ValueError):
+            return
+        # request id -> earliest row timestamp
+        req_at: dict[str, object] = {}
+        for path in paths:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                pd = row.get("providerData")
+                if not isinstance(pd, dict):
+                    continue
+                req = pd.get("conversationRequestId")
+                ts = row.get("timestamp")
+                if req and ts and req not in req_at:
+                    at = ts_to_iso(ts)
+                    if at:
+                        req_at[str(req)] = at
+        if not req_at:
+            return
+        for req, amount in credits.items():
+            at = req_at.get(req)
+            if at is None:
+                continue
+            # Prefer the request's text turn (the billable answer); fall
+            # back to the earliest tool row when the request has no text.
+            best = None
+            for m in raw.messages:
+                if m.role != "assistant" or m.credits is not None or not m.at:
+                    continue
+                if m.text.startswith("[思考]") or m.text.startswith("[工具"):
+                    continue
+                if m.at >= at and (best is None or m.at < best.at):
+                    best = m
+            if best is None:
+                for m in raw.messages:
+                    if m.role != "assistant" or m.credits is not None or not m.at:
+                        continue
+                    if m.text.startswith("[思考]"):
+                        continue
+                    if m.at >= at and (best is None or m.at < best.at):
+                        best = m
+            if best is not None:
+                best.credits = amount
+
+    def _db_experts(self) -> dict[str, tuple[str | None, str | None]]:
+        """session_id -> (expert name, avatar URL) from assistant-display.
+
+        ``~/.workbuddy/assistant-display/<sid>.json`` keeps timestamped
+        snapshots; the latest resolved one is what the product shows.
+        Avatar URLs point at the vendor's public CDN (display-only).
+        """
+        try:
+            disp = home() / ".workbuddy" / "assistant-display"
+            if not disp.is_dir():
+                return {}
+            out: dict[str, tuple[str | None, str | None]] = {}
+            for path in disp.glob("*.json"):
+                sid = path.stem
+                try:
+                    d = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, ValueError):
+                    continue
+                snaps = d.get("snapshots") if isinstance(d, dict) else None
+                if not isinstance(snaps, list) or not snaps:
+                    continue
+                last = None
+                for s in snaps:
+                    if not isinstance(s, dict):
+                        continue
+                    ad = s.get("assistantDisplay")
+                    if isinstance(ad, dict) and ad.get("resolution") != "provisional":
+                        last = ad
+                if last is None:
+                    for s in reversed(snaps):
+                        if isinstance(s, dict) and isinstance(s.get("assistantDisplay"), dict):
+                            last = s["assistantDisplay"]
+                            break
+                if not isinstance(last, dict):
+                    continue
+                name = last.get("name") or last.get("profession")
+                avatar = last.get("avatarUrl")
+                out[sid] = (
+                    str(name)[:40] if isinstance(name, str) and name else None,
+                    str(avatar)[:300] if isinstance(avatar, str) and avatar else None,
+                )
+            return out
+        except OSError:
+            return {}
+
+    def _db_kinds(self) -> dict[str, str]:
+        """session_id -> kind from workbuddy.db (read-only).
+
+        Priority: playground > background-automation > source_mode >
+        mode > none. Mirrors how the product separates playground tries,
+        background runs and working modes.
+        """
+        try:
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return {}
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                rows = conn.execute(
+                    "SELECT id, mode, source_mode, is_playground, "
+                    "is_background_automation, deleted_at FROM sessions"
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return {}
+        out: dict[str, str] = {}
+        for sid, mode, source, play, bg, deleted in rows:
+            if deleted or not sid:
+                continue
+            kind = None
+            if str(play) == "1":
+                kind = "playground"
+            elif str(bg) == "1":
+                kind = "background"
+            elif source and str(source).strip():
+                kind = str(source).strip()
+            elif mode and str(mode).strip():
+                kind = str(mode).strip()
+            if kind:
+                out[str(sid)] = kind
+        return out
+
+    def peek_status(self, session_id: str) -> str | None:
+        """workbuddy.db sessions.status (completed/archived/error/…).
+
+        Same cost class as the title lookup; deleted rows report None.
+        """
+        try:
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return None
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                row = conn.execute(
+                    "SELECT status FROM sessions WHERE id=? AND deleted_at IS NULL",
+                    (session_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+        except Exception:
+            return None
+        if not row or not row[0]:
+            return None
+        return str(row[0])
+
+    def _db_automations(self) -> dict[str, str]:
+        """session_id -> automation name from automation_runs (read-only).
+
+        ``runs_json[].conversationId`` is the session id; the automation
+        name (tts / LUFS / 每日检查…) is the parent a background session
+        belongs to. NOTE: ``deleted_at`` carries timestamps on every row
+        (not a live/dead flag), so it must NOT filter — status rides along
+        in the note instead.
+        """
+        try:
+            import json as _json
+            import sqlite3
+
+            db = home() / self.projects_dirname / "workbuddy.db"
+            if not db.is_file():
+                return {}
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                names = {}
+                for aid, name, status in conn.execute(
+                    "SELECT id, name, status FROM automations"
+                ).fetchall():
+                    label = str(name or "").strip()
+                    if status and str(status).strip().upper() != "ACTIVE":
+                        label = f"{label} [{status}]"
+                    if aid and label:
+                        names[str(aid)] = label
+                runs = conn.execute(
+                    "SELECT runs_json, automation_id FROM automation_runs"
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return {}
+        out: dict[str, str] = {}
+        for runs_json, aid in runs:
+            name = names.get(str(aid or ""))
+            if not name:
+                continue
+            try:
+                items = _json.loads(runs_json or "[]")
+            except ValueError:
+                continue
+            if not isinstance(items, list):
+                continue
+            for run in items:
+                if not isinstance(run, dict):
+                    continue
+                cid = run.get("conversationId")
+                if cid and str(cid) not in out:
+                    out[str(cid)] = name
+        return out
 
     def _db_titles(self) -> dict[str, str]:
         """session_id -> display title from workbuddy.db (read-only)."""
@@ -923,6 +1753,62 @@ class _QoderworkSharedMixin:
                     paths.append(p)
         return sorted(set(paths))
 
+    def execution_anchors(self, state_dir: Path | None = None) -> Counter[str]:
+        """Task-execution traces the CLI never lists as sessions.
+
+        ``~/.qodersec/state/*/*.session.execution.json`` records, per task,
+        every path the agent touched (plus l1 lint findings). They carry no
+        dialogue — only file anchors — so they supplement, never create,
+        sessions. Read-only; lock files skipped.
+        """
+        from agent_handoff.locations import home
+
+        out: Counter[str] = Counter()
+        state = state_dir or home() / ".qodersec" / "state"
+        if not state.is_dir():
+            return out
+        for path in state.rglob("*.session.execution.json"):
+            if path.name.endswith(".lock"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            touched = data.get("touched_paths") or []
+            if isinstance(touched, list):
+                for p in touched:
+                    if isinstance(p, str) and p.strip():
+                        out[p] += 1
+        return out
+
+    def load(self, session_id: str) -> RawSession | None:
+        """Transcript first, then the qodersec execution traces as file-only
+        supplements: they carry no dialogue, so they merge into
+        ``files_touched`` (never into messages) and are marked in notes.
+        Fixture/test trees (root outside the real home) never merge: the
+        evidence layer must measure the transcript alone."""
+        raw = super().load(session_id)
+        if raw is None:
+            return None
+        try:
+            rooted = self.root.resolve().is_relative_to(home().resolve())
+        except (OSError, ValueError):
+            rooted = False
+        if not rooted:
+            return raw
+        anchors = self.execution_anchors()
+        if anchors:
+            for p, n in anchors.items():
+                raw.files_touched[p] = raw.files_touched.get(p, 0) + n
+            raw.meta.notes = [*raw.meta.notes, f"qodersec_anchors:{len(anchors)}"]
+        # Session-log model attribution: ~/.<store>/logs/sessions/*/<sid>/
+        # segments/*.jsonl records model.response.completed per LLM call
+        # (model + ts; token fields are zero placeholders server-side).
+        # Attribute the serving model to nearby unattributed turns.
+        n_applied = self._apply_log_models(raw)
+        if n_applied:
+            raw.meta.notes = [*raw.meta.notes, f"log_models:{n_applied}"]
+        return raw
 
 class QoderworkParser(_QoderworkSharedMixin, JsonlSessionParser):
     """Qoderwork — Claude-Code-style JSONL under ~/.qoderwork/projects."""
@@ -1056,17 +1942,23 @@ class QodercnIdeParser(JsonlSessionParser):
         # (browser/automation sub-agent run), not a conversation — the product
         # UI never lists them, so neither do we. Still loadable by id.
         out = [m for m in out if m.title != _TOOLLOOP_TITLE]
+        # Quest-task transcripts live under <project>/transcript/ and surface
+        # in the product's task panel, not its chat list. Tag them so the
+        # cockpit can group/filter like the product does.
+        for m in out:
+            try:
+                is_transcript = Path(m.source_path).parent.name == "transcript"
+            except (ValueError, OSError):
+                continue
+            if is_transcript:
+                m.task_type = "quest-task"
         out.sort(key=lambda m: m.updated_at or "", reverse=True)
         return out
 
     def list_sessions(self) -> list[SessionMeta]:
         """The IDE's own chats only: wake/work families leave the shared store
         for their own CLI entries (still deep-linkable by id via load())."""
-        out = [
-            m
-            for m in self._list_all()
-            if _family_of_path(self.root, m.source_path) is None
-        ]
+        out = [m for m in self._list_all() if _family_of_path(self.root, m.source_path) is None]
         return out
 
     def _within_gap(self, a: SessionMeta, b: SessionMeta) -> bool:
@@ -1091,7 +1983,7 @@ class QodercnIdeParser(JsonlSessionParser):
         """The single user message of an add_user_message fragment file."""
         for path in self._resolve_group(session_id):
             for r in read_jsonl(path, limit=8):
-                role, text, _tools = self._row_content(r)
+                role, text, _raw, _tools = self._row_content(r)
                 if role == "user" and text:
                     return text.strip()
         return ""
@@ -1139,7 +2031,7 @@ class QodercnIdeParser(JsonlSessionParser):
                 for row in read_jsonl(path):
                     if row.get("type") != "user":
                         continue
-                    role, text, _tools = self._row_content(row)
+                    role, text, _raw, _tools = self._row_content(row)
                     if role == "user" and text and text.strip() in wanted:
                         wanted.discard(text.strip())
                         if not wanted:
@@ -1170,7 +2062,209 @@ class QodercnIdeParser(JsonlSessionParser):
         official = self._load_quest_titles().get(session_id) or self._wake_titles().get(session_id)
         if official:
             raw.meta.title = official
+        # The CLI's per-file telemetry (.qoder-cli/ai-stats) names the exact
+        # files this session's agent touched, keyed by the same session id.
+        # File-only supplement like the qodersec anchors — never dialogue.
+        # Fixture trees never merge (evidence must measure the transcript).
+        try:
+            rooted = self.root.resolve().is_relative_to(home().resolve())
+        except (OSError, ValueError):
+            rooted = False
+        if rooted:
+            tele = self.telemetry_anchors(session_id)
+            if tele:
+                for pth, n in tele.items():
+                    raw.files_touched[pth] = raw.files_touched.get(pth, 0) + n
+                raw.meta.notes = [*raw.meta.notes, f"aistats_files:{len(tele)}"]
+            selector = self._model_selector(session_id)
+            if selector:
+                raw.meta.notes = [*raw.meta.notes, f"model_selector:{selector}"]
+                # The IDE's own per-session routing record (e.g. auto):
+                # backfill turns that carry no model so every message shows
+                # the serving routing. Tokens stay absent (honest).
+                for m in raw.messages:
+                    if m.role == "assistant" and not m.model:
+                        m.model = selector
+            if not raw.meta.model:
+                anchor = self._workspace_model_anchor(session_id, raw.meta.cwd)
+                if anchor:
+                    raw.meta.notes = [*raw.meta.notes, f"workspace_model:{anchor}"]
+            n_log = self._apply_log_models(raw)
+            if n_log:
+                raw.meta.notes = [*raw.meta.notes, f"log_models:{n_log}"]
+            task_files = self._task_execution_files(session_id)
+            if task_files:
+                for pth in task_files:
+                    raw.files_touched[pth] += 1
+                raw.meta.notes = [*raw.meta.notes, f"task_files:{len(task_files)}"]
         return raw
+
+    def _task_execution_files(self, session_id: str) -> list[str]:
+        """Exact-match file supplement for quest-task sessions.
+
+        ``~/.qodersec/state/*/<task-id>.session.execution.json`` shares the
+        task id with the transcript filename, so unlike the global
+        execution_anchors merge this attributes touched paths to the exact
+        session. Dialogue untouched; file anchors only.
+        """
+        from agent_handoff.locations import home
+
+        if ".session.execution" not in session_id:
+            return []
+        task_id = session_id.split(".session.execution")[0]
+        state = home() / ".qodersec" / "state"
+        if not state.is_dir():
+            return []
+        out: list[str] = []
+        for path in state.rglob(f"{task_id}.session.execution.json"):
+            if path.name.endswith(".lock"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            touched = data.get("touched_paths") or []
+            if isinstance(touched, list):
+                out.extend(p for p in touched if isinstance(p, str) and p.strip())
+        return out
+
+    def _workspace_model_anchor(self, session_id: str, cwd: str) -> str | None:
+        """Same-workspace, time-overlapping sibling's runtime-config model.
+
+        task-/quest-class sessions carry no model of their own, but a uuid
+        sibling in the same cwd whose time range overlaps this session was
+        served under its runtime-config model. INFERENCE, not measurement:
+        recorded as a note (never Message.model), so the cockpit can show
+        it as a hint while the honest-absence rule stays intact.
+        """
+        try:
+            me_paths = self._resolve_group(session_id)
+        except (OSError, ValueError):
+            return None
+        me_times: list[str] = []
+        me_cwds: set[str] = set()
+        for path in me_paths:
+            for row in read_jsonl(path):
+                ts = _iso(row.get("timestamp"))
+                if ts:
+                    me_times.append(ts)
+                c = row.get("cwd")
+                if isinstance(c, str) and c:
+                    me_cwds.add(c.casefold())
+        if not me_times:
+            return None
+        me_start, me_end = min(me_times), max(me_times)
+        try:
+            metas = super().list_sessions()
+        except (OSError, ValueError):
+            return None
+        # Compare by the cwd recorded INSIDE the rows (project dir names
+        # differ in case/separators across the family's layouts); the meta
+        # cwd may be a project dir instead of the workdir.
+        # Cheap cross-check first: only siblings in the same cwd whose files
+        # we already indexed are candidates; skip a full re-scan otherwise.
+        index = getattr(self, "_index", None) or {}
+        for m in metas:
+            if m.session_id == session_id:
+                continue
+            if m.session_id not in index:
+                continue
+            try:
+                sib_paths = self._resolve_group(m.session_id)
+            except (OSError, ValueError):
+                continue
+            sib_model: str | None = None
+            sib_times: list[str] = []
+            sib_cwds: set[str] = set()
+            for path in sib_paths:
+                for row in read_jsonl(path):
+                    if row.get("type") == "runtime-config" and isinstance(row.get("model"), str):
+                        sib_model = row["model"]
+                    ts = _iso(row.get("timestamp"))
+                    if ts:
+                        sib_times.append(ts)
+                    c = row.get("cwd")
+                    if isinstance(c, str) and c:
+                        sib_cwds.add(c.casefold())
+                    if sib_model and len(sib_times) > 4000:
+                        break
+                if sib_model and sib_times:
+                    break
+            if not sib_model or not sib_times:
+                continue
+            if not (me_cwds & sib_cwds):
+                continue
+            if max(min(sib_times), me_start) <= min(max(sib_times), me_end):
+                return f"{sib_model}（同工作区同时段会话 {m.session_id[:8]}…，推断仅供参考）"
+        return None
+
+    def _model_selector(self, session_id: str) -> str | None:
+        """The IDE's per-session model routing record.
+
+        Each workspace's ``state.vscdb`` keeps
+        ``chat.modelMapSession.<sessionId>`` (e.g. ``auto`` = IDE-routed).
+        It names the routing, not the serving model — recorded as a note,
+        never as Message.model.
+        """
+        import os
+        import sqlite3
+
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return None
+        base = Path(appdata) / self.appdata_product / "User" / "workspaceStorage"
+        if not base.is_dir():
+            return None
+        for db in sorted(base.rglob("state.vscdb")):
+            try:
+                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+                try:
+                    row = con.execute(
+                        "SELECT value FROM ItemTable WHERE key=?",
+                        (f"chat.modelMapSession.{session_id}",),
+                    ).fetchone()
+                finally:
+                    con.close()
+            except (sqlite3.Error, OSError):
+                continue
+            if row and row[0]:
+                return str(row[0])[:60]
+        return None
+
+    def telemetry_anchors(
+        self, session_id: str, stats_dir: Path | None = None
+    ) -> Counter[str]:
+        """Per-session file telemetry from the CLI's own ai-stats store.
+
+        ``~/.qoder-cli/ai-stats/projects/*/*.jsonl`` rows carry ``filePath``
+        plus ``lineDetails[].sessionId`` — the same id space as this parser's
+        sessions. Only the international ``qoder-ide`` variant keeps this
+        store; the CN twin has none (returns empty there).
+        """
+        from agent_handoff.locations import home
+
+        out: Counter[str] = Counter()
+        base = stats_dir or home() / ".qoder-cli" / "ai-stats" / "projects"
+        if not base.is_dir():
+            return out
+        for path in base.rglob("*.jsonl"):
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                fp = row.get("filePath")
+                if not isinstance(fp, str) or not fp.strip():
+                    continue
+                for ld in row.get("lineDetails") or []:
+                    if isinstance(ld, dict) and ld.get("sessionId") == session_id:
+                        out[fp] += 1
+                        break
+        return out
 
     def _wake_titles(self) -> dict[str, str]:
         """qs_* session titles from the QoderWake board projection (read-only)."""

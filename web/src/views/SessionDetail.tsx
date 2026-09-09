@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Segmented, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Segmented, Table, Tag, Tooltip, Typography } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import {
   api,
@@ -38,57 +38,354 @@ function graphemeSlice(text: string, maxGraphemes: number): string {
   return [...text].slice(0, maxGraphemes).join("");
 }
 
-function TranscriptRow({ m, labels }: { m: TranscriptMessage; labels: { user: string; assistant: string; expand: string; collapse: string } }) {
+/** Desktop Task chats link to the CLI session of the same work. */
+function guessLinkedCli(_id: string, fromCli: string): string {
+  if (fromCli === "qoderwork-cn-app") return "qoderwork-cn";
+  if (fromCli === "qoderwork-app") return "qoderwork";
+  if (fromCli === "qwenwork-app") return "qwenwork";
+  return fromCli;
+}
+
+/**
+ * Official-grade transcript row (WorkBuddy asar ground truth):
+ * - user: right-aligned bubble (M3E large radius, sender corner cut)
+ * - assistant: full-width column, transparent — avatar row above the text
+ * - thinking ([思考] prefix): folded by default, tertiary 13px header
+ * - tool call ([工具 name] line): card with header + args
+ * - sub-agent call ([子代理 mark] line): nested block linked to the child
+ * - timestamp: hover-only time tip, never standing text
+ */
+function TranscriptRow({
+  m,
+  labels,
+  expert,
+  cli,
+  onOpenSub,
+}: {
+  m: TranscriptMessage;
+  labels: {
+    user: string;
+    assistant: string;
+    expand: string;
+    collapse: string;
+    raw: string;
+    clean: string;
+    thinking: string;
+    toolCall: string;
+    subagentCall: string;
+    openSubagent: string;
+  };
+  expert?: { name?: string | null; avatar?: string | null };
+  cli: string;
+  onOpenSub?: (cli: string, sid: string) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const long = m.text.length > 500;
+  const [showRaw, setShowRaw] = useState(false);
+  const [thinkOpen, setThinkOpen] = useState(false);
+  const [toolOpen, setToolOpen] = useState(false);
+  const text = m.text || "";
+  const isThinking = text.startsWith("[思考]");
+  const isTool = !isThinking && text.startsWith("[工具");
+  const isSubagent = !isThinking && !isTool && text.startsWith("[子代理");
+  const long = !isThinking && !isTool && !isSubagent && text.length > 500;
   const who = m.role === "user" ? labels.user : labels.assistant;
-  return (
-    <div
-      className="ah-inset cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] leading-[1.65]"
-      onClick={() => long && setOpen(!open)}
-      title={long ? (open ? labels.collapse : labels.expand) : undefined}
+  const shown = showRaw && m.raw_text ? m.raw_text : text;
+  // Elapsed-time cost proxy (store clocks): "3.2s" when the store kept no
+  // token billing for this turn. Verifiable, never estimated.
+  const durTip =
+    typeof m.dur_ms === "number"
+      ? m.dur_ms < 1000
+        ? `${m.dur_ms}ms`
+        : `${(m.dur_ms / 1000).toFixed(1)}s`
+      : "";
+  const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
+  const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
+
+  // Cost chip priority: model+tokens > model+credits > model+≈estimate >
+  // model > tokens > credits > measured duration. Turns without vendor
+  // billing show the honest ≈ estimate — every message carries visible
+  // cost evidence, estimates never pose as vendor truth.
+  const hasTokens = typeof m.tokens_in === "number" || typeof m.tokens_out === "number";
+  const hasCredits = typeof m.credits === "number";
+  const hasEst = typeof m.tokens_estimated === "number";
+  const costTitle = hasTokens
+    ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
+        typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
+      }${hasCredits ? ` · ${m.credits} credits` : ""}`
+    : hasCredits
+      ? ` · ${m.credits} credits${durTip ? ` · +${durTip}` : ""}`
+      : hasEst
+        ? ` · ≈${m.tokens_estimated} tokens (length estimate, not vendor billing)${durTip ? ` · +${durTip}` : ""}`
+        : durTip
+          ? ` · +${durTip} (no token billing in store)`
+          : "";
+  const modelChip = m.model || hasTokens || hasCredits || hasEst ? (
+    <span
+      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+      title={`${m.model ?? "?"}${costTitle}`}
     >
-      <span className="ah-label mr-1.5 select-none" style={{ textTransform: "none" }}>
-        {m.role === "user" ? "👤" : "🤖"} {who}
-      </span>
-      {m.subagent && (
-        <span className="ah-accent mr-1.5 px-1.5 py-px font-mono text-[11px]" title={m.subagent}>
-          ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
+      <span>{m.model ?? "?"}</span>
+      {hasTokens ? (
+        <span className="ah-faint">
+          {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
+          {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
         </span>
-      )}
-      {m.model && (
-        <span
-          className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-          title={`${m.model}${
-            typeof m.tokens_in === "number" || typeof m.tokens_out === "number"
-              ? ` · in=${m.tokens_in ?? "?"} out=${m.tokens_out ?? "?"}${
-                  typeof m.tokens_reasoning === "number" ? ` reason=${m.tokens_reasoning}` : ""
-                }`
-              : ""
-          }`}
-        >
-          <span>{m.model}</span>
-          {(typeof m.tokens_in === "number" || typeof m.tokens_out === "number") && (
-            <span className="ah-faint">
-              {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
-              {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
+      ) : null}
+      {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
+      {!hasTokens && !hasCredits && hasEst ? (
+        <span className="ah-faint">≈{m.tokens_estimated}</span>
+      ) : null}
+      {!hasTokens && !hasCredits && !hasEst && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
+    </span>
+  ) : durTip ? (
+    <span
+      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+      title={`no model/token billing in store · measured +${durTip}`}
+    >
+      <span className="ah-faint">⏱ {durTip}</span>
+    </span>
+  ) : null;
+
+  const rawToggle = m.raw_text ? (
+    <button
+      className="ah-faint mr-1.5 font-mono text-[11px]"
+      title={showRaw ? labels.clean : labels.raw}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowRaw(!showRaw);
+      }}
+    >
+      {showRaw ? labels.clean : labels.raw}
+    </button>
+  ) : null;
+
+  // — user: right-aligned bubble —
+  if (m.role === "user") {
+    return (
+      <div className="ah-user-row">
+        <div className="flex max-w-full flex-col items-end">
+          <div className="ah-user-bubble" dir="auto" title={timeTipFull}>
+            <Markdown text={shown} />
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="ah-time-tip font-mono" title={timeTipFull}>{durTip || timeTip}</span>
+            {rawToggle}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — thinking: folded block —
+  if (isThinking) {
+    const body = text.replace(/^\[思考\]\s?/, "");
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div
+            className="ah-reasoning"
+            onClick={() => setThinkOpen(!thinkOpen)}
+            title={thinkOpen ? labels.collapse : labels.expand}
+          >
+            <span className="mr-1 select-none">{thinkOpen ? "▾" : "▸"}</span>
+            💭 {labels.thinking}
+            {m.model || hasTokens || hasCredits || hasEst || durTip ? (
+              <span
+                className="ah-inset ml-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
+                title={`${m.model ?? "?"}${costTitle}`}
+              >
+                <span>{m.model ?? "?"}</span>
+                {hasTokens ? (
+                  <span className="ah-faint">
+                    {typeof m.tokens_in === "number" ? `${m.tokens_in.toLocaleString()}↓` : ""}
+                    {typeof m.tokens_out === "number" ? ` ${m.tokens_out.toLocaleString()}↑` : ""}
+                  </span>
+                ) : null}
+                {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
+                {!hasTokens && !hasCredits && hasEst ? (
+                  <span className="ah-faint">≈{m.tokens_estimated}</span>
+                ) : null}
+                {!hasTokens && !hasCredits && !hasEst && durTip ? (
+                  <span className="ah-faint">⏱ {durTip}</span>
+                ) : null}
+              </span>
+            ) : null}
+            <span className="ah-time-tip ml-1.5 font-mono" title={timeTipFull}>{durTip || timeTip}</span>
+          </div>
+          {thinkOpen && (
+            <div className="ah-reasoning-content" dir="auto">
+              <Markdown text={showRaw && m.raw_text ? m.raw_text : body} />
+            </div>
+          )}
+          <div className="mt-0.5">{rawToggle}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // — tool call: card —
+  if (isTool) {
+    const nl = text.indexOf("\n");
+    const head = (nl >= 0 ? text.slice(0, nl) : text).replace(/^\[工具\s?/, "").replace(/\]$/, "");
+    const rest = nl >= 0 ? text.slice(nl + 1) : "";
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div className="ah-toolcall">
+            <button className="ah-toolcall-head" onClick={() => setToolOpen(!toolOpen)}>
+              <span className="select-none">{toolOpen ? "▾" : "▸"}</span>
+              <span>🔧 {head || labels.toolCall}</span>
+              {m.subagent ? (
+                <span className="ah-faint font-mono text-[11px]" title={m.subagent}>
+                  ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
+                </span>
+              ) : null}
+              <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>{durTip || timeTip}</span>
+            </button>
+            {toolOpen && rest ? (
+              <div className="ah-toolcall-body">
+                <pre className="ah-toolcall-args" dir="auto">
+                  {rest}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+          <div>
+            {modelChip}
+            {rawToggle}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — sub-agent call: nested block linked to the child session —
+  if (isSubagent) {
+    // "[子代理 ✓] description → child-id"
+    const body = text.replace(/^\[子代理\s?[✓…✗]?\]\s?/, "");
+    const arrow = body.lastIndexOf(" → ");
+    const desc = arrow >= 0 ? body.slice(0, arrow) : body;
+    const childId = arrow >= 0 ? body.slice(arrow + 3).trim() : "";
+    const looksLikeSid = /^[A-Za-z0-9_:-]{6,128}$/.test(childId);
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div className="ah-subagent">
+            <button className="ah-toolcall-head" onClick={() => setToolOpen(!toolOpen)}>
+              <span className="select-none">{toolOpen ? "▾" : "▸"}</span>
+              <span>
+                👥 {labels.subagentCall} · {desc || who}
+              </span>
+              <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>{durTip || timeTip}</span>
+            </button>
+            <div className="ah-toolcall-body flex items-center gap-2">
+              {modelChip}
+              {looksLikeSid && onOpenSub ? (
+                <button
+                  className="ah-accent font-mono text-[12px]"
+                  title={`${labels.openSubagent} · ${childId}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenSub(cli, childId);
+                  }}
+                >
+                  → {childId.slice(0, 8)}…
+                </button>
+              ) : m.subagent ? (
+                <span className="ah-faint font-mono text-[11px]" title={m.subagent}>
+                  ⌥ {m.subagent.slice(0, 24)}
+                </span>
+              ) : null}
+              {rawToggle}
+            </div>
+            {toolOpen && m.raw_text ? (
+              <div className="ah-toolcall-body border-t border-[var(--ah-line)]">
+                <pre className="ah-toolcall-args" dir="auto">
+                  {m.raw_text.slice(0, 2000)}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — assistant: avatar row + transparent body —
+  return (
+    <div className="ah-assistant-row">
+      <div className="ah-assistant-body">
+        <div className="mb-1 flex items-center gap-1.5">
+          <span className="ah-label flex select-none items-center" style={{ textTransform: "none" }}>
+            {expert?.avatar ? (
+              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 rounded-full align-[-2px]" loading="lazy" />
+            ) : (
+              <span className="mr-1">🤖</span>
+            )}
+            {expert?.name || who}
+          </span>
+          {m.subagent && (
+            <span className="ah-accent px-1.5 py-px font-mono text-[11px]" title={m.subagent}>
+              ⌥ {m.subagent.replace(/^agent-/, "").slice(0, 8)}
             </span>
           )}
-        </span>
-      )}
-      {m.role === "assistant" && (open || !long) ? (
-        <div dir="auto" className="tx-user min-w-0 break-words text-[var(--ah-text-1)]">
-          <Markdown text={m.text} />
+          {modelChip}
+          {rawToggle}
+          <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>{durTip || timeTip}</span>
         </div>
-      ) : (
-        <span dir="auto" className="tx-user whitespace-pre-wrap break-words text-[var(--ah-text-1)]">
-          {open || !long ? m.text : `${graphemeSlice(m.text, 500)}…`}
-        </span>
-      )}
-      {long && (
-        <span className="ah-accent ml-1.5 select-none text-[12px]">
-          {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${m.text.length})`}
-        </span>
+        <div
+          dir="auto"
+          className="min-w-0 cursor-pointer break-words text-[var(--ah-text-1)]"
+          onClick={() => long && setOpen(!open)}
+          title={long ? (open ? labels.collapse : labels.expand) : undefined}
+        >
+          {open || !long ? (
+            <Markdown text={shown} />
+          ) : (
+            <span className="tx-user whitespace-pre-wrap break-words">
+              {`${graphemeSlice(shown, 500)}…`}
+            </span>
+          )}
+        </div>
+        {long && (
+          <span className="ah-accent ml-1.5 select-none text-[12px]">
+            {open ? `▲ ${labels.collapse}` : `▼ ${labels.expand} (${shown.length})`}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Paginated transcript: huge task sessions (4000+ turns) would freeze the
+ * tab if every row mounted at once. Latest first page, older pages on demand
+ * — the product loads history the same way. */
+function TranscriptList({
+  messages,
+  page,
+  moreLabel,
+  row,
+}: {
+  messages: TranscriptMessage[];
+  page: number;
+  moreLabel: string;
+  row: (m: TranscriptMessage, i: number) => React.ReactNode;
+}) {
+  // messages arrive newest-first; show the newest page, prepend older ones.
+  const [pages, setPages] = useState(1);
+  useEffect(() => setPages(1), [messages.length]);
+  const shown = messages.slice(0, pages * page);
+  const rest = messages.length - shown.length;
+  return (
+    <div className="max-h-[420px] overflow-y-auto pr-1">
+      <ul className="m-0 list-none space-y-1.5 p-0">{shown.map((m, i) => row(m, i))}</ul>
+      {rest > 0 && (
+        <button
+          onClick={() => setPages((n) => n + 1)}
+          className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+        >
+          {moreLabel} ({rest})
+        </button>
       )}
     </div>
   );
@@ -98,10 +395,12 @@ export default function SessionDetail({
   cli,
   sid,
   onBack,
+  onOpen,
 }: {
   cli: string;
   sid: string;
   onBack: () => void;
+  onOpen?: (cli: string, sid: string) => void;
 }) {
   const t = useT();
   const charts: ChartLabels = {
@@ -166,8 +465,11 @@ export default function SessionDetail({
 
   if (err)
     return (
-      <div className="p-5">
+      <div className="space-y-3 p-5">
         <Alert type="error" showIcon message={t("loading")} description={err} />
+        <Button size="small" onClick={onBack}>
+          ← {t("back")}
+        </Button>
       </div>
     );
   if (!data)
@@ -371,35 +673,66 @@ export default function SessionDetail({
             {data.messages.length === 0 ? (
               <Typography.Text className="ah-meta italic">{t("noMessages")}</Typography.Text>
             ) : (
-              <div className="max-h-[420px] overflow-y-auto pr-1">
-                <ul className="m-0 list-none space-y-1.5 p-0">
-                  {data.messages.map((m, i) =>
-                    m.role === "compaction" ? (
-                      <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
-                        <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
-                        <span className="ah-meta">{m.text}</span>
-                      </li>
-                    ) : (
-                      <li key={i}>
-                        <TranscriptRow
-                          m={m}
-                          labels={{
-                            user: t("user"),
-                            assistant: t("assistant"),
-                            expand: t("expand"),
-                            collapse: t("collapse"),
-                          }}
-                        />
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </div>
+              <TranscriptList
+                messages={data.messages}
+                page={200}
+                moreLabel={t("showMore")}
+                row={(m, i) =>
+                  m.role === "compaction" ? (
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
+                      <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
+                      <span className="ah-meta">{m.text}</span>
+                    </li>
+                  ) : (
+                    <li key={i}>
+                      <TranscriptRow
+                        m={m}
+                        expert={{ name: meta.expert_name, avatar: meta.expert_avatar }}
+                        cli={cli}
+                        onOpenSub={onOpen}
+                        labels={{
+                          user: t("user"),
+                          assistant: t("assistant"),
+                          expand: t("expand"),
+                          collapse: t("collapse"),
+                          raw: t("viewRaw"),
+                          clean: t("viewClean"),
+                          thinking: t("thinking"),
+                          toolCall: t("toolCall"),
+                          subagentCall: t("subagentCall"),
+                          openSubagent: t("openSubagent"),
+                        }}
+                      />
+                    </li>
+                  )
+                }
+              />
             )}
           </SectionCard>
 
           <div className="grid grid-cols-2 gap-3">
-            <SectionCard title={t("filesTouched")}>
+            <SectionCard
+              title={t("filesTouched")}
+              extra={
+                meta.attachments?.length ? (
+                  <Tooltip title={t("attachmentsHint")}>
+                    <span className="ah-label">📎 {meta.attachments.length}</span>
+                  </Tooltip>
+                ) : undefined
+              }
+            >
+              {meta.attachments?.length ? (
+                <ul className="m-0 mb-2 list-none space-y-1 border-b border-[var(--ah-line)] p-0 pb-2 font-mono text-[12px]">
+                  {meta.attachments.map((a) => (
+                    <li key={a} className="flex items-baseline gap-2">
+                      <span title={t("attachment")}>📎</span>
+                      <span className="min-w-0 flex-1 truncate text-[var(--ah-text-1)]" title={a}>
+                        {a}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {b.files_touched.length === 0 ? (
                 <Typography.Text className="ah-meta italic">{t("noRecord")}</Typography.Text>
               ) : (
@@ -421,7 +754,16 @@ export default function SessionDetail({
           </div>
 
           {b.tool_summary.length > 0 && (
-            <SectionCard title={t("calls")}>
+            <SectionCard
+              title={t("calls")}
+              extra={
+                data.tool_detail?.length ? (
+                  <span className="ah-faint font-mono text-[12px]">
+                    {data.tool_detail.length} {t("callRows")}
+                  </span>
+                ) : undefined
+              }
+            >
               <div className="flex flex-wrap gap-1.5">
                 {b.tool_summary.map((tl) => (
                   <span key={tl.tool} className="ah-inset px-2 py-0.5 font-mono text-[12px]">
@@ -429,6 +771,68 @@ export default function SessionDetail({
                   </span>
                 ))}
               </div>
+              {data.tool_detail?.length ? (
+                <Table
+                  size="small"
+                  className="mt-2"
+                  pagination={{ pageSize: 8, size: "small", showSizeChanger: false }}
+                  rowKey={(_, i) => String(i)}
+                  dataSource={data.tool_detail}
+                  columns={[
+                    { title: t("tool"), dataIndex: "tool", ellipsis: true },
+                    {
+                      title: t("status"),
+                      dataIndex: "status",
+                      width: 90,
+                      render: (v: string | null, r) =>
+                        r.error ? (
+                          <Tooltip title={r.error}>
+                            <Tag color="red" className="mr-0!">
+                              {v ?? "error"}
+                            </Tag>
+                          </Tooltip>
+                        ) : (
+                          <Tag color={v === "completed" ? "green" : undefined} className="mr-0!">
+                            {v ?? "—"}
+                          </Tag>
+                        ),
+                    },
+                    {
+                      title: "ms",
+                      dataIndex: "duration_ms",
+                      align: "right" as const,
+                      width: 70,
+                      render: (v: number | null) => (v != null ? v.toLocaleString() : "—"),
+                    },
+                    {
+                      title: "exit",
+                      dataIndex: "exit_code",
+                      align: "right" as const,
+                      width: 60,
+                      render: (v: number | null) =>
+                        v == null || v === 0 ? (
+                          <span className="ah-faint">{v ?? "—"}</span>
+                        ) : (
+                          <Tag color="red" className="mr-0!">
+                            {v}
+                          </Tag>
+                        ),
+                    },
+                    {
+                      title: "out",
+                      dataIndex: "output_bytes",
+                      align: "right" as const,
+                      width: 80,
+                      render: (v: number | null, r) => (
+                        <span>
+                          {v != null ? formatNum(v) : "—"}
+                          {r.truncated ? <span className="ah-warn"> ✂</span> : null}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              ) : null}
             </SectionCard>
           )}
         </div>
@@ -526,7 +930,13 @@ export default function SessionDetail({
                 <span className="font-mono text-[12px] break-all">{meta.cwd}</span>
               </Descriptions.Item>
               <Descriptions.Item label={t("model")}>
-                <span className="font-mono text-[12px]">{meta.model ?? "—"}</span>
+                {meta.model ? (
+                  <span className="font-mono text-[12px]">{meta.model}</span>
+                ) : (
+                  <Tooltip title={t("noModelHint")}>
+                    <span className="ah-faint font-mono text-[12px]">{t("noModel")}</span>
+                  </Tooltip>
+                )}
               </Descriptions.Item>
               <Descriptions.Item label={t("provider")}>
                 <span className="font-mono text-[12px]">{meta.provider ?? "—"}</span>
@@ -536,9 +946,50 @@ export default function SessionDetail({
                   <span className="font-mono text-[12px]">{meta.origin}</span>
                 </Descriptions.Item>
               )}
+              {meta.task_type && (
+                <Descriptions.Item label={t("taskKind")}>
+                  <span className="font-mono text-[12px]">{meta.task_type}</span>
+                </Descriptions.Item>
+              )}
+              {meta.title_source && (
+                <Descriptions.Item label={t("titleSource")}>
+                  <Tooltip title={t("titleSourceHint")}>
+                    <span className="font-mono text-[12px]">{meta.title_source}</span>
+                  </Tooltip>
+                </Descriptions.Item>
+              )}
+              {meta.permission && (
+                <Descriptions.Item label={t("permission")}>
+                  <Tag color={meta.permission === "yolo" ? "red" : "blue"} className="mr-0 font-mono!">
+                    {meta.permission}
+                  </Tag>
+                </Descriptions.Item>
+              )}
               {meta.parent_session_id && (
                 <Descriptions.Item label={t("subSession")}>
                   <span className="font-mono text-[12px] break-all">{meta.parent_session_id}</span>
+                </Descriptions.Item>
+              )}
+              {meta.notes?.some((n) => n.startsWith("linked_cli_sessions:")) && (
+                <Descriptions.Item label={t("linkedSessions")}>
+                  <span className="flex flex-wrap gap-1">
+                    {(meta.notes.find((n) => n.startsWith("linked_cli_sessions:")) ?? "")
+                      .replace("linked_cli_sessions:", "")
+                      .split(",")
+                      .filter(Boolean)
+                      .map((id) => (
+                        <Button
+                          key={id}
+                          size="small"
+                          type="link"
+                          className="font-mono! text-[12px]"
+                          onClick={() => onOpen?.(guessLinkedCli(id, meta.cli), id)}
+                          title={t("linkedSessionsHint")}
+                        >
+                          {id.slice(0, 8)}
+                        </Button>
+                      ))}
+                  </span>
                 </Descriptions.Item>
               )}
               {meta.tokens_in != null && (

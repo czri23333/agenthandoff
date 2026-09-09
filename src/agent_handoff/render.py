@@ -35,7 +35,11 @@ model: {model}
 provider: {provider}
 origin: {origin}
 parent_session_id: {parent_session_id}
+task_type: {task_type}
+title_source: {title_source}
+permission: {permission}
 meta_notes: {meta_notes}
+attachments: {attachments}
 tokens_in: {tokens_in}
 tokens_out: {tokens_out}
 source_path: "{source_path}"
@@ -152,7 +156,11 @@ def render_markdown(b: HandoffBundle) -> str:
         provider=_yaml_str(b.meta.provider),
         origin=_yaml_str(b.meta.origin),
         parent_session_id=_yaml_str(b.meta.parent_session_id),
+        task_type=_yaml_str(b.meta.task_type),
+        title_source=_yaml_str(b.meta.title_source),
+        permission=_yaml_str(b.meta.permission),
         meta_notes=_yaml_str("; ".join(b.meta.notes) or None),
+        attachments=_yaml_str("; ".join(b.meta.attachments) or None),
         tokens_in=b.meta.tokens_in if b.meta.tokens_in is not None else "null",
         tokens_out=b.meta.tokens_out if b.meta.tokens_out is not None else "null",
         source_path=b.meta.source_path,
@@ -315,7 +323,15 @@ def parse_bundle_markdown(text: str) -> HandoffBundle:
         provider=meta_raw.get("provider"),
         origin=meta_raw.get("origin"),
         parent_session_id=meta_raw.get("parent_session_id"),
+        task_type=meta_raw.get("task_type"),
+        title_source=meta_raw.get("title_source"),
+        permission=meta_raw.get("permission"),
         notes=[s.strip() for s in str(meta_raw.get("meta_notes") or "").split(";") if s.strip()],
+        attachments=[
+            s.strip()
+            for s in str(meta_raw.get("attachments") or "").split(";")
+            if s.strip()
+        ],
     )
 
     files: list[tuple[str, int]] = []
@@ -379,6 +395,10 @@ def load_bundle(path: str) -> HandoffBundle:
             origin=m.get("origin"),
             parent_session_id=m.get("parent_session_id"),
             notes=list(m.get("notes", [])),
+            task_type=m.get("task_type"),
+            title_source=m.get("title_source"),
+            permission=m.get("permission"),
+            attachments=list(m.get("attachments", [])),
         )
         state = d.get("state", {})
         it_raw = d.get("interruption", {})
