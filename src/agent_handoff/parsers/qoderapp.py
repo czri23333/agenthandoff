@@ -239,15 +239,15 @@ class _QoderAppSharedMixin:
                         text = self.clean_text(praw)
                         if text and not self.is_noise(text):
                             messages.append(
-                            self.msg(
-                                "assistant",
-                                f"[思考] {praw}",
-                                text=f"[思考] {text}",
-                                at=at,
-                                model=chat_model,
-                                dur_ms=row_dur,
+                                self.msg(
+                                    "assistant",
+                                    f"[思考] {praw}",
+                                    text=f"[思考] {text}",
+                                    at=at,
+                                    model=chat_model,
+                                    dur_ms=row_dur,
+                                )
                             )
-                        )
                     else:
                         tools[name] += 1
                         for p in self.extract_paths(part.get("input") or {}):
