@@ -232,7 +232,9 @@ class DshParser(Parser):
                 )
                 text = self.clean_text(praw)
                 if text and not self.is_noise(text):
-                    messages.append(self.msg("user", praw, text=text, at=ts_to_iso(row.get("time"))))
+                    messages.append(
+                        self.msg("user", praw, text=text, at=ts_to_iso(row.get("time")))
+                    )
             elif t == "subagent/descriptor":
                 data = row.get("data") or {}
                 agent_label = str(data.get("label") or "") or agent_label
@@ -307,13 +309,19 @@ class DshParser(Parser):
                         praw = b.get("text") or ""
                         text = self.clean_text(praw)
                         if text:
-                            turns_text.setdefault(turn, []).append((ts_to_iso(row.get("time")), text, praw))
+                            turns_text.setdefault(turn, []).append(
+                                (ts_to_iso(row.get("time")), text, praw)
+                            )
                             turns_seen_index[turn, len(turns_text[turn])] = True
             elif t == "assistant/chunk":
                 data = row.get("data") or {}
                 chunk = data.get("chunk") or {}
                 turn = data.get("turn")
-                if turn is not None and str(turn) in has_finished and (chunk.get("type") or "") != "usage":
+                if (
+                    turn is not None
+                    and str(turn) in has_finished
+                    and (chunk.get("type") or "") != "usage"
+                ):
                     continue  # finished row already covers this turn's content
                 ctype = chunk.get("type")
                 if ctype == "usage":
@@ -323,7 +331,9 @@ class DshParser(Parser):
                     praw = chunk.get("text") or chunk.get("delta") or ""
                     text = self.clean_text(praw)
                     if text:
-                        turns_text.setdefault(turn, []).append((ts_to_iso(row.get("time")), text, praw))
+                        turns_text.setdefault(turn, []).append(
+                            (ts_to_iso(row.get("time")), text, praw)
+                        )
                         turns_seen_index[turn, chunk.get("index")] = True
                 elif ctype == "reasoning-delta":
                     praw = chunk.get("text") or ""
@@ -337,8 +347,12 @@ class DshParser(Parser):
                         praw = block.get("text") or ""
                         text = self.clean_text(praw)
                         if text:
-                            turns_text.setdefault(turn, []).append((ts_to_iso(row.get("time")), text, praw))
-                    elif btype == "reasoning" and not turns_seen_index.get((turn, chunk.get("index"))):
+                            turns_text.setdefault(turn, []).append(
+                                (ts_to_iso(row.get("time")), text, praw)
+                            )
+                    elif btype == "reasoning" and not turns_seen_index.get(
+                        (turn, chunk.get("index"))
+                    ):
                         praw = block.get("text") or ""
                         text = self.clean_text(praw)
                         if text:
@@ -372,7 +386,8 @@ class DshParser(Parser):
             _usage2.setdefault(_tkey(t), v)
         turns_usage = _usage2
         has_finished = {str(t) for t in has_finished}
-        for turn in sorted(set(list(turns_text) + list(turns_reason) + list(turns_tools)), key=lambda k: (k is None, k)):
+        live_turns = set(list(turns_text) + list(turns_reason) + list(turns_tools))
+        for turn in sorted(live_turns, key=lambda k: (k is None, k)):
             parts = turns_text.get(turn, [])
             at = next((a for a, _, _ in parts if a), None)
             u = turns_usage.get(turn) or {}
@@ -474,8 +489,6 @@ class DshParser(Parser):
         if path is None:
             return None
         import json
-
-        from collections import Counter
 
         seen: dict = {}
         model: str | None = None

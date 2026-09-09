@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from agent_handoff.model import RawSession, SessionMeta
 from agent_handoff.parsers.base import Parser
-from agent_handoff.parsers.codex import CodexParser
 from agent_handoff.parsers.cherrystudio import CherryStudioParser
+from agent_handoff.parsers.codex import CodexParser
 from agent_handoff.parsers.dsh import DshParser
 from agent_handoff.parsers.jsonl_family import (
     ClaudeCodeParser,

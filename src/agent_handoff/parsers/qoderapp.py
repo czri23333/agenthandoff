@@ -170,7 +170,8 @@ class _QoderAppSharedMixin:
                 snap = {}
             if isinstance(snap, dict) and snap.get("percentage") is not None and quota_note is None:
                 quota_note = (
-                    f"context_fill:{float(snap.get('percentage', 0)):.1%}@{snap.get('model') or chat_model or '?'}"
+                    f"context_fill:{float(snap.get('percentage', 0)):.1%}"
+                    f"@{snap.get('model') or chat_model or '?'}"
                 )
 
         meta = SessionMeta(
@@ -216,7 +217,9 @@ class _QoderAppSharedMixin:
                 praw = row["searchable_text"]
                 text = self.clean_text(praw)
                 if text and not self.is_noise(text):
-                    messages.append(self.msg(role, praw, text=text, at=at, model=chat_model, dur_ms=row_dur))
+                    messages.append(
+                        self.msg(role, praw, text=text, at=at, model=chat_model, dur_ms=row_dur)
+                    )
                 continue
             for part in parts:
                 if not isinstance(part, dict):
@@ -226,15 +229,25 @@ class _QoderAppSharedMixin:
                     praw = str(part.get("text") or "")
                     text = self.clean_text(praw)
                     if text and not self.is_noise(text):
-                        messages.append(self.msg(role, praw, text=text, at=at, model=chat_model, dur_ms=row_dur))
+                        messages.append(
+                            self.msg(role, praw, text=text, at=at, model=chat_model, dur_ms=row_dur)
+                        )
                 elif ptype.startswith("tool-"):
                     name = str(part.get("toolName") or ptype[5:] or "tool")
                     if name == "Thinking":
                         praw = str((part.get("input") or {}).get("text") or "")
                         text = self.clean_text(praw)
                         if text and not self.is_noise(text):
-                            messages.append(self.msg("assistant", f"[思考] {praw}",
-                                                     text=f"[思考] {text}", at=at, model=chat_model, dur_ms=row_dur))
+                            messages.append(
+                                self.msg(
+                                    "assistant",
+                                    f"[思考] {praw}",
+                                    text=f"[思考] {text}",
+                                    at=at,
+                                    model=chat_model,
+                                    dur_ms=row_dur,
+                                )
+                            )
                     else:
                         tools[name] += 1
                         for p in self.extract_paths(part.get("input") or {}):
@@ -243,8 +256,16 @@ class _QoderAppSharedMixin:
                     praw = str(part.get("text") or "")
                     text = self.clean_text(praw)
                     if text:
-                        messages.append(self.msg("assistant", f"[工具error] {praw}",
-                                                 text=f"[工具error] {text[:500]}", at=at, model=chat_model, dur_ms=row_dur))
+                        messages.append(
+                            self.msg(
+                                "assistant",
+                                f"[工具error] {praw}",
+                                text=f"[工具error] {text[:500]}",
+                                at=at,
+                                model=chat_model,
+                                dur_ms=row_dur,
+                            )
+                        )
         if linked:
             meta.notes = [*meta.notes, f"linked_cli_sessions:{','.join(linked[:8])}"]
         if quota_note:
