@@ -140,7 +140,12 @@ def measure(parser, limit_sessions: int = 6) -> Evidence:
             return evidence
         metas = scoped.list_sessions()
         evidence.sessions = len(metas)
-        for meta in metas[:limit_sessions]:
+        # Deterministic subset. A fresh checkout stamps every fixture file with
+        # the same mtime, so a parser's newest-first listing is a full tie and
+        # falls back to filesystem enumeration order (APFS, NTFS and ext4 all
+        # differ). Measuring "the first six" by that order made the committed
+        # evidence machine-dependent; session id is stable everywhere.
+        for meta in sorted(metas, key=lambda m: m.session_id)[:limit_sessions]:
             raw = scoped.load(meta.session_id)
             if raw is None:
                 evidence.error = f"{meta.session_id} is listed but does not load"
