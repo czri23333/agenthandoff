@@ -224,7 +224,13 @@ def diff(baseline: dict, current: dict, parse_comparable: bool = True) -> dict[s
         changed,
     )
     base_parse, now_parse = baseline.get("parse", {}), current.get("parse", {})
-    for field in ("sessions", "nonempty_messages", "tool_calls", "file_anchors", "supplement_files"):
+    for field in (
+        "sessions",
+        "nonempty_messages",
+        "tool_calls",
+        "file_anchors",
+        "supplement_files",
+    ):
         if not parse_comparable:
             break
         before, after = base_parse.get(field, 0), now_parse.get(field, 0)

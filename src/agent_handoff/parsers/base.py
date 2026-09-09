@@ -222,8 +222,19 @@ class Parser(ABC):
         # Honest gauge: length-based estimate when the store records nothing.
         # CJK chars carry ~1 token each; latin ~4 chars per token. Displayed
         # with ≈, never aggregated as vendor truth.
-        if m.tokens_in is None and m.tokens_out is None and m.tokens_estimated is None and text.strip():
-            cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff" or "\u3400" <= ch <= "\u4dbf" or "\uf900" <= ch <= "\ufaff")
+        if (
+            m.tokens_in is None
+            and m.tokens_out is None
+            and m.tokens_estimated is None
+            and text.strip()
+        ):
+            cjk = sum(
+                1
+                for ch in text
+                if "\u4e00" <= ch <= "\u9fff"
+                or "\u3400" <= ch <= "\u4dbf"
+                or "\uf900" <= ch <= "\ufaff"
+            )
             latin = max(0, len(text) - cjk)
             m.tokens_estimated = cjk + max(1, latin // 4) if text.strip() else None
         return m
@@ -239,9 +250,10 @@ class Parser(ABC):
         zero impact.
         """
         try:
-            from agent_handoff.locations import home as _home
             import json as _json
             from datetime import datetime as _dt
+
+            from agent_handoff.locations import home as _home
         except ImportError:
             return 0
         try:

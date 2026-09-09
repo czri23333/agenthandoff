@@ -234,10 +234,17 @@ class ZcodeParser(Parser):
                             prompt = str(tool_input.get("prompt") or "")
                             status = str(state.get("status") or "")
                             child_id = _match_child(children, prompt, desc)
-                            mark = "✓" if status == "completed" else ("…" if not status or status == "running" else "✗")
+                            if status == "completed":
+                                mark = "✓"
+                            elif not status or status == "running":
+                                mark = "…"
+                            else:
+                                mark = "✗"
                             call_text = f"[子代理 {mark}] {desc or 'subagent'}"
                             if child_id:
                                 call_text += f" → {child_id}"
+                            call_id = pdata.get("callID") or "unknown"
+                            agent_ref = child_id or f"agent:{call_id}"
                             agent_msgs.append(
                                 (
                                     m["time_created"],
@@ -247,7 +254,7 @@ class ZcodeParser(Parser):
                                         text=call_text,
                                         at=ts_to_iso(m["time_created"]),
                                         model=mdata.get("modelID") or None,
-                                        subagent=child_id or f"agent:{pdata.get('callID') or 'unknown'}",
+                                        subagent=agent_ref,
                                     ),
                                 )
                             )

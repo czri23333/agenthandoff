@@ -438,7 +438,7 @@ class JsonlSessionParser(Parser):
         turn_ids: dict[str, list[tuple]] = {}
         seen: set[str] = set()
         for key in ({sid, sid_bare}):
-            for seg in sorted((logs.rglob(f"{key}/segments/*.jsonl"))):
+            for seg in sorted(logs.rglob(f"{key}/segments/*.jsonl")):
                 if str(seg) in seen:
                     continue
                 seen.add(str(seg))
@@ -479,7 +479,7 @@ class JsonlSessionParser(Parser):
                 pid = at_to_prompt.get(m.at or "")
                 exact = None
                 if pid:
-                    for at, model, _ in turn_ids.get(pid, []):
+                    for _at, model, _ in turn_ids.get(pid, []):
                         if model:
                             exact = model
                             break
@@ -801,16 +801,23 @@ class JsonlSessionParser(Parser):
                     if key in seen_ids:
                         continue  # the same turn mirrored into a companion file
                     seen_ids.add(key)
-                    if role == "user" and not title:
-                        # System-context reminders are real turns but never
-                        # titles — the product shows the ai-title / first real
-                        # prompt instead.
-                        if not text.lstrip().startswith("<system-reminder"):
-                            title = text[:80]
+                    # System-context reminders are real turns but never
+                    # titles — the product shows the ai-title / first real
+                    # prompt instead.
+                    if (
+                        role == "user"
+                        and not title
+                        and not text.lstrip().startswith("<system-reminder")
+                    ):
+                        title = text[:80]
                     model, tokens = self._row_billing(row)
                     if not model:
                         model = runtime_model
-                    if role == "assistant" and tokens.get("in") is None and tokens.get("out") is None:
+                    if (
+                        role == "assistant"
+                        and tokens.get("in") is None
+                        and tokens.get("out") is None
+                    ):
                         # Exact first: same conversationRequestId as a usage row.
                         pd = row.get("providerData")
                         req = pd.get("conversationRequestId") if isinstance(pd, dict) else None
@@ -820,15 +827,19 @@ class JsonlSessionParser(Parser):
                             # The usage row bills the whole request: the text
                             # turn takes it, and so do the run-up thinking
                             # turns of the same request that have none yet.
-                            tokens = {**tokens, **{k: v for k, v in pend.items() if tokens.get(k) is None}}
+                            tokens = {
+                                **tokens,
+                                **{k: v for k, v in pend.items() if tokens.get(k) is None},
+                            }
                             for m in reversed(messages):
                                 if m.role != "assistant":
                                     break
                                 if m.tokens_in is None and m.tokens_out is None:
                                     m.tokens_in = pend.get("in")
                                     m.tokens_out = pend.get("out")
-                                    if pend.get("reasoning") is not None and m.tokens_reasoning is None:
-                                        m.tokens_reasoning = pend.get("reasoning")
+                                    reasoning = pend.get("reasoning")
+                                    if reasoning is not None and m.tokens_reasoning is None:
+                                        m.tokens_reasoning = reasoning
                                 elif m.text and not m.text.startswith("[思考]"):
                                     break
                             if not exact:
@@ -1936,10 +1947,10 @@ class QodercnIdeParser(JsonlSessionParser):
         # cockpit can group/filter like the product does.
         for m in out:
             try:
-                rel = str(Path(m.source_path).parent)
+                is_transcript = Path(m.source_path).parent.name == "transcript"
             except (ValueError, OSError):
                 continue
-            if Path(m.source_path).parent.name == "transcript":
+            if is_transcript:
                 m.task_type = "quest-task"
         out.sort(key=lambda m: m.updated_at or "", reverse=True)
         return out

@@ -34,12 +34,18 @@ class _Parser(Parser):
         return list(self.sessions)
 
     slow: float = 0.0
+    # When set, load() blocks on this event. Tests use it to hold a build open
+    # for as long as they need: "the build is in flight" becomes a fact instead
+    # of a race against a fast machine (the flake that reddened a CI leg).
+    gate: threading.Event | None = None
 
     def load(self, session_id: str) -> RawSession | None:
         # Not thread-safe on purpose: a duplicate build shows up as a doubled
         # count here. The optional delay widens the "building" window so the
         # single-flight promise of warm_async is observable without sleeping on
         # luck.
+        if self.gate is not None:
+            self.gate.wait(30)
         if self.slow:
             import time as _time
 
@@ -113,12 +119,14 @@ def test_warm_async_is_single_flight(tmp_path, monkeypatch):
     """Extra warm requests while a build is in flight must not rebuild.
 
     This is the promise the cockpit relies on: a dashboard open in three windows
-    polling `searchWarm` at once must pay for exactly one indexing pass. A slow
-    parser keeps the build in flight long enough to assert against deterministically.
+    polling `searchWarm` at once must pay for exactly one indexing pass. The
+    parser blocks on a gate, so the build provably stays in flight until this
+    test releases it - the assertion never races a fast machine.
     """
     import time
 
-    parser = _Parser(sessions=_fixture_parser().sessions, slow=0.03)
+    gate = threading.Event()
+    parser = _Parser(sessions=_fixture_parser().sessions, gate=gate)
     S.reset_index(disk=False)
     monkeypatch.setattr(S, "_STORE", IndexStore(tmp_path / "idx.sqlite3"))
     monkeypatch.setattr(S, "available_parsers", lambda: [parser])
@@ -133,9 +141,11 @@ def test_warm_async_is_single_flight(tmp_path, monkeypatch):
         status = S.warm_async()
         assert status["state"] == "building", "warm_async started a second build"
 
-    deadline = time.monotonic() + 10
+    gate.set()
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline and S.index_status()["state"] == "building":
         time.sleep(0.01)
+    assert S.index_status()["state"] == "ready", "the build never finished"
 
     loaded = sum(parser.loads.values())
     assert loaded == SESSIONS, f"{loaded} loads for {SESSIONS} sessions: warm double-built"
