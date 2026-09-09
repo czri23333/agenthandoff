@@ -29,7 +29,7 @@
 |---|---|---|---|---|---|---|
 | `zcode` | SQLite（只读 URI 打开） | ✓ | 2 | 3 ses / 46 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `claude` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `codebuddy` | JSONL 目录 | ✓ | 25 | 15 ses / 530 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `codebuddy` | JSONL 目录 | ✓ | 25 | 15 ses / 343 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `codebuddy-cn` | JSONL 目录 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwork` | JSONL 目录 | ✓ | 4 | 2 ses / 4 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwork-cn` | JSONL 目录 | ✓ | 25 | 2 ses / 295 msg | ✓ | ✅ 稳定（有夹具证据） |
@@ -39,7 +39,7 @@
 | `workbuddy` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ 仅形态（源存档无对话内容） |
-| `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 426 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 439 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `opencode` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
