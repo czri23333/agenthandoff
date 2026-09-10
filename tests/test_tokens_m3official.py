@@ -92,6 +92,98 @@ OFFICIAL_SPRINGS = {
     "standard-slow-effects": (1.0, 800.0),
 }
 
+# material-web v0_192: `_md-sys-color.scss` role→tone mapping over the tones in
+# `_md-ref-palette.scss`. A sample of both themes, written out by hand.
+OFFICIAL_COLOR_ROLES = {
+    "light": {
+        "surface": "#fef7ff",
+        "on-surface": "#1d1b20",
+        "surface-container-low": "#f7f2fa",
+        "surface-container-high": "#ece6f0",
+        "surface-container-lowest": "#ffffff",
+        "on-surface-variant": "#49454f",
+        "outline": "#79747e",
+        "outline-variant": "#cac4d0",
+        "primary": "#6750a4",
+        "on-primary": "#ffffff",
+        "primary-container": "#eaddff",
+        "on-primary-container": "#21005d",
+        "secondary": "#625b71",
+        "tertiary": "#7d5260",
+        "error": "#b3261e",
+        "on-error": "#ffffff",
+        "error-container": "#f9dedc",
+        "inverse-surface": "#322f35",
+        "scrim": "#000000",
+    },
+    "dark": {
+        "surface": "#141218",
+        "on-surface": "#e6e0e9",
+        "surface-container-low": "#1d1b20",
+        "surface-container-high": "#2b2930",
+        "surface-container-lowest": "#0f0d13",
+        "on-surface-variant": "#cac4d0",
+        "outline": "#938f99",
+        "outline-variant": "#49454f",
+        "primary": "#d0bcff",
+        "on-primary": "#381e72",
+        "primary-container": "#4f378b",
+        "on-primary-container": "#eaddff",
+        "secondary": "#ccc2dc",
+        "tertiary": "#efb8c8",
+        "error": "#f2b8b5",
+        "on-error": "#601410",
+        "error-container": "#8c1d18",
+        "inverse-surface": "#e6e0e9",
+        "scrim": "#000000",
+    },
+}
+
+# The cockpit's own names must resolve to those roles, not to hand-picked hexes.
+REPO_NAMES_TO_ROLES = {
+    "surface0": "surface",
+    "surface1": "surface-container-low",
+    "surface2": "surface-container-high",
+    "line": "outline-variant",
+    "lineStrong": "outline",
+    "text1": "on-surface",
+    "text2": "on-surface-variant",
+    "accent": "primary",
+    "accentContainer": "primary-container",
+    "err": "error",
+    "errContainer": "error-container",
+    "codeBg": "surface-container-lowest",
+}
+
+
+def test_colour_roles_are_googles_baseline_scheme():
+    roles = TOKENS["colorRoles"]["roles"]
+    for theme, expected in OFFICIAL_COLOR_ROLES.items():
+        for role, hex_value in expected.items():
+            assert roles[theme][role] == hex_value, f"{theme}.{role}"
+
+
+def test_both_themes_carry_the_full_role_set():
+    roles = TOKENS["colorRoles"]["roles"]
+    assert set(roles["light"]) == set(roles["dark"]), "themes must define the same roles"
+    # Every role the mapping names, resolved: a tone typo raises in the generator,
+    # and this pins the count so a dropped role is noticed.
+    assert len(roles["light"]) == 49
+
+
+def test_the_repo_palette_is_the_official_roles_not_a_tint():
+    """The palette is an alias onto the roles — no hand-picked hex survives.
+
+    This is what makes the scheme *Google's* rather than "close to it": before
+    this, `surface1` was `#161a21` (a hand-authored blue-grey) and
+    `accentContainer` was a tint of it, neither of which is an M3 value.
+    """
+    for theme, mapping in (("dark", REPO_NAMES_TO_ROLES), ("light", REPO_NAMES_TO_ROLES)):
+        palette = TOKENS["themes"][theme]
+        roles = TOKENS["colorRoles"]["roles"][theme]
+        for name, role in mapping.items():
+            assert palette[name] == roles[role], f"{theme}.{name} != {role}"
+
 
 def test_shape_carries_googles_corner_steps_and_composed_corners():
     assert TOKENS["shape"] == OFFICIAL_CORNERS

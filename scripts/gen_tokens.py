@@ -312,40 +312,219 @@ def easing_problem(value: str) -> str | None:
             return f"control-point x {x} is outside [0, 1]"
     return None
 
-BASE: dict[str, dict[str, str]] = {
-    "dark": {
-        "surface0": "#0e1116",  # app background
-        "surface1": "#161a21",  # cards, rows, inputs
-        "surface2": "#1e242e",  # raised: chips, code, hover
-        "line": "#2a3240",
-        "lineStrong": "#3d4757",
-        "text1": "#eef1f6",
-        "text2": "#c3cad6",
-        "text3": "#9aa4b3",  # dimmest tier — still AA, by construction
-        "accent": "#7aa2ff",
-        "ok": "#7ee2a8",
-        "warn": "#ffd166",
-        "err": "#ff8f96",
-        "codeBg": "#0b0e13",
-        "scheme": "dark",
+# ── M3 baseline colour scheme (official) ─────────────────────────────────────
+# Tones verbatim from material-web tokens v0_192 `_md-ref-palette.scss`; the
+# role→tone mapping verbatim from `_md-sys-color.scss` (`values-light` /
+# `values-dark`). Both fetched 2026-09-10. The *references* are stored, not 48
+# hex values per theme, so this stays auditable against Google: the hexes are
+# derived, and the derivation is the mapping Google ships.
+M3_TONES: dict[str, dict[int, str]] = {
+    "primary": {
+        0: "#000000", 10: "#21005d", 20: "#381e72", 30: "#4f378b", 40: "#6750a4", 50: "#7f67be",
+        60: "#9a82db", 70: "#b69df8", 80: "#d0bcff", 90: "#eaddff", 95: "#f6edff",
+        99: "#fffbfe", 100: "#ffffff",
     },
-    "light": {
-        "surface0": "#f6f7f9",
-        "surface1": "#ffffff",
-        "surface2": "#eceff4",
-        "line": "#d5dae2",
-        "lineStrong": "#a9b3c1",
-        "text1": "#14181f",
-        "text2": "#3b4351",
-        "text3": "#5d6779",
-        "accent": "#2f5fd0",
-        "ok": "#1a7f45",
-        "warn": "#8a6100",
-        "err": "#b4232f",
-        "codeBg": "#f2f4f8",
-        "scheme": "light",
+    "secondary": {
+        0: "#000000", 10: "#1d192b", 20: "#332d41", 30: "#4a4458", 40: "#625b71", 50: "#7a7289",
+        60: "#958da5", 70: "#b0a7c0", 80: "#ccc2dc", 90: "#e8def8", 95: "#f6edff",
+        99: "#fffbfe", 100: "#ffffff",
+    },
+    "tertiary": {
+        0: "#000000", 10: "#31111d", 20: "#492532", 30: "#633b48", 40: "#7d5260", 50: "#986977",
+        60: "#b58392", 70: "#d29dac", 80: "#efb8c8", 90: "#ffd8e4", 95: "#ffecf1",
+        99: "#fffbfa", 100: "#ffffff",
+    },
+    "error": {
+        0: "#000000", 10: "#410e0b", 20: "#601410", 30: "#8c1d18", 40: "#b3261e", 50: "#dc362e",
+        60: "#e46962", 70: "#ec928e", 80: "#f2b8b5", 90: "#f9dedc", 95: "#fceeee",
+        99: "#fffbf9", 100: "#ffffff",
+    },
+    "neutral": {
+        0: "#000000", 4: "#0f0d13", 6: "#141218", 10: "#1d1b20", 12: "#211f26", 17: "#2b2930",
+        20: "#322f35", 22: "#36343b", 24: "#3b383e", 30: "#48464c", 40: "#605d64", 50: "#79767d",
+        60: "#938f96", 70: "#aea9b1", 80: "#cac5cd", 87: "#ded8e1", 90: "#e6e0e9",
+        92: "#ece6f0", 94: "#f3edf7", 95: "#f5eff7", 96: "#f7f2fa", 98: "#fef7ff",
+        99: "#fffbff", 100: "#ffffff",
+    },
+    "neutral-variant": {
+        0: "#000000", 10: "#1d1a22", 20: "#322f37", 30: "#49454f", 40: "#605d66", 50: "#79747e",
+        60: "#938f99", 70: "#aea9b4", 80: "#cac4d0", 90: "#e7e0ec", 95: "#f5eefa",
+        99: "#fffbfe", 100: "#ffffff",
     },
 }
+
+# role -> "family:tone", exactly as `_md-sys-color.scss` maps them.
+M3_ROLE_REFS: dict[str, dict[str, str]] = {
+    "light": {
+        "background": "neutral:98",
+        "on-background": "neutral:10",
+        "surface": "neutral:98",
+        "on-surface": "neutral:10",
+        "surface-dim": "neutral:87",
+        "surface-bright": "neutral:98",
+        "surface-container-lowest": "neutral:100",
+        "surface-container-low": "neutral:96",
+        "surface-container": "neutral:94",
+        "surface-container-high": "neutral:92",
+        "surface-container-highest": "neutral:90",
+        "surface-variant": "neutral-variant:90",
+        "on-surface-variant": "neutral-variant:30",
+        "outline": "neutral-variant:50",
+        "outline-variant": "neutral-variant:80",
+        "primary": "primary:40",
+        "on-primary": "primary:100",
+        "primary-container": "primary:90",
+        "on-primary-container": "primary:10",
+        "primary-fixed": "primary:90",
+        "primary-fixed-dim": "primary:80",
+        "on-primary-fixed": "primary:10",
+        "on-primary-fixed-variant": "primary:30",
+        "secondary": "secondary:40",
+        "on-secondary": "secondary:100",
+        "secondary-container": "secondary:90",
+        "on-secondary-container": "secondary:10",
+        "secondary-fixed": "secondary:90",
+        "secondary-fixed-dim": "secondary:80",
+        "on-secondary-fixed": "secondary:10",
+        "on-secondary-fixed-variant": "secondary:30",
+        "tertiary": "tertiary:40",
+        "on-tertiary": "tertiary:100",
+        "tertiary-container": "tertiary:90",
+        "on-tertiary-container": "tertiary:10",
+        "tertiary-fixed": "tertiary:90",
+        "tertiary-fixed-dim": "tertiary:80",
+        "on-tertiary-fixed": "tertiary:10",
+        "on-tertiary-fixed-variant": "tertiary:30",
+        "error": "error:40",
+        "on-error": "error:100",
+        "error-container": "error:90",
+        "on-error-container": "error:10",
+        "surface-tint": "primary:40",
+        "inverse-surface": "neutral:20",
+        "inverse-on-surface": "neutral:95",
+        "inverse-primary": "primary:80",
+        "scrim": "neutral:0",
+        "shadow": "neutral:0",
+    },
+    "dark": {
+        "background": "neutral:6",
+        "on-background": "neutral:90",
+        "surface": "neutral:6",
+        "on-surface": "neutral:90",
+        "surface-dim": "neutral:6",
+        "surface-bright": "neutral:24",
+        "surface-container-lowest": "neutral:4",
+        "surface-container-low": "neutral:10",
+        "surface-container": "neutral:12",
+        "surface-container-high": "neutral:17",
+        "surface-container-highest": "neutral:22",
+        "surface-variant": "neutral-variant:30",
+        "on-surface-variant": "neutral-variant:80",
+        "outline": "neutral-variant:60",
+        "outline-variant": "neutral-variant:30",
+        "primary": "primary:80",
+        "on-primary": "primary:20",
+        "primary-container": "primary:30",
+        "on-primary-container": "primary:90",
+        "primary-fixed": "primary:90",
+        "primary-fixed-dim": "primary:80",
+        "on-primary-fixed": "primary:10",
+        "on-primary-fixed-variant": "primary:30",
+        "secondary": "secondary:80",
+        "on-secondary": "secondary:20",
+        "secondary-container": "secondary:30",
+        "on-secondary-container": "secondary:90",
+        "secondary-fixed": "secondary:90",
+        "secondary-fixed-dim": "secondary:80",
+        "on-secondary-fixed": "secondary:10",
+        "on-secondary-fixed-variant": "secondary:30",
+        "tertiary": "tertiary:80",
+        "on-tertiary": "tertiary:20",
+        "tertiary-container": "tertiary:30",
+        "on-tertiary-container": "tertiary:90",
+        "tertiary-fixed": "tertiary:90",
+        "tertiary-fixed-dim": "tertiary:80",
+        "on-tertiary-fixed": "tertiary:10",
+        "on-tertiary-fixed-variant": "tertiary:30",
+        "error": "error:80",
+        "on-error": "error:20",
+        "error-container": "error:30",
+        "on-error-container": "error:90",
+        "surface-tint": "primary:80",
+        "inverse-surface": "neutral:90",
+        "inverse-on-surface": "neutral:20",
+        "inverse-primary": "primary:40",
+        "scrim": "neutral:0",
+        "shadow": "neutral:0",
+    },
+}
+
+# The cockpit's own names, resolved through the official roles. Only two colours
+# here are not M3 at all — `ok` and `warn`: M3 has no success/warning roles, so
+# they stay ours (AA-solved against whichever surface they land on) and are
+# labelled as ours in tokens.json.
+SEMANTIC_FROM_ROLES: dict[str, dict[str, str]] = {
+    "dark": {
+        "surface0": "surface",
+        "surface1": "surface-container-low",
+        "surface2": "surface-container-high",
+        "line": "outline-variant",
+        "lineStrong": "outline",
+        "text1": "on-surface",
+        "text2": "on-surface-variant",
+        "text3": "on-surface-variant",
+        "accent": "primary",
+        "accentContainer": "primary-container",
+        "err": "error",
+        "errContainer": "error-container",
+        "codeBg": "surface-container-lowest",
+    },
+    "light": {
+        "surface0": "surface",
+        "surface1": "surface-container-low",
+        "surface2": "surface-container-high",
+        "line": "outline-variant",
+        "lineStrong": "outline",
+        "text1": "on-surface",
+        "text2": "on-surface-variant",
+        "text3": "on-surface-variant",
+        "accent": "primary",
+        "accentContainer": "primary-container",
+        "err": "error",
+        "errContainer": "error-container",
+        "codeBg": "surface-container-lowest",
+    },
+}
+
+# Ours: no M3 role for success or warning. Solved for AA against each theme's
+# surfaces below, same gate as everything else.
+OUR_COLOURS: dict[str, dict[str, str]] = {
+    "dark": {"ok": "#7ee2a8", "warn": "#ffd166"},
+    "light": {"ok": "#1a7f45", "warn": "#8a6100"},
+}
+
+
+def colour_roles(theme: str) -> dict[str, str]:
+    """Every official role for a theme, resolved from the tone references."""
+    out: dict[str, str] = {}
+    for role, ref in M3_ROLE_REFS[theme].items():
+        family, _, tone = ref.partition(":")
+        out[role] = M3_TONES[family][int(tone)]
+    return out
+
+
+def base_palette(theme: str) -> dict[str, str]:
+    """The cockpit's palette: official roles under our names, plus ok/warn."""
+    roles = colour_roles(theme)
+    base = {
+        name: roles[role]
+        for name, role in SEMANTIC_FROM_ROLES[theme].items()
+        if role in roles
+    }
+    base.update(OUR_COLOURS[theme])
+    base["scheme"] = theme
+    base["placeholder"] = roles["on-surface-variant"]
+    return base
 
 TEXT_PAIR_MIN = 4.5
 GRAPHIC_MIN = 3.0
@@ -440,18 +619,20 @@ CONTAINER_SOURCES: dict[str, str] = {
 }
 
 
-def containers(theme: dict, strength: float) -> dict[str, str]:
-    """The four M3E tonal surfaces: a semantic colour mixed into surface1.
+def containers(theme: dict, strength: float, only: tuple[str, ...] | None = None) -> dict[str, str]:
+    """Tonal surfaces: a semantic colour mixed into surface1.
 
-    Derived rather than pinned: one strength per theme reproduces all four
-    shipped containers byte-exactly (dark 0.179, light 0.16 — measured by
-    solving ``tint()`` for its pre-image, not by eye). Deriving means a palette
-    edit re-tints the chips and the user bubble together, and the AA gate below
-    re-checks the text that sits on them.
+    Only *success* and *warning* containers come from here now. M3 has no such
+    roles, so those two stay derived (one strength per theme, measured by solving
+    ``tint()`` for its pre-image rather than by eye). The accent and error
+    containers are Google's own `primary-container` / `error-container` and are
+    taken verbatim from the colour-role map — deriving them would have replaced
+    an official value with a hand-rolled approximation that merely looked similar.
     """
     return {
         container: tint(theme["surface1"], theme[source], strength)
         for container, source in CONTAINER_SOURCES.items()
+        if only is None or container in only
     }
 
 
@@ -516,8 +697,8 @@ def build() -> tuple[dict, list[str]]:
             problems.append(f"cli {cli} has no identity: add a hue to CLI_HUES")
 
     themes: dict[str, dict] = {}
-    for name, raw in BASE.items():
-        theme = dict(raw)
+    for name in ("dark", "light"):
+        theme = base_palette(name)
         for tier in ("text1", "text2", "text3"):
             for surface in ("surface0", "surface1", "surface2"):
                 if ratio(theme[tier], theme[surface]) < TEXT_PAIR_MIN:
@@ -527,7 +708,9 @@ def build() -> tuple[dict, list[str]]:
                 theme[key] = solve(theme[key], theme["surface1"], TEXT_PAIR_MIN)
         theme["placeholder"] = theme["text3"]
         theme["onSurface0"] = theme["text1"]
-        theme.update(containers(theme, CONTAINER_STRENGTH[name]))
+        theme.update(
+            containers(theme, CONTAINER_STRENGTH[name], only=("okContainer", "warnContainer"))
+        )
         theme["cli"] = {
             cli: (
                 dict(CLI_PINNED[cli][name])
@@ -642,6 +825,22 @@ def build() -> tuple[dict, list[str]]:
             "it, `--check` to prove it is fresh. All text/surface, text-on-tonal-container and "
             "CLI-chip pairs are WCAG AA (>= 4.5:1) verified by tests/test_tokens_contrast.py."
         ),
+        "colorRoles": {
+            "_source": (
+                "Google's full M3 baseline colour scheme: the role→tone mapping is "
+                "material-web tokens/versions/v0_192/_md-sys-color.scss and the tones are "
+                "_md-ref-palette.scss. Derived here rather than copied as hex, so the file "
+                "states the derivation and a tone typo fails loudly."
+            ),
+            # Tone keys are emitted as strings: JSON turns an int key into a string,
+            # so an in-memory int key made the committed file compare unequal to a
+            # fresh build even though both were correct.
+            "tones": {
+                family: {str(tone): hexv for tone, hexv in tones.items()}
+                for family, tones in M3_TONES.items()
+            },
+            "roles": {theme: colour_roles(theme) for theme in ("dark", "light")},
+        },
         "shape": SHAPE,
         "shapeComposed": {
             "_source": "Google's composed corners (corner-*-top/start/end), derived from `shape`.",

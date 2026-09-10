@@ -81,6 +81,17 @@ export interface ElevationTokens {
   shadow: Record<string, string>;
 }
 
+/**
+ * Google's full M3 baseline colour scheme. `roles` is the resolved output of the
+ * official role→tone mapping (`_md-sys-color.scss`) over the official tones
+ * (`_md-ref-palette.scss`); the generator stores the *references*, so this is the
+ * derived half and `tokens.json` is the auditable half.
+ */
+export interface ColorRoleTokens {
+  tones: Record<string, Record<string, string>>;
+  roles: Record<Effective, Record<string, string>>;
+}
+
 /** M3 type roles, with Google's size / line-height / tracking / weight. */
 export interface TypescaleTokens {
   cjkFloor: number;
@@ -123,6 +134,7 @@ type ElevationLevel = keyof (typeof tokensJson)["elevation"]["levels"];
 const TOKENS = tokensJson as unknown as {
   themes: Record<Effective, Palette>;
   cli: string[];
+  colorRoles: ColorRoleTokens;
   shape: ShapeScale;
   shapeComposed: ComposedCorners;
   state: StateTokens;
@@ -204,6 +216,12 @@ function contractVars(): string {
 function cssVars(p: Palette): string {
   return [
     `color-scheme:${p.scheme};`,
+    // Every official M3 role, under its own name, so a component can reach for
+    // `--ah-primary-container` instead of inventing a mix (the semantic names
+    // below are aliases onto these — see the mapping in gen_tokens.py).
+    ...Object.entries(TOKENS.colorRoles.roles[p.scheme as Effective]).map(
+      ([role, hex]) => `--ah-${role}:${hex};`,
+    ),
     `--ah-surface-0:${p.surface0};`,
     `--ah-surface-1:${p.surface1};`,
     `--ah-surface-2:${p.surface2};`,
