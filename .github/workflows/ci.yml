@@ -63,9 +63,24 @@ jobs:
       - name: Typecheck the cockpit
         working-directory: web
         run: npx tsc -b
+      - name: Mark the dist before building
+        shell: bash
+        run: touch .dist-build-marker
       - name: Build the cockpit
         working-directory: web
         run: npm run build
+      - name: The build actually wrote the dist
+        shell: bash
+        run: |
+          # "No differences" is not the same claim as "the build wrote here": if
+          # vite's outDir ever moves, the comparison below passes while the
+          # shipped cockpit stays stale. Vite rewrites every asset, so at least
+          # one file must be newer than the marker.
+          if [ -z "$(find src/agent_handoff/server/static/assets -type f -newer .dist-build-marker -print -quit)" ]; then
+            echo "::error title=cockpit build wrote nothing::no asset is newer than the build start — check web/vite.config.ts build.outDir still points at src/agent_handoff/server/static."
+            exit 1
+          fi
+          echo "the build rewrote the dist"
       - name: Committed dist matches the source
         shell: bash
         run: |
@@ -77,5 +92,7 @@ jobs:
             echo "::error title=stale cockpit dist::the committed dist is not what web/ builds. Run 'npm ci && npm run build' in web/ and commit src/agent_handoff/server/static."
             exit 1
           fi
+          rm -f .dist-build-marker
           echo "committed dist matches a fresh build"
+
 
