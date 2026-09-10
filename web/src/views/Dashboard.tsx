@@ -669,7 +669,7 @@ function SessionRow({
           )}
           {s.automation && (
             <Tooltip title={`${t("automation")} · ${s.automation}`}>
-              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-pill)] px-2 py-px font-mono text-[11px] lg:inline">
+              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-full)] px-2 py-px font-mono text-[11px] lg:inline">
                 ⚙ {s.automation.length > 18 ? `${s.automation.slice(0, 17)}…` : s.automation}
               </span>
             </Tooltip>

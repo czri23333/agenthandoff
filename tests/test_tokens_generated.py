@@ -63,7 +63,7 @@ def test_tonal_containers_survive_regeneration(theme: str):
 def test_shape_scale_survives_regeneration():
     committed, fresh = _committed(), gen.build()[0]
     assert fresh["shape"] == committed["shape"]
-    assert committed["shape"] == {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 28, "pill": 999}
+    assert committed["shape"] == {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 28, "full": 9999}
 
 
 def test_every_parser_cli_has_an_identity():

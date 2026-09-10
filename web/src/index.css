@@ -19,7 +19,7 @@
   --ah-shape-md: 12px;
   --ah-shape-lg: 16px;
   --ah-shape-xl: 28px;
-  --ah-shape-pill: 999px;
+  --ah-shape-full: 9999px;
   /* M3E motion tokens (theme.ts injects the full table from tokens.json; these
      fallbacks cover the subset this sheet uses, so CSS is valid before JS runs).
      Durations and the standard/emphasized/linear curves are Google's
@@ -274,7 +274,7 @@ body {
   align-items: center;
   gap: 4px;
   padding: 1px 7px;
-  border-radius: var(--ah-shape-pill);
+  border-radius: var(--ah-shape-full);
   border: 1px solid var(--ah-cli-border, var(--ah-line-strong));
   background: var(--ah-cli-bg, var(--ah-surface-2));
   color: var(--ah-cli-fg, var(--ah-text-1));

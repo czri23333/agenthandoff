@@ -10,7 +10,12 @@ instead of trusting a blob of hex codes. The gate:
   * every text tier on every surface          >= 4.5:1  (AA normal text)
   * every CLI identity fg on its badge bg     >= 4.5:1, in both themes
   * borders / focus rings / large text        >= 3:1
-  * shape scale strictly increasing, pill huge, motion values well-formed
+  * shape scale strictly increasing, `full` at Google's 9999px, composed corners resolvable
+  * every state opacity a fraction in (0, 1); every elevation level has a shadow recipe
+  * typescale roles: line-height above size, weight 400/500, nothing under the 12px CJK
+    floor unless it is marked mono-only
+  * motion values well-formed; every spring's damping/stiffness in range and its sampled
+    easing a `linear()` that runs 0 → 1
 
 The whole file — shape and motion included — comes from here, because it did
 not: `shape` used to live only in the committed JSON, so running this script
@@ -30,6 +35,7 @@ from __future__ import annotations
 
 import colorsys
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -104,16 +110,139 @@ CLI_PINNED: dict[str, dict[str, dict[str, str]]] = {
 # re-checks the text that sits on them.
 CONTAINER_STRENGTH: dict[str, float] = {"dark": 0.179, "light": 0.16}
 
-# M3 Expressive shape scale (px). Cards take lg, controls md, chips pill; the
-# message roles reuse the same scale so bubbles and cards share one geometry.
-SHAPE: dict[str, int] = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 28, "pill": 999}
+# ── M3 official layers ───────────────────────────────────────────────────────
+# Sources, all fetched first-hand on 2026-09-10. material-web pins its whole token
+# set to design-system v0_192:
+#   tokens/versions/v0_192/_md-sys-shape.scss       (corner radii)
+#   tokens/versions/v0_192/_md-sys-state.scss       (state-layer opacities)
+#   tokens/versions/v0_192/_md-sys-elevation.scss   (elevation levels, in dp)
+#   tokens/versions/v0_192/_md-sys-typescale.scss   (type roles)
+# M3E's springs are NOT published there; they are androidx material3 token files
+# (v0_14_0), reached through MotionScheme.kt:
+#   compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/
+#     tokens/{Expressive,Standard}MotionTokens.kt
+# The dp→box-shadow recipe is MDC-Web's elevation maps — the same algorithm
+# material-web compiles to CSS:
+#   packages/mdc-elevation/_elevation-theme.scss
+
+# M3E shape scale (px): the official corner steps plus `full`. Cards take lg,
+# controls md, chips full; the message roles reuse the same scale so bubbles and
+# cards share one geometry. `full` is Google's `corner-full` = 9999px.
+SHAPE: dict[str, int] = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 28, "full": 9999}
+
+# The official *composed* corners, derived from the scale above so a scale edit
+# propagates. None means the zero corner: Google publishes these as four-value
+# lists (corner-extra-small-top `4px 4px 0 0`, corner-large-start, corner-large-end,
+# …), and call sites used to spell them out by hand — `.ah-user-bubble` wrote
+# `lg lg 0 lg`.
+COMPOSED_CORNERS: dict[str, tuple] = {
+    "extra-small-top": ("xs", "xs", None, None),
+    "large-top": ("lg", "lg", None, None),
+    "large-start": ("lg", None, None, "lg"),
+    "large-end": (None, "lg", "lg", None),
+    "extra-large-top": ("xl", "xl", None, None),
+}
+
+# State layers: the surface's own content colour, composited over it, at Google's
+# official opacities. This is what M3 means by feedback — not a brightness filter,
+# not a different background colour. `disabled` is NOT in M3's token file; those
+# two numbers are ours and are marked as ours wherever they surface.
+STATE: dict[str, float] = {"hover": 0.08, "focus": 0.12, "pressed": 0.12, "dragged": 0.16}
+STATE_DISABLED: dict[str, float] = {"container": 0.12, "content": 0.38}
+
+# Elevation: M3's official levels in dp, plus the MDC-Web umbra/penumbra/ambient
+# maps that turn a dp into a CSS box-shadow. Level 0 is no shadow by definition —
+# M3 separates resting surfaces with an outline and reserves shadow for what floats.
+# MDC's maps run to 24 dp; these are the six levels the M3 scale uses.
+ELEVATION_DP: dict[str, int] = {
+    "level0": 0,
+    "level1": 1,
+    "level2": 3,
+    "level3": 6,
+    "level4": 8,
+    "level5": 12,
+}
+_SHADOW_RGB, _UMBRA_OPACITY, _PENUMBRA_OPACITY, _AMBIENT_OPACITY = (
+    "0, 0, 0",
+    0.2,
+    0.14,
+    0.12,
+)
+_UMBRA: dict[int, str] = {
+    0: "0px 0px 0px 0px",
+    1: "0px 2px 1px -1px",
+    3: "0px 3px 3px -2px",
+    6: "0px 3px 5px -1px",
+    8: "0px 5px 5px -3px",
+    12: "0px 7px 8px -4px",
+}
+_PENUMBRA: dict[int, str] = {
+    0: "0px 0px 0px 0px",
+    1: "0px 1px 1px 0px",
+    3: "0px 3px 4px 0px",
+    6: "0px 6px 10px 0px",
+    8: "0px 8px 10px 1px",
+    12: "0px 12px 17px 2px",
+}
+_AMBIENT: dict[int, str] = {
+    0: "0px 0px 0px 0px",
+    1: "0px 1px 3px 0px",
+    3: "0px 1px 8px 0px",
+    6: "0px 1px 18px 0px",
+    8: "0px 3px 14px 2px",
+    12: "0px 5px 22px 4px",
+}
+
+# The official type roles this cockpit needs, with M3's size / line-height /
+# tracking / weight (the token file's rem values × 16). Sizes are px. `mono_only`
+# marks the single role that sits under this repo's 12 px CJK floor: 11 px is
+# legitimate for latin identifiers and monospace, and the gate refuses to let it
+# be used anywhere a CJK glyph can land.
+CJK_FLOOR_PX = 12
+TYPESCALE: dict[str, dict] = {
+    "body-medium": {"size": 14, "line": 20, "tracking": 0.25, "weight": 400},
+    "body-small": {"size": 12, "line": 16, "tracking": 0.4, "weight": 400},
+    "label-large": {"size": 14, "line": 20, "tracking": 0.1, "weight": 500},
+    "label-medium": {"size": 12, "line": 16, "tracking": 0.5, "weight": 500},
+    "label-small": {"size": 11, "line": 16, "tracking": 0.5, "weight": 500, "mono_only": True},
+    "title-small": {"size": 14, "line": 20, "tracking": 0.1, "weight": 500},
+    "title-medium": {"size": 16, "line": 24, "tracking": 0.15, "weight": 500},
+}
+
+# Official M3E springs: a damping ratio and a stiffness. MotionScheme picks
+# between the standard and the expressive scheme; CSS has no spring primitive, so
+# each spring is *sampled* into a `linear()` easing below and ships a cubic-bezier
+# fallback for engines without `linear()`.
+SPRINGS: dict[str, dict[str, float]] = {
+    "expressive-fast-spatial": {"damping": 0.6, "stiffness": 800.0},
+    "expressive-default-spatial": {"damping": 0.8, "stiffness": 380.0},
+    "expressive-slow-spatial": {"damping": 0.8, "stiffness": 200.0},
+    "expressive-fast-effects": {"damping": 1.0, "stiffness": 3800.0},
+    "expressive-default-effects": {"damping": 1.0, "stiffness": 1600.0},
+    "expressive-slow-effects": {"damping": 1.0, "stiffness": 800.0},
+    "standard-fast-spatial": {"damping": 0.9, "stiffness": 1400.0},
+    "standard-default-spatial": {"damping": 0.9, "stiffness": 700.0},
+    "standard-slow-spatial": {"damping": 0.9, "stiffness": 300.0},
+    "standard-fast-effects": {"damping": 1.0, "stiffness": 3800.0},
+    "standard-default-effects": {"damping": 1.0, "stiffness": 1600.0},
+    "standard-slow-effects": {"damping": 1.0, "stiffness": 800.0},
+}
+# Fallbacks are ours, chosen from the official curve set: spatial springs overshoot
+# so they approximate to `expressive-out`; effects springs are critically damped
+# and match `standard`.
+SPRING_FALLBACK: dict[str, str] = {
+    "spatial": "cubic-bezier(0.22, 1.2, 0.36, 1)",
+    "effects": "cubic-bezier(0.2, 0, 0, 1)",
+}
+SPRING_SAMPLES = 24
+SPRING_SETTLE_TOLERANCE = 0.001
 
 # Motion tokens. Durations and the standard/emphasized easings are Google's,
 # copied from material-web's generated token file (design system v0.192):
 #   https://github.com/material-components/material-web/blob/main/tokens/versions/v0_192/_md-sys-motion.scss
-# `expressive-*` are ours: M3E's spring feel needs a slight overshoot, which the
-# official cubic-beziers do not have. They are marked as additions here and in
-# tokens.json so nobody mistakes them for Google values.
+# `expressive-*` are ours: they exist as the fallback tier for the springs above,
+# which CSS cannot express. They are marked as additions here and in tokens.json
+# so nobody mistakes them for Google values.
 MOTION_DURATIONS: dict[str, str] = {
     "short1": "50ms",
     "short2": "100ms",
@@ -326,6 +455,59 @@ def containers(theme: dict, strength: float) -> dict[str, str]:
     }
 
 
+def elevation_shadow(dp: int) -> str:
+    """The MDC-Web box-shadow for an elevation level, from the official maps.
+
+    Three shadows (umbra/penumbra/ambient) at 0.2/0.14/0.12 black — that is the
+    recipe material-web compiles to CSS. Level 0 is `none`: M3 has no shadow at
+    rest, it has an outline.
+    """
+    if dp == 0:
+        return "none"
+    return (
+        f"{_UMBRA[dp]} rgba({_SHADOW_RGB}, {_UMBRA_OPACITY}), "
+        f"{_PENUMBRA[dp]} rgba({_SHADOW_RGB}, {_PENUMBRA_OPACITY}), "
+        f"{_AMBIENT[dp]} rgba({_SHADOW_RGB}, {_AMBIENT_OPACITY})"
+    )
+
+
+def spring_curve(damping: float, stiffness: float) -> tuple[str, int]:
+    """Sample a unit-mass spring into a CSS `linear()` easing, plus its duration.
+
+    Closed form of a damped harmonic oscillator released at rest: with
+    ``omega0 = sqrt(stiffness)`` and ratio ``zeta``, the response is
+    ``1 - e^(-zeta*omega0*t) * (cos(wd*t) + zeta*omega0/wd * sin(wd*t))`` for
+    ``zeta < 1`` (``wd = omega0*sqrt(1 - zeta^2)``), and ``1 - e^(-omega0*t)*(1 +
+    omega0*t)`` at ``zeta = 1``. The window runs to the settle time — the first
+    instant the curve has stayed within a tenth of a percent — so the easing
+    reaches 1 instead of being cut off mid-flight.
+    """
+    omega = math.sqrt(stiffness)
+
+    def response(t: float) -> float:
+        if damping >= 1.0:
+            return 1 - math.exp(-omega * t) * (1 + omega * t)
+        wd = omega * math.sqrt(1 - damping * damping)
+        return 1 - math.exp(-damping * omega * t) * (
+            math.cos(wd * t) + damping * omega / wd * math.sin(wd * t)
+        )
+
+    def settled(t: float) -> bool:
+        return all(
+            abs(1 - response(t + step * 0.02)) <= SPRING_SETTLE_TOLERANCE for step in range(0, 50)
+        )
+
+    settle = 0.1
+    while settle < 6.0 and not settled(settle):
+        settle += 0.02
+
+    stops = ", ".join(
+        f"{response(settle * i / SPRING_SAMPLES):.3f} {i * 100 / SPRING_SAMPLES:.1f}%"
+        for i in range(1, SPRING_SAMPLES)
+    )
+    return f"linear(0, {stops}, 1)", round(settle * 1000)
+
+
 def build() -> tuple[dict, list[str]]:
     problems: list[str] = []
     ids = cli_ids()
@@ -383,8 +565,47 @@ def build() -> tuple[dict, list[str]]:
     sizes = list(SHAPE.values())
     if sizes != sorted(sizes) or len(set(sizes)) != len(sizes):
         problems.append(f"shape scale must be strictly increasing: {SHAPE}")
-    if SHAPE.get("pill", 0) < 100:
-        problems.append("shape pill must be large enough to read as a pill")
+    if SHAPE.get("full", 0) < 1000:
+        problems.append("shape `full` must be Google's corner-full (9999px)")
+    for corner, parts in COMPOSED_CORNERS.items():
+        unknown = [p for p in parts if p is not None and p not in SHAPE]
+        if unknown:
+            problems.append(f"composed corner {corner} references unknown steps {unknown}")
+
+    for label, value in {
+        **STATE,
+        **{f"disabled-{k}": v for k, v in STATE_DISABLED.items()},
+    }.items():
+        if not 0.0 < value < 1.0:
+            problems.append(f"state opacity {label} must be a fraction in (0, 1), got {value}")
+
+    for level, dp in ELEVATION_DP.items():
+        if not all(dp in table for table in (_UMBRA, _PENUMBRA, _AMBIENT)):
+            problems.append(f"elevation {level} ({dp}dp) has no umbra/penumbra/ambient recipe")
+
+    for role, spec in TYPESCALE.items():
+        if spec["line"] <= spec["size"]:
+            problems.append(f"typescale {role}: line-height must exceed the size")
+        if spec["weight"] not in (400, 500):
+            problems.append(f"typescale {role}: M3 uses weight 400 or 500, got {spec['weight']}")
+        if spec["tracking"] < 0:
+            problems.append(f"typescale {role}: tracking must not be negative")
+        if spec["size"] < CJK_FLOOR_PX and not spec.get("mono_only"):
+            problems.append(
+                f"typescale {role}: {spec['size']}px is under the {CJK_FLOOR_PX}px CJK floor "
+                "and is not marked mono_only"
+            )
+
+    for name, spring in SPRINGS.items():
+        if not 0.0 < spring["damping"] <= 1.0:
+            problems.append(f"spring {name}: damping must be in (0, 1], got {spring['damping']}")
+        if spring["stiffness"] <= 0:
+            problems.append(f"spring {name}: stiffness must be positive, got {spring['stiffness']}")
+        curve, settle_ms = spring_curve(spring["damping"], spring["stiffness"])
+        if not (curve.startswith("linear(0, ") and curve.endswith(", 1)")):
+            problems.append(f"spring {name}: sampled easing must run 0 → 1, got {curve[:40]}…")
+        if not 40 <= settle_ms <= 4000:
+            problems.append(f"spring {name}: settle time {settle_ms}ms is out of range")
 
     # Report the offending *value*, never raise on it: `int(v[:-2])` used to
     # blow up with a ValueError traceback on `"1.1s"` — the exact style the
@@ -411,26 +632,80 @@ def build() -> tuple[dict, list[str]]:
         "_readme": (
             "Cockpit design tokens — the single source of truth for both themes. theme.ts "
             "turns this file into CSS custom properties plus antd ConfigProvider tokens: "
-            "every colour, and every animated duration and curve, comes from here (the few "
-            "hairline radii that are not M3E surfaces — code blocks, inline marks, focus "
-            "rings — stay literal, and the AA gate does not cover them). Generated: run "
-            "`python scripts/gen_tokens.py` to rewrite it, `--check` to prove it is fresh. "
-            "All text/surface, text-on-tonal-container and CLI-chip pairs are WCAG AA "
-            "(>= 4.5:1) verified by tests/test_tokens_contrast.py. `shape` and `motion` live "
-            "here so the M3E geometry and the motion contract regenerate with the palette "
-            "instead of drifting beside it."
+            "colours, shape, interaction state, elevation, type scale and motion all come "
+            "from here (the few hairline radii that are not M3E surfaces — code blocks, inline "
+            "marks, focus rings — stay literal, and the AA gate does not cover them). Sources: "
+            "material-web tokens v0_192 for shape/state/elevation/typescale/motion, androidx "
+            "material3 tokens v0_14_0 for the springs, MDC-Web elevation maps for the "
+            "dp→box-shadow recipe; each block carries its own `_source` and marks whatever is "
+            "ours rather than Google's. Generated: run `python scripts/gen_tokens.py` to rewrite "
+            "it, `--check` to prove it is fresh. All text/surface, text-on-tonal-container and "
+            "CLI-chip pairs are WCAG AA (>= 4.5:1) verified by tests/test_tokens_contrast.py."
         ),
         "shape": SHAPE,
+        "shapeComposed": {
+            "_source": "Google's composed corners (corner-*-top/start/end), derived from `shape`.",
+            "corners": {
+                corner: " ".join(f"{SHAPE[step]}px" if step else "0px" for step in parts)
+                for corner, parts in COMPOSED_CORNERS.items()
+            },
+        },
+        "state": {
+            "_source": (
+                "Opacity of a surface's own content colour composited over it — M3's definition "
+                "of feedback. hover/focus/pressed/dragged are Google's (material-web "
+                "tokens/versions/v0_192/_md-sys-state.scss). `disabled` is ours: M3's token file "
+                "publishes no disabled opacity."
+            ),
+            "opacity": STATE,
+            "disabled": STATE_DISABLED,
+        },
+        "elevation": {
+            "_source": (
+                "Levels are M3's (material-web tokens/versions/v0_192/_md-sys-elevation.scss), in "
+                "dp. The dp→box-shadow recipes are MDC-Web's umbra/penumbra/ambient maps "
+                "(packages/mdc-elevation/_elevation-theme.scss) at 0.2/0.14/0.12 black — the same "
+                "algorithm material-web compiles to CSS. Level 0 is `none`: M3 separates resting "
+                "surfaces with an outline."
+            ),
+            "levels": ELEVATION_DP,
+            "shadow": {level: elevation_shadow(dp) for level, dp in ELEVATION_DP.items()},
+        },
+        "typescale": {
+            "_source": (
+                "Google's M3 type roles (material-web "
+                "tokens/versions/v0_192/_md-sys-typescale.scss), rem × 16 = px. `label-small` is "
+                f"11px, under this repo's {CJK_FLOOR_PX}px CJK floor, so it is marked mono_only: "
+                "latin identifiers and monospace only."
+            ),
+            "cjkFloor": CJK_FLOOR_PX,
+            "roles": TYPESCALE,
+        },
         "motion": {
             "_source": (
-                "Durations and standard/emphasized/linear easings are Google's, from "
-                "material-web tokens/versions/v0_192/_md-sys-motion.scss. `expressive-over`/"
-                "`expressive-out` and the `stagger` steps are ours (M3E spring overshoot; M3 "
-                "publishes no stagger token), not Google values."
+                "Durations and the standard/emphasized/linear easings are Google's, from "
+                "material-web tokens/versions/v0_192/_md-sys-motion.scss. `spring` is Google's "
+                "M3E motion scheme (androidx material3 tokens v0_14_0: spring damping ratios and "
+                "stiffnesses); `easing`/`duration` inside each spring are the `linear()` sample of "
+                "that spring and its settle time, derived here because CSS has no spring "
+                "primitive, and `fallback` is our cubic-bezier approximation for engines without "
+                "`linear()`. `expressive-over`/`expressive-out` and the `stagger` step are ours."
             ),
             "duration": MOTION_DURATIONS,
             "easing": MOTION_EASINGS,
             "stagger": MOTION_STAGGER,
+            "spring": {
+                name: {
+                    "damping": spring["damping"],
+                    "stiffness": spring["stiffness"],
+                    "duration": f"{spring_curve(spring['damping'], spring['stiffness'])[1]}ms",
+                    "easing": spring_curve(spring["damping"], spring["stiffness"])[0],
+                    "fallback": SPRING_FALLBACK[
+                        "spatial" if name.endswith("-spatial") else "effects"
+                    ],
+                }
+                for name, spring in SPRINGS.items()
+            },
         },
         "contrast": {"text": TEXT_PAIR_MIN, "graphic": GRAPHIC_MIN},
         "cli": ids,

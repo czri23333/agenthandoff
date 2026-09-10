@@ -47,28 +47,67 @@ export interface Palette {
   cli: Record<string, CliInk>;
 }
 
-/** M3 Expressive shape scale (px), from tokens.json. */
+/** M3 shape scale (px), from tokens.json. `full` is Google's corner-full. */
 export interface ShapeScale {
   xs: number;
   sm: number;
   md: number;
   lg: number;
   xl: number;
-  pill: number;
+  full: number;
+}
+
+/** Google's composed corners, derived in the generator from the shape scale. */
+export interface ComposedCorners {
+  corners: Record<
+    "extra-small-top" | "large-top" | "large-start" | "large-end" | "extra-large-top",
+    string
+  >;
 }
 
 /**
- * M3E motion contract, from tokens.json. Durations and the standard/emphasized
- * easings are Google's (material-web v0.192); `expressive-*` are ours. Nothing
- * in the app writes a duration or a curve by hand: components read these as
- * `--ah-motion-*` custom properties, which is what makes a motion change a
- * token change (and therefore reviewable and gate-checked) instead of a
- * scattering of magic `150ms ease` values.
+ * M3 interaction state: the opacity of a surface's own content colour composited
+ * over it. Google's four, plus the disabled pair (which M3 publishes only as
+ * prose, so those two numbers are ours).
+ */
+export interface StateTokens {
+  opacity: Record<string, number>;
+  disabled: Record<string, number>;
+}
+
+/** M3 elevation: official dp levels and the MDC-Web box-shadow for each. */
+export interface ElevationTokens {
+  levels: Record<string, number>;
+  shadow: Record<string, string>;
+}
+
+/** M3 type roles, with Google's size / line-height / tracking / weight. */
+export interface TypescaleTokens {
+  cjkFloor: number;
+  roles: Record<
+    string,
+    { size: number; line: number; tracking: number; weight: number; mono_only?: boolean }
+  >;
+}
+
+/**
+ * M3E motion contract, from tokens.json. Durations and the standard/emphasized/
+ * linear easings are Google's (material-web v0_192). `spring` is Google's M3E
+ * motion scheme (androidx material3 tokens v0_14_0) realised for the web: the
+ * official damping/stiffness pair, the `linear()` easing sampled from it, that
+ * sample's settle time, and a cubic-bezier `fallback` for engines without
+ * `linear()`. Nothing in the app writes a duration or a curve by hand: components
+ * read these as `--ah-motion-*` custom properties, which is what makes a motion
+ * change a token change (and therefore reviewable and gate-checked).
  */
 export interface MotionTokens {
   duration: Record<string, string>;
   easing: Record<string, string>;
   stagger: Record<string, string>;
+  spring: Record<
+    string,
+    { damping: number; stiffness: number; duration: string; easing: string; fallback: string }
+  >;
 }
 
 /* The token *names* are a closed set, so a typo must not compile. Typing these
@@ -77,11 +116,18 @@ export interface MotionTokens {
    antd and `transition: … var(--ah-motion-duration-short-4, )` to CSS. */
 type DurationName = keyof (typeof tokensJson)["motion"]["duration"];
 type EasingName = keyof (typeof tokensJson)["motion"]["easing"];
+type SpringName = keyof (typeof tokensJson)["motion"]["spring"];
+type TypeRole = keyof (typeof tokensJson)["typescale"]["roles"];
+type ElevationLevel = keyof (typeof tokensJson)["elevation"]["levels"];
 
 const TOKENS = tokensJson as unknown as {
   themes: Record<Effective, Palette>;
   cli: string[];
   shape: ShapeScale;
+  shapeComposed: ComposedCorners;
+  state: StateTokens;
+  elevation: ElevationTokens;
+  typescale: TypescaleTokens;
   motion: MotionTokens;
 };
 const KEY = "ah-theme";
@@ -100,8 +146,60 @@ export function dur(name: DurationName): string {
 export function curve(name: EasingName): string {
   return motion.easing[name];
 }
+/** A spring's settle duration, sampled easing and fallback bezier. */
+export function spring(name: SpringName) {
+  return motion.spring[name];
+}
+/** A type role's size / line-height / tracking / weight, e.g. `typeRole("body-small")`. */
+export function typeRole(name: TypeRole) {
+  return TOKENS.typescale.roles[name];
+}
+/** An elevation level's box-shadow, e.g. `elevation("level2")` (level0 is `none`). */
+export function elevation(level: ElevationLevel): string {
+  return TOKENS.elevation.shadow[level];
+}
 
 /* -- css injection ---------------------------------------------------------- */
+
+/** 0.08 → "8%": state opacities are stored as fractions, CSS wants a percentage. */
+function pct(fraction: number): string {
+  return `${Number((fraction * 100).toFixed(2))}%`;
+}
+
+/**
+ * The theme-independent half of the contract: shape, state layers, elevation,
+ * the type scale and motion. These do not change with the palette, so they are
+ * injected once on `:root` instead of being duplicated inside both theme blocks.
+ */
+function contractVars(): string {
+  return [
+    `--ah-shape-xs:${shape.xs}px;`,
+    `--ah-shape-sm:${shape.sm}px;`,
+    `--ah-shape-md:${shape.md}px;`,
+    `--ah-shape-lg:${shape.lg}px;`,
+    `--ah-shape-xl:${shape.xl}px;`,
+    `--ah-shape-full:${shape.full}px;`,
+    ...Object.entries(TOKENS.shapeComposed.corners).map(([k, v]) => `--ah-corner-${k}:${v};`),
+    ...Object.entries(TOKENS.state.opacity).map(([k, v]) => `--ah-state-${k}:${pct(v)};`),
+    ...Object.entries(TOKENS.state.disabled).map(([k, v]) => `--ah-state-disabled-${k}:${pct(v)};`),
+    ...Object.entries(TOKENS.elevation.shadow).map(([k, v]) => `--ah-elevation-${k}:${v};`),
+    ...Object.entries(TOKENS.typescale.roles).flatMap(([role, r]) => [
+      `--ah-type-${role}-size:${r.size}px;`,
+      `--ah-type-${role}-line:${r.line}px;`,
+      `--ah-type-${role}-tracking:${r.tracking}px;`,
+      `--ah-type-${role}-weight:${r.weight};`,
+    ]),
+    `--ah-type-cjk-floor:${TOKENS.typescale.cjkFloor}px;`,
+    ...Object.entries(motion.duration).map(([k, v]) => `--ah-motion-duration-${k}:${v};`),
+    ...Object.entries(motion.easing).map(([k, v]) => `--ah-motion-easing-${k}:${v};`),
+    ...Object.entries(motion.stagger).map(([k, v]) => `--ah-motion-stagger-${k}:${v};`),
+    ...Object.entries(motion.spring).flatMap(([name, s]) => [
+      `--ah-spring-${name}-duration:${s.duration};`,
+      `--ah-spring-${name}-easing:${s.easing};`,
+      `--ah-spring-${name}-fallback:${s.fallback};`,
+    ]),
+  ].join("");
+}
 
 function cssVars(p: Palette): string {
   return [
@@ -123,15 +221,6 @@ function cssVars(p: Palette): string {
     `--ah-ok-container:${p.okContainer};`,
     `--ah-warn-container:${p.warnContainer};`,
     `--ah-err-container:${p.errContainer};`,
-    `--ah-shape-xs:${shape.xs}px;`,
-    `--ah-shape-sm:${shape.sm}px;`,
-    `--ah-shape-md:${shape.md}px;`,
-    `--ah-shape-lg:${shape.lg}px;`,
-    `--ah-shape-xl:${shape.xl}px;`,
-    `--ah-shape-pill:${shape.pill}px;`,
-    ...Object.entries(motion.duration).map(([k, v]) => `--ah-motion-duration-${k}:${v};`),
-    ...Object.entries(motion.easing).map(([k, v]) => `--ah-motion-easing-${k}:${v};`),
-    ...Object.entries(motion.stagger).map(([k, v]) => `--ah-motion-stagger-${k}:${v};`),
   ].join("");
 }
 
@@ -155,6 +244,7 @@ function injectStyles(): void {
     document.head.appendChild(el);
   }
   el.textContent =
+    `:root{${contractVars()}}` +
     `:root[data-theme="dark"]{${cssVars(palettes.dark)}}` +
     `:root[data-theme="light"]{${cssVars(palettes.light)}}` +
     cliRules("dark") +
@@ -237,7 +327,7 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
     algorithm: effective === "dark" ? antdAlgorithms.darkAlgorithm : antdAlgorithms.defaultAlgorithm,
     token: {
       colorPrimary: PRIMARY,
-      // M3E shape scale: cards lg(16), controls md(12), chips pill.
+      // M3E shape scale: cards lg(16), controls md(12), chips full.
       borderRadius: 12,
       borderRadiusLG: 16,
       borderRadiusSM: 8,
