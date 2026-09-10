@@ -1,7 +1,7 @@
 ---
 feature: divergent-slice-motion-1
-status: designed
-updated: 2026-09-09
+status: delivered
+updated: 2026-09-10
 branch: compose/divergent-slice-motion-1
 commits: c033438..HEAD
 ---
