@@ -25,3 +25,8 @@ AGENT_HANDOFF_GUIDE.md
 
 # build artifact (tsc incremental)
 web/tsconfig.tsbuildinfo
+
+# Program receipts/screenshots: they carry personal names and email addresses,
+# so they stay on the maintainer's machine and out of the public tree.
+*submission-receipt*.png
+*-receipt-*.png
