@@ -128,6 +128,23 @@
   border-radius: var(--ah-c-button-sizes-large-shape-pressed);
 }
 
+/* The *container* is the variant's business, not the shared rule's. This block
+   is what a bare `.ah-btn` means: M3's filled button. antd's `default` button
+   is not filled, and painting it from here is how an outlined button briefly
+   shipped with a primary container.
+
+   It has to come *before* the variant rules below, because they are all
+   (0,1,0) and the later one wins: the first draft put it after, which silently
+   re-filled the tonal and elevated buttons with the primary container. */
+.ah-btn {
+  border: 0;
+  background: var(--ah-c-button-variant-filled-container);
+  color: var(--ah-c-button-variant-filled-content);
+  /* A filled surface composites its *on*-colour, which is
+     ButtonSmallTokens.HoveredLabelTextColor — not the label's own colour. */
+  --ah-state-layer-color: var(--ah-c-button-variant-filled-content);
+}
+
 /* Variants. A variant changes container, content and — for the outlined one —
    the outline width that OutlinedButtonTokens carries per size. */
 .ah-btn--tonal,
@@ -150,19 +167,6 @@
 .ah-btn--text {
   --_btn-hover-elevation: 0 0 0 0 transparent;
   --_btn-pressed-elevation: 0 0 0 0 transparent;
-}
-
-/* The *container* is the variant's business, not the shared rule's. This block
-   is what a bare `.ah-btn` means: M3's filled button. antd's `default` button
-   is not filled, and painting it from here is how an outlined button briefly
-   shipped with a primary container. */
-.ah-btn {
-  border: 0;
-  background: var(--ah-c-button-variant-filled-container);
-  color: var(--ah-c-button-variant-filled-content);
-  /* A filled surface composites its *on*-colour, which is
-     ButtonSmallTokens.HoveredLabelTextColor — not the label's own colour. */
-  --ah-state-layer-color: var(--ah-c-button-variant-filled-content);
 }
 
 /* FilledButtonTokens.HoveredContainerElevation and
@@ -615,9 +619,21 @@
   box-shadow: none;
 }
 
-:root .ant-switch.ant-switch-checked {
+/* Hover is included in the selector on purpose: antd paints a checked switch
+   with `colorPrimaryHover` while the pointer is over it, and its own
+   `.css-<hash>.ant-switch-checked:hover` is (0,3,0) — a tie my rule would lose
+   on insertion order. M3's answer is that the *track* stays primary and the 8%
+   layer composites over it, which is what the rule below and the `:hover` layer
+   further down do together. */
+:root .ant-switch.ant-switch-checked,
+:root .ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
   border-color: transparent;
   background: var(--ah-c-switch-selected-track);
+}
+
+:root .ant-switch:not(.ant-switch-checked),
+:root .ant-switch:not(.ant-switch-checked):hover:not(.ant-switch-disabled) {
+  background: var(--ah-c-switch-unselected-track);
 }
 
 :root .ant-switch.ant-switch-checked .ant-switch-handle {
@@ -828,7 +844,11 @@
 
 /* ── Tooltip, badge, divider, snackbar ─────────────────────────────────────── */
 
-:root .ant-tooltip .ant-tooltip-inner {
+/* antd v6 renders the bubble as `.ant-tooltip-container`; v5's
+   `.ant-tooltip-inner` no longer exists, and a rule against the old name is
+   *dead CSS that still passes the token gate* — it reads its custom properties
+   and simply never applies. The browser probe is what caught it. */
+:root .ant-tooltip .ant-tooltip-container {
   border-radius: var(--ah-c-tooltip-shape);
   background: var(--ah-c-tooltip-container);
   color: var(--ah-c-tooltip-content);
@@ -838,7 +858,8 @@
   box-shadow: none;
 }
 
-:root .ant-tooltip .ant-tooltip-arrow::before {
+:root .ant-tooltip .ant-tooltip-arrow::before,
+:root .ant-tooltip .ant-tooltip-arrow-content {
   background: var(--ah-c-tooltip-container);
 }
 
@@ -1428,7 +1449,7 @@
 }
 
 /* Tooltip, badge and the spacing scale's remaining steps. */
-:root .ant-tooltip .ant-tooltip-inner {
+:root .ant-tooltip .ant-tooltip-container {
   font-weight: var(--ah-c-tooltip-type-role-weight);
 }
 

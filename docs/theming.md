@@ -30,6 +30,8 @@ the token table.
 | interaction feedback | the official state layer (content colour at hover 8% / focus 12% / pressed 12%), never a brightness filter or a swapped background |
 | depth | level 0 (outline, no shadow) unless the surface floats: popover/dropdown/menu/tooltip/dialog take levels 2–3, a hovered row level 1 |
 | reduced motion | `prefers-reduced-motion: reduce` collapses every duration and delay |
+| a control's geometry | an official per-component token, *referenced* (never restated) from `tokens.json`'s `component` block and spent only as a `--ah-c-*` custom property |
+| interaction geometry | the M3E shape morph where the component publishes one: a button tightens to `corner-small`/`medium`/`large` while held, a list item widens `extra-small` → `medium` → `large` across rest/hover/selected |
 
 ### Where this deliberately differs from Google
 
@@ -45,14 +47,26 @@ re-derive every judgement.
 | tracking applies to every role | CJK-authored prose keeps `letter-spacing: normal` | tracking is a Latin typography device; the roles' numbers are sub-pixel Latin optimisations |
 | M3 publishes no `disabled` opacity | `container 12%` / `content 38%`, labelled ours in `tokens.json` | a disabled control has to look disabled; the value is recorded as ours rather than dressed as Google's |
 | `label-small` at 11px | 11px only beside a mono family | 11px CJK is illegible; the role is marked `mono_only` and the floor test enforces the pairing |
+| a dense text field is 40dp in Material's own spec pages | built from the same three published numbers (`8 + 24 + 8`), labelled ours | the *token* files publish only the 56dp geometry; the derivation is shown so it can be checked rather than trusted |
+| the filled field's focus indicator is 3px (`tokens/_md-comp-filled-field.scss`) | 3px | material-web's own pinned `versions/v0_192/_md-comp-filled-text-field.scss` still says 2px; the current field token set is the newer document and we follow it, but the disagreement is real and recorded here |
+| a list item's disabled label is 38% (`ListTokens.kt`) | 38% | material-web's `_md-comp-list.scss` says 0.3 for the same token. androidx is the newer source; either way the value is Google's, not a guess |
+| every component has a Material implementation | some do not, and the cockpit's are ours | M3 publishes no data table, no banner, no empty state, no description list and no inline spinner size. The table takes the list item's 16px leading space and the spacing scale for its cells; the rest are compositions, named here rather than left to look official |
+| antd's `size="small"` is a 32px control | mapped onto M3's *small* (40px); `size="large"` onto M3's *medium* (56px) | M3 publishes no 32px button. Leaving it would put an off-scale rectangle in an M3 toolbar, which is worse than moving it 8px |
+| a button's shape is its container's | a bare `.ah-btn` means the *filled* button, and antd's `default` is the *outlined* one | antd's variant classes are the owner of container colour; an earlier draft painted every antd button from the shared geometry rule and shipped an outlined button with a primary container. The rule now sets geometry only |
+| a list row lifts on hover (as the m3eofficial report claimed) | it morphs instead: `extra-small → medium`, elevation stays 0 | `ListTokens.kt` gives a list item level 0 at rest and level 4 only while *dragged*. The previous slice raised a hovered row to level 1 by analogy with M3E cards; that was wrong, and the row is now the correction |
+| `.ah-chip` is a chip | it is a CLI identity *label*: no press state, no morph, deliberately | it answers no interaction because it has none. M3's interactive families are `.ah-mchip` (`--assist` / `--filter` / `--input`) and are separate components with separate tokens |
 
 `tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
 
 ```bash
-python scripts/gen_tokens.py          # rewrites web/src/tokens.json
-python scripts/gen_tokens.py --check  # fails if the committed file drifted
+python scripts/gen_tokens.py          # rewrites tokens.json and firstpaint.css
+python scripts/gen_tokens.py --check  # fails if either committed file drifted
 cd web && npm ci && npm run build     # emits into src/agent_handoff/server/static
 ```
+
+`--check` covers **both** outputs now (the token file and the two-line pre-JS
+first paint), because a generated file that drifts silently is the failure mode
+this script exists to prevent, and it does not care which file it is.
 
 `--check` exists because this file used to be half-generated: `shape` and the
 four tonal containers lived only in the committed JSON, so following these
@@ -215,6 +229,110 @@ is deliberately absent where it would lie: chips answer no press (they are
 labels, not controls), and the freshness dot does not pulse (a permanently
 moving element reads as an alarm and breaks screenshot automation).
 
+## Components (M3)
+
+Tokens describe a *surface*. A control is made of anatomy — height, padding, icon
+size, corner, the corner it morphs to while held — and until the m3components
+slice that anatomy was antd v6's while the colours were ours. Measured before:
+a 32px button with `border-radius: 12px`, a switch with a 2px-radius knob, a 3px
+progress bar with square ends and no stop indicator, a list row that *lifted* on
+hover. None of those is Material 3, and none of them was checkable against
+Material 3, because the number lived in a stylesheet rather than in the contract.
+
+Now it lives in the contract. `scripts/gen_tokens.py` carries a `component`
+block — 22 families, each naming the files it came from — whose values are
+**references** rather than copies:
+
+```
+@shape:sm          → the shape scale (8px)
+@corner:xs-top     → a composed corner (`--ah-corner-extra-small-top`)
+@role:primary      → an official colour role (`var(--ah-primary)`)
+@type:label-large  → all four `var(--ah-type-label-large-{size,line,tracking,weight})`
+@elev:level3       → an elevation recipe
+@spring:standard-fast-spatial → a spring's duration and easing pair
+```
+
+`build()` refuses to run if a reference does not resolve, so renaming a rung of
+the shape scale cannot leave a component pointing at nothing — which is how
+`shape.pill` went missing once already. `theme.ts` flattens the block into
+`--ah-c-<path>` custom properties (camelCase → kebab-case: `listItem.height.oneLine`
+→ `--ah-c-list-item-height-one-line`), and `m3.css` reads them.
+
+**One owner per property.** antd keeps behaviour — focus management, the keyboard
+model, aria, Table virtualisation — and keeps any property it exposes as a
+*named* token, which `antdConfig()` now sets from the same token file
+(`Button.paddingInline` from `button.sizes.small.leading`, `Switch.trackHeight`
+from `switch.track.height`, `Table.cellPaddingBlock` from the spacing scale, and
+so on). `m3.css` owns what antd has no token for: the press shape morph, the
+state-layer composition, the chip families, the list-item morph, the floating
+label, the progress stop. There is no property with two owners, and no property
+with none.
+
+Where antd's own stylesheet is the obstacle rather than the owner, the override
+is deliberate and commented: `:root .ant-btn.ant-btn` is (0,3,0) against antd's
+`.css-<hash>.ant-btn-compact-item` at (0,2,0), because a plain `.ant-btn` ties
+and then *loses*: antd injects its styles at runtime, i.e. after this bundle.
+
+**The shape morph is the point**, so it gets its own rule and its own numbers.
+Button{Small,Medium,Large}Tokens publish `ContainerShapeRound: corner-full` and
+`PressedContainerShape: corner-small/medium/large`; `ListTokens` publishes
+`ItemContainerExpressiveShape: corner-extra-small`, `ItemHoveredContainerExpressiveShape:
+corner-medium` and `ItemPressedContainerExpressiveShape: corner-large`. Both are
+spent as geometry, so both animate on a spatial spring and are zeroed by
+`prefers-reduced-motion` like everything else. They are also the reason the
+generic `button:active { transform: scale(0.97) }` is retired on these elements:
+M3 answers a press with a corner and a state layer, not by shrinking the thing
+the reader is aiming at.
+
+Measured on the built bundle in headless Chromium (dark theme):
+
+| Surface | Rest | Hovered | Pressed |
+|---|---|---|---|
+| filled button | `40px`, `9999px`, `rgb(208,188,255)` on `rgb(56,30,114)`, `rgb(0,0,0)` shadow | 8% layer, level-1 shadow | corner `8px`, 12% layer, level-0 |
+| outlined button | `40px`, `9999px`, transparent, `rgb(202,196,208)` | 8% layer, **no** shadow | corner `8px`, 12% layer |
+| list row | corner `4px`, no shadow | corner `12px`, 8% layer | corner `16px`, 12% layer, `transform: none` |
+| top app bar | `64px` on `rgb(33,31,38)`, title 22/28 weight 400 | — | — |
+| segmented | `40px`, `9999px`, 1px `rgb(147,143,153)` | — | selected `rgb(74,68,88)` on `rgb(232,222,248)` |
+| switch, off → on | `52×32`, 2px outline, handle `16px` | — | handle `24px` at `inset-inline-start: 20px` |
+
+**The consumption gate is the one that keeps this honest**, and it runs twice.
+`tests/test_tokens_components.py` reimplements `theme.ts`'s flattening and asserts
+the stylesheet's `--ah-c-*` references and the token file's leaves are *equal*
+sets — 375 properties, neither side with an orphan. The browser probe asserts the
+same thing against the *running page*: it reads the injected `<style id="ah-tokens">`
+and the loaded CSSOM, which is the only way to catch a divergence between the two
+implementations of the transform. Both found real defects on the way in: three
+keys were written `icon_colour` where the CSS read `icon-color`, and a probe run
+showed an outlined antd button painted with the filled container.
+
+Two more gates: the values themselves are an independent hand transcription of
+Google's files (so a generator typo fails instead of regenerating a wrong file
+that then passes `--check` because both sides moved together), and `m3.css` may
+not contain a px length, a hex colour or a bare curve outside a short allow-list.
+
+### The pre-JS first paint
+
+One open question from §8.7 of the brief — a dark theme whose `getComputedStyle`
+reports the right colours while `page.screenshot()` renders light — is now closed,
+and the answer was not in the compositor.
+
+`--ah-surface-0` is written by `theme.ts`, which is inside the JS bundle. Between
+the first byte of navigation and that bundle executing — measured at 44–99 ms on
+this machine — `body { background: var(--ah-surface-0) }` is a guaranteed-invalid
+substitution, the declaration is dropped, and the page has **no canvas paint at
+all**. A capture taken in that window is composited onto the compositor's base
+colour, which is white; a DOM read one round-trip later sees the injected tokens
+and reports `rgb(20, 18, 24)`. Reproduced at 7/8 cold captures; the alternatives
+(background propagation, `color-scheme`, stylesheet order, a stale frame, an
+element painted over the DOM) were each falsified by measurement.
+
+The fix is two declarations, and they are **generated** rather than typed:
+`scripts/gen_tokens.py` writes `web/src/firstpaint.css` from the same palette, and
+`index.css` imports it before any rule that could paint the root. A hand-written
+copy would have been a second source of truth, which is the thing `--check`
+exists to eliminate. Measured after the fix: **0/8** white, 8/8 at the exact
+`rgb(20,18,24)`.
+
 ## Why the CLI chips are ours and not antd's
 
 The shipped cockpit passed `Tag color="sky"` and `color="amber"` for zcode and
@@ -243,3 +361,23 @@ token and `test_every_supported_cli_has_an_identity` tells you.
 3. Use it through a class in `index.css` — never as a literal in a component.
 4. If it carries meaning (status/severity), assert its contrast in
    `tests/test_tokens_contrast.py`.
+
+## Adding a component token
+
+1. Add the family (or the key) to `COMPONENTS` in `scripts/gen_tokens.py`, with a
+   `_source` naming the file it came from — androidx, material-web, or the word
+   `Ours`. The generator refuses a family without one.
+2. Point at an existing value rather than restating it: `@shape:sm`,
+   `@role:on-surface-variant`, `@type:body-medium`, `@elev:level3`,
+   `@corner:extra-small-top`, `@spring:standard-fast-spatial`. The generator
+   refuses a reference that does not resolve.
+3. Run `python scripts/gen_tokens.py`, then read the token in `m3.css` as
+   `var(--ah-c-<path>)` — the path with `-` between the keys and camelCase folded
+   (`listItem.height.oneLine` → `--ah-c-list-item-height-one-line`).
+4. **The consumption gate is exact, so you cannot skip step 3.** Publishing a
+   token no rule reads fails `test_stylesheet_reads_exactly_the_published_component_tokens`,
+   and so does reading one the generator does not emit. That is deliberate: a
+   token that nothing spends is a number pretending to be a contract, and a
+   property nothing injects is a control with an undefined value.
+5. If the value is a colour role, `test_every_reference_resolves` proves the role
+   exists, and the browser probe proves it reaches a computed value.
