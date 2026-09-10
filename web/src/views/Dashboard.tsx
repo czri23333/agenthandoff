@@ -704,7 +704,7 @@ function SessionRow({
           </span>
           {s.needs_reply === true && (
             <Tooltip title={t("needsReplyHint")}>
-              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
+              <span className="ah-warn shrink-0 text-[14px]">⚠</span>
             </Tooltip>
           )}
           <span className="w-24 shrink-0 text-right max-sm:hidden">

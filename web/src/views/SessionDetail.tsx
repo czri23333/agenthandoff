@@ -564,7 +564,7 @@ export default function SessionDetail({
               <div className="mt-2 space-y-1.5 border-t border-[var(--ah-line)] pt-2">
                 <span className="ah-label">{t("topicSegments")}</span>
                 {b.topics.map((tp, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[12.5px]">
+                  <div key={i} className="flex items-start gap-2 text-[12px]">
                     <span className="ah-inset min-w-[20px] px-1 text-center font-mono text-[12px]">{i + 1}</span>
                     <span className="min-w-0 flex-1 text-[var(--ah-text-1)]">{tp.opener}</span>
                     <span className="ah-faint shrink-0 font-mono">
@@ -679,7 +679,7 @@ export default function SessionDetail({
                 moreLabel={t("showMore")}
                 row={(m, i) =>
                   m.role === "compaction" ? (
-                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12px]">
                       <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
                       <span className="ah-meta">{m.text}</span>
                     </li>
@@ -913,7 +913,7 @@ export default function SessionDetail({
                   </p>
                 )}
                 {launcher.kind === "unverified" && (
-                  <p className="ah-warn mb-0 text-[12.5px]">{t("unverifiedHint")}</p>
+                  <p className="ah-warn mb-0 text-[12px]">{t("unverifiedHint")}</p>
                 )}
               </div>
             ) : (

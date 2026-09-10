@@ -148,7 +148,7 @@ export default function MemoryExport() {
                 const entries = data.entries.filter((e) => e.category === cat);
                 return (
                   <section key={cat} className="rounded-lg border p-4" style={{ borderColor: "var(--ah-line)" }}>
-                    <h3 className="mb-2 mt-0 text-sm font-semibold">
+                    <h3 className="mb-2 mt-0 text-sm font-medium">
                       {lang === "zh" ? t(`memoryCat_${cat}`) : cat}
                       <span className="ah-meta ml-2 font-normal">{entries.length}</span>
                     </h3>
@@ -157,7 +157,7 @@ export default function MemoryExport() {
                     ) : (
                       <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
                         {entries.map((e, i) => (
-                          <li key={i} className="flex gap-2 text-[13px] leading-relaxed">
+                          <li key={i} className="flex gap-2 text-[14px] leading-relaxed">
                             <span className="ah-meta shrink-0 whitespace-nowrap font-mono">
                               [{e.date === "unknown" ? t("memoryUnknown") : e.date}]
                             </span>
@@ -181,7 +181,7 @@ export default function MemoryExport() {
             </div>
 
             <section className="rounded-lg border p-4" style={{ borderColor: "var(--ah-line)" }}>
-              <h3 className="mb-2 mt-0 text-sm font-semibold">{t("memorySources")}</h3>
+              <h3 className="mb-2 mt-0 text-sm font-medium">{t("memorySources")}</h3>
               <Table<MemoryReport>
                 size="small"
                 rowKey={(r) => `${r.cli}:${r.path}`}
@@ -215,7 +215,7 @@ export default function MemoryExport() {
             </section>
 
             <section className="rounded-lg border p-4" style={{ borderColor: "var(--ah-line)" }}>
-              <h3 className="mb-2 mt-0 text-sm font-semibold">{t("memoryCompleteness")}</h3>
+              <h3 className="mb-2 mt-0 text-sm font-medium">{t("memoryCompleteness")}</h3>
               <Typography.Paragraph className="tx-user !mb-0" style={{ color: "var(--ah-fg)" }}>
                 {lang === "zh" ? data.completeness_zh : data.completeness_en}
               </Typography.Paragraph>

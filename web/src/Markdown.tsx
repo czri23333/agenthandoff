@@ -36,7 +36,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
       >
         {t("copy")}
       </button>
-      <pre ref={ref} className="overflow-x-auto rounded-md p-3 text-[12.5px] leading-relaxed">
+      <pre ref={ref} className="overflow-x-auto rounded-md p-3 text-[12px] leading-relaxed">
         {children}
       </pre>
     </div>

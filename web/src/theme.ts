@@ -344,6 +344,12 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
       colorBgLayout: p.surface0,
       colorBorder: p.line,
       colorBorderSecondary: p.line,
+      // M3 elevation: level 0 is an outline, shadow is for what floats. antd's
+      // popovers, dropdowns, menus, tooltips, dialogs and messages are exactly
+      // that, so they take the official recipes instead of antd's own shadows.
+      boxShadow: elevation("level3"),
+      boxShadowSecondary: elevation("level2"),
+      boxShadowTertiary: elevation("level1"),
       fontSize: 14,
       // antd's own widgets move on the same curves as ours, so a chip and a
       // Select popup never disagree about what "300ms emphasized" means.

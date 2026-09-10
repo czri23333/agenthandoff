@@ -130,12 +130,35 @@ def test_no_component_hardcodes_a_colour() -> None:
     assert not offenders, "colours outside the token table:\n  " + "\n  ".join(offenders[:10])
 
 
-def test_font_floor_is_enforced_in_css() -> None:
-    """CJK below ~12px is unreadable; the style system sets the floor, not JSX."""
+def test_font_floor_is_enforced_across_the_frontend() -> None:
+    """CJK below ~12px is unreadable, and the rule has to hold where text is set.
+
+    This used to scan `index.css` for `font-size: Npx` only. Two ways that fails:
+    after the M3 typescale migration there are no literal pixel sizes left in the
+    CSS at all (so an assertion over an empty set passes vacuously), and the
+    JSX — where eleven files set `text-[11px]` — was never looked at. The floor
+    now covers both, and it is enforced together with the scale: 11px is Google's
+    `label-small`, which is legitimate for latin identifiers and monospace, so it
+    is allowed only where the same element also sets a mono family.
+    """
     css = (WEB / "src" / "index.css").read_text(encoding="utf-8")
-    sizes = [float(v) for v in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", css)]
-    assert sizes, "expected explicit font sizes in the style system"
-    assert min(sizes) >= MIN_FONT_PX, f"index.css sets {min(sizes)}px text"
+    offenders: list[str] = []
+
+    for value in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", css):
+        if float(value) < MIN_FONT_PX:
+            offenders.append(f"index.css: literal {value}px is under the {MIN_FONT_PX}px floor")
+
+    for path in sorted((WEB / "src").rglob("*.tsx")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for match in re.finditer(r"text-\[(\d+(?:\.\d+)?)px\]", line):
+                size = float(match.group(1))
+                if size < MIN_FONT_PX and "font-mono" not in line:
+                    offenders.append(
+                        f"{path.name}:{lineno}: {size}px without a mono family "
+                        f"(label-small is latin-only)"
+                    )
+
+    assert not offenders, "text under the CJK floor:\n  " + "\n  ".join(offenders[:10])
 
 
 def test_theme_tokens_drive_antd() -> None:

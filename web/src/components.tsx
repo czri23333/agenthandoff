@@ -62,7 +62,7 @@ export function InterruptionBanner({ it }: { it: Interruption }) {
         <>
           {it.detail && <div className="ah-meta">{it.detail}</div>}
           {it.kind === "user_pending" && it.pending_user_text && (
-            <div className="ah-code mt-1.5 px-2 py-1.5 text-[12.5px]">
+            <div className="ah-code mt-1.5 px-2 py-1.5 text-[12px]">
               <span className="ah-label">{t("pendingDirective")}</span>
               <div className="whitespace-pre-wrap break-words">{it.pending_user_text}</div>
             </div>
@@ -139,7 +139,7 @@ export function Bullets({
   return (
     <ol className="m-0 list-none space-y-1.5 p-0">
       {items.map((s, i) => (
-        <li key={i} className="flex items-start gap-2 text-[13px] leading-[1.6] text-[var(--ah-text-1)]">
+        <li key={i} className="flex items-start gap-2 text-[14px] leading-[1.6] text-[var(--ah-text-1)]">
           {numbered ? (
             <span className="ah-inset mt-0.5 min-w-[20px] px-1 text-center font-mono text-[12px] leading-5">
               {i + 1}

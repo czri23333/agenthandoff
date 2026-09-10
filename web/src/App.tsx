@@ -135,7 +135,7 @@ export default function App() {
       >
         <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
           agenthandoff{" "}
-          <span className="ah-label" style={{ textTransform: "none", letterSpacing: 0 }}>
+          <span className="ah-label ah-label-plain">
             cockpit
           </span>
         </Typography.Title>
