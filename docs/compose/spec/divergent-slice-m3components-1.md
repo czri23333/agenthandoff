@@ -1,12 +1,103 @@
 ---
 feature: divergent-slice-m3components-1
-status: designed
-updated: 2026-09-10
+status: delivered
+updated: 2026-09-11
 branch: compose/divergent-slice-m3components-1
 commits: 0cb9eb1..HEAD
 ---
 
 # Divergent Slice M3 Components 1
+
+## Report
+
+**What was built.** `scripts/gen_tokens.py` gained a `component` block: 22
+families of per-component anatomy, transcribed from Google's own token files
+(androidx material3 v0_14_0) and cross-checked against material-web (design
+system v0_192). A value is a *reference*, not a copy — `@shape:`, `@corner:`,
+`@role:`, `@type:`, `@elev:`, `@spring:` — and `build()` refuses to run if a
+reference does not resolve, so renaming a rung of the shape scale cannot leave a
+component pointing at nothing. `theme.ts` flattens the block into 375 `--ah-c-*`
+custom properties and hands antd the same numbers through `ConfigProvider`.
+`web/src/m3.css` spends all 375 of them and writes no length, colour or curve of
+its own. Also generated, and also `--check`-gated: `web/src/firstpaint.css`, two
+declarations that close the screenshot anomaly (below).
+
+**Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
+and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
+tests/` → **316 passed** · `uv run ruff check .` → clean · `evidence --check` →
+21 rows, README and `support-matrix.json` match the fixtures · `conformance
+--check` → 12 CLIs match their baselines · `npx tsc -b` → exit 0 · `npm run
+build` → clean, dist rebuilt and committed.
+
+Browser-measured on the built bundle in headless Chromium (dark unless noted):
+
+| Claim | Measured |
+|---|---|
+| token consumption, at runtime | injected `367`…`375` = referenced `375`, **0** read-but-never-injected, **0** injected-but-never-read |
+| top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
+| filled button | `40px`, radius `9999px`, `min-width 64px`, padding `16px`, `14px/20px/500`, `rgb(208,188,255)` on `rgb(56,30,114)`, no shadow; transitions `0.16s, 0.24s, …` from the springs |
+| …hovered / pressed | 8% layer; then radius **`8px`** (`ButtonSmallTokens.PressedContainerShape`) + 12% layer + level 0, `transform: none` |
+| outlined button | transparent, `rgb(202,196,208)`, radius `9999px`, **no** hover shadow; pressed radius `8px` |
+| tonal / elevated button | `rgb(74,68,88)` on `rgb(232,222,248)`; `surface-container-low rgb(29,27,32)` in primary ink with the level-1 recipe |
+| list row | rest `4px` → hover `12px` + 8% layer → pressed `16px` + 12% layer, `transform: none` (was `scale(0.97)`) |
+| segmented | `40px`, `9999px`, 1px `rgb(147,143,153)`; selected `rgb(74,68,88)` on `rgb(232,222,248)` |
+| switch | `52×32`, 2px outline, handle `16px` off / **`24px`** on at `inset-inline-start: 20px`; checked track `rgb(208,188,255)` |
+| chip | off `32px`/`12px`/1px `outline-variant`/8px block margin (the 48px touch target); on `9999px`, 0 border, `secondary-container`, checkmark `display: flex` |
+| linear progress | track `4px` `secondary-container`, `padding-inline-end: 8px` (4 gap + 4 stop), fill `4px` `primary` on the 320ms spring, stop indicator **4×4** `primary` |
+| text field | `56px`, `4px 4px 0px 0px`, `surface-container-highest`; indicator 1px `on-surface-variant`; input 16/24 |
+| tooltip | `inverse-surface` on `inverse-on-surface`, 4px corner, body-small — verified in **both** themes |
+| FAB / icon button | `56×56` `corner-large` on `primary-container` with the level-3 recipe / `40×40` `corner-full` |
+| first paint | **0/8** white cold captures, 8/8 at the exact `rgb(20,18,24)` (was 7/8 white) |
+
+**Journey log.** (1) The audit that opened this slice measured the shipped
+controls and found antd's anatomy everywhere: a 32px button at `border-radius:
+12px`, a switch with a knob, a 3px progress bar with square ends, a list row that
+lifted on hover. (2) Google publishes this layer in two places that are not the
+same place — androidx has the token files, material-web has the CSS geometry —
+so every family is cited to at least one and often cross-checked against the
+other. Where they disagree the disagreement is in the deviation register, not
+sanded off: the filled field's focus indicator is 3px in material-web's current
+field token set and 2px in its own pinned `v0_192` copy, and the list item's
+disabled label is 0.38 in androidx and 0.3 in material-web. (3) Three defects were
+found by the new gates rather than by reading: the consumption gate caught three
+keys written `icon_colour` where the CSS read `icon-color`; the browser probe
+caught an outlined antd button painted with the filled container; and the second
+probe round caught the filled-container block sitting *after* the tonal and
+elevated variants, where all three are (0,1,0) and the later one wins. (4) The
+tooltip rule was dead CSS — `.ant-tooltip-inner` is a v5 class and v6 renders
+`.ant-tooltip-container` — and it satisfied the consumption gate while applying
+to nothing, which is the argument for a browser-side mirror of a static check.
+(5) The previous slice's row-lift is corrected: `ListTokens` gives a list item
+level 0 at rest and level 4 only while *dragged*, so a hovered row now widens its
+corner instead of rising.
+
+**The screenshot anomaly is closed.** §8.7 of the brief recorded a dark theme
+whose `getComputedStyle` reports the right colours while `page.screenshot()`
+renders light. An independent, read-only probe reproduced it (**7/8** cold
+captures white) and localised it: `--ah-surface-0` only exists once the JS bundle
+runs, so between `commit` and `theme.ts` — a window measured at **44–99 ms** —
+`body { background: var(--ah-surface-0) }` is a guaranteed-invalid substitution,
+the page has *no canvas paint at all*, and the capture is composited onto the
+compositor's base colour. The DOM read that reported dark values happened one
+round-trip after the capture. Background propagation, `color-scheme`, stylesheet
+order, a stale frame and "an element painted over the DOM" were each falsified by
+measurement. The fix is two generated declarations; after it, **0/8** white.
+
+**Disclosures.** No screenshot of a real dialogue exists in this slice's
+evidence: the stores on this machine carry sessions but no transcripts, so the
+message-transcript roles were re-measured only by token and by gate. The
+`progress`, `chip`, `text field`, `FAB` and `icon button` families are measured
+from instances constructed in the page with the app's own classes and stylesheet,
+because no view in the cockpit currently mounts them — the *rule* is under test,
+not a call site, and the harness is removed immediately after measurement. One
+browser only (chrome-headless-shell 153.0.8010.12, driven by Playwright 1.62 with
+an explicit `executable_path`, since the wheel's expected rev 1234 is absent).
+**Nothing on this branch has run on a GitHub runner** — the workflow triggers on
+`pull_request` or on `push` to `main`, and this branch has no pull request.
+
+**Independent verification.** The first review subagent was orphaned by a process
+restart and produced **no result** — it verified nothing. The second is recorded
+below.
 
 ## [S1] Problem
 
@@ -149,38 +240,38 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
 
 ## Tasks
 
-- [ ] T1: `component` token block — `gen_tokens.py` emits every family above with
+- [x] T1: `component` token block — `gen_tokens.py` emits every family above with
       Google's numbers and a per-family `_source` URL; `--check` green;
       `tests/test_tokens_components.py` asserts the numbers literally (covers: S2)
-- [ ] T2: Button + icon button + FAB — `m3.css` families with the official
+- [x] T2: Button + icon button + FAB — `m3.css` families with the official
       heights, paddings, icons, disabled 38% and the press shape morph; antd's
       `Button` receives the same geometry through `ConfigProvider`; browser-
       measured on the built bundle (covers: S2; depends: T1)
-- [ ] T3: Chip family — assist / filter / input at 32px with an 18px leading
+- [x] T3: Chip family — assist / filter / input at 32px with an 18px leading
       icon, the official selected container, the checkmark slot and the 48px
       touch target; the CLI identity `.ah-chip` is untouched and documented as a
       different component (covers: S2; depends: T1)
-- [ ] T4: List item anatomy — one/two/three-line heights, leading icon, trailing
+- [x] T4: List item anatomy — one/two/three-line heights, leading icon, trailing
       slot, `body-large` label + `body-medium` supporting + `label-small`
       overline/trailing, and the `4 → 12 → 16` state morph (covers: S2; depends: T1)
-- [ ] T5: Text field — filled and outlined, floating label, 56px and 40px
+- [x] T5: Text field — filled and outlined, floating label, 56px and 40px
       containers, focus indicator 3px, error/disabled states (covers: S2; depends: T1)
-- [ ] T6: Selection controls — switch (52×32, 24/16/28 handle, 16px icon),
+- [x] T6: Selection controls — switch (52×32, 24/16/28 handle, 16px icon),
       checkbox (18px, 2px radius), radio (20px), segmented (40px, `full`,
       `secondary-container` selected) (covers: S2; depends: T1)
-- [ ] T7: Dialog — 28px radius, `surface-container-high`, elevation 3, scrim
+- [x] T7: Dialog — 28px radius, `surface-container-high`, elevation 3, scrim
       0.32 through `--ah-scrim`, M3E enter/exit springs (covers: S2; depends: T1)
-- [ ] T8: Progress — linear 4px with the 4px stop indicator and the 4px gap,
+- [x] T8: Progress — linear 4px with the 4px stop indicator and the 4px gap,
       rounded ends, official track/active/stop colours; circular 40px (covers: S2; depends: T1)
-- [ ] T9: Tooltip, badge, divider, snackbar — official container, shape,
+- [x] T9: Tooltip, badge, divider, snackbar — official container, shape,
       elevation and type role for each (covers: S2; depends: T1)
-- [ ] T10: Layout structure — 64px top app bar, navigation bar/rail geometry and
+- [x] T10: Layout structure — 64px top app bar, navigation bar/rail geometry and
       the M3 spacing scale, applied to the shell (covers: S2; depends: T1)
-- [ ] T11: Gates and their mutation proofs — the literal component table, the
+- [x] T11: Gates and their mutation proofs — the literal component table, the
       token-consumption gate and the literal gate, each demonstrated able to fail
       on a `%TEMP%` copy (covers: S2; depends: T2–T10)
-- [ ] T12: The dark-screenshot anomaly is reproduced, root-caused and closed, or
+- [x] T12: The dark-screenshot anomaly is reproduced, root-caused and closed, or
       reported unresolved with the measurement that shows it (covers: S2)
-- [ ] T13: Docs, deviation register and verification — `docs/theming.md` gains
+- [x] T13: Docs, deviation register and verification — `docs/theming.md` gains
       the component contract and every new deviation; all gates green; one
       independent review recorded with its verdict (covers: S2; depends: T2–T12)
