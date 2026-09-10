@@ -1,6 +1,8 @@
 """QoderWake parser — the digital-employee daemon's SQLite store.
 
-Layout (verified live, 2026-09-01):
+Layout (**seen** on a real store, 2026-09-01 — not fixture-proven: no sanitized
+sample of this store ships, so `handoff matrix` reports this reader as unverified
+and CI never exercises it):
     ~/.qoderwake-cn/data/store/qoderwake.sqlite
         team_group_conversations_v3   team chats: task_name is the real title
         team_group_messages_v3        payload_json.body carries the dialogue

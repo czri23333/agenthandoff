@@ -22,16 +22,28 @@ are that same output, and CI fails if they drift from it
 
 What that leaves, stated here rather than in the table:
 
-* **proven (9)**: `zcode`, `codebuddy`, `qoderwork`, `qoderwork-cn`,
-  `qodercn-ide`, `qwenwork`, `dsh`, `codex`, and `kimi` *shape-only* — each is a
-  sanitized sample of a real store that our parsers turn into sessions and
-  messages in CI.
-* **unverified (2)**: `claude`, `codebuddy-cn`. Readers exist, no store was ever
-  available to sample and no fixture ships, so nothing here proves they work.
-  `dsh` additionally needs the optional `zstd` extra; without it the matrix says
-  `unavailable` instead of pretending the format is broken.
-* **roadmap (3)**: `opencode`, Qoder IDE (international, Electron leveldb),
-  Trae/IDE-family.
+* **stable / shape-only** — a sanitized sample of a real store is parsed by our
+  code in CI, with an asserted shape. `shape-only` means the store held no dialogue
+  to assert (kimi today): the structure round-trips, the conversation was never
+  exercised.
+* **unverified (no fixture)** — a reader exists and nothing in CI has ever fed it
+  data. The names are in the generated table; the honest reading is "the code is
+  there and may well be right, but no run in this repo proves it". Never describe
+  one of these as supported.
+* **`seen`** — the reader's docstring says its layout was read on a real machine on
+  a stated date. That is weaker than a fixture (you cannot reproduce it) and
+  stronger than nothing, so the docstring says it *and* says which of the two it is.
+* **roadmap** — no reader at all.
+
+Independently of the level, one optional dependency changes the answer: `dsh` needs
+the `zstd` extra. Without it the matrix says `unavailable` rather than pretending the
+format is broken.
+
+Counts are deliberately absent from this page. A count typed into prose is a count
+that will be wrong within a release — this section used to claim "proven (9) /
+unverified (2) / roadmap (3)" while the generated table said 11 / 8 / 1. Run
+`handoff matrix`, or read [config/support-matrix.json](../config/support-matrix.json),
+for the live numbers.
 
 The fixtures were built on one Windows host on 2026-08-31 from
 `scripts/sanitize_fixtures.py`, and every `.fixture.json` says how much was

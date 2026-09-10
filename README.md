@@ -139,8 +139,11 @@ Details in [docs/architecture.md](docs/architecture.md).
 ## Privacy
 
 - Session content never leaves your machine; the tool makes zero network calls.
-- No session data of any kind is committed — the repo ships no fixtures yet, and
-  when it does they will be structure-preserving, content-replaced files.
+- No session data of any kind is committed. The repo *does* ship sanitized fixtures
+  (see [docs/limitations.md](docs/limitations.md) and
+  `tests/fixtures/sanitized/`): they are structure-preserving, content-replaced
+  files, built by `scripts/sanitize_fixtures.py`, and each `.fixture.json` records
+  how much was sampled away.
 - Nothing leaves your machine: the tool makes zero network calls, and the cockpit
   binds to 127.0.0.1 only.
 - Bundles are written only where you point `--out`.

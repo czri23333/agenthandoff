@@ -1335,7 +1335,11 @@ class CodebuddyParser(_CodebuddyHybridParser):
 
 
 class CodebuddyCnParser(JsonlSessionParser):
-    """CodeBuddy CN edition — same layout under ~/.codebuddycn."""
+    """CodeBuddy CN edition — the same dialect under `~/.codebuddycn`.
+
+    Unverified: no sanitized fixture ships for this store, so the shared dialect
+    class is the whole argument here, and `handoff matrix` reports it unverified.
+    """
 
     cli = "codebuddy-cn"
     projects_dirname = ".codebuddycn"
@@ -1443,7 +1447,9 @@ class WorkbuddyParser(_CodebuddyHybridParser):
             if t:
                 raw.meta.title = t
         # Per-request credit attribution: session_usage.credit_json maps
-        # conversationRequestId -> credits (100% key match verified). The
+        # conversationRequestId -> credits. The mapping was *observed* to join
+        # cleanly on one live store; nothing asserts it in CI (this reader has no
+        # fixture), so treat a missing join as expected rather than as a bug. The
         # request id rides on providerData but _load_paths drops it, so
         # re-resolve: credit goes to the first assistant text turn at/after
         # the request's own timestamp. Tokens stay absent (honest).
@@ -2391,12 +2397,15 @@ class QodercnIdeParser(JsonlSessionParser):
 
 
 class QoderIdeParser(QodercnIdeParser):
-    """Qoder IDE (international edition) — same layout under ~/.qoder.
+    """Qoder IDE (international edition) — the same dialect under `~/.qoder`.
 
     The international and CN builds are separate installs with separate stores
     (``.qoder`` vs ``.qoder-cn``) and separate state DBs (``%APPDATA%/Qoder``
-    vs ``%APPDATA%/QoderCN``); everything else — dialect, quest titles, the
-    qoderwake board overlay — behaves identically.
+    vs ``%APPDATA%/QoderCN``). "Everything else behaves identically" is the
+    *assumption* this subclass is built on, not an observation: no fixture ships
+    for this store, so `handoff matrix` reports it unverified. The CN sibling has
+    a 25-file fixture, which is why the shared code path is exercised — but that
+    exercises the dialect, not this store.
     """
 
     cli = "qoder-ide"

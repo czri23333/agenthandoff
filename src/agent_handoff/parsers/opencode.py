@@ -1,6 +1,8 @@
 """OpenCode parser — SQLite store at ~/.local/share/opencode/opencode.db.
 
-Layout (verified live, 2026-09-01):
+Layout (**seen** on a real store, 2026-09-01 — not fixture-proven: no sanitized
+sample of this store ships, so `handoff matrix` reports this reader as unverified
+and CI never exercises it):
     session   id, title, directory, parent_id        (parent_id != null => sub-agent)
     message   id, session_id, time_created, data     (role/model/tokens/cost in data)
     part      message_id, session_id, data           (type: text|tool|reasoning|step-*)
