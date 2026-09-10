@@ -23,7 +23,7 @@
 ## 支持的 CLI
 
 <!-- MATRIX BEGIN: generated, do not edit -->
-下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 11 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
+下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 12 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
 
 | CLI | 存储形态 | 读取 | 脱敏夹具 | 夹具读出 | 格式指纹 | 状态 |
 |---|---|---|---|---|---|---|
@@ -40,7 +40,7 @@
 | `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ 仅形态（源存档无对话内容） |
 | `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 439 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `opencode` | SQLite | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `opencode` | SQLite | ✓ | 2 | 3 ses / 18 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwake` | SQLite + 共享 JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake-cn` | SQLite + 共享 JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwork-app` | SQLite（应用数据） | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |

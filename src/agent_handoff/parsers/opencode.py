@@ -22,6 +22,7 @@ import contextlib
 import json
 import sqlite3
 from collections import Counter
+from pathlib import Path
 
 from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
@@ -53,17 +54,30 @@ def _opencode_permission(raw) -> str | None:
 class OpenCodeParser(Parser):
     cli = "opencode"
 
-    def __init__(self, root=None) -> None:
+    # The tables this reader queries, for the fixture mirror. The live store is
+    # dominated by `event`/`event_sequence` — an append-only telemetry log the
+    # parser never reads — which made a 2.3 GB store mirror to 0.73 MB of
+    # irrelevant pages and put a vendor constant shaped like an address into the
+    # publish scan. A fixture should mirror what the reader reads.
+    fixture_tables = ("session", "message", "part", "todo")
 
-        self.root = root or home() / ".local" / "share" / "opencode"
+    def __init__(self, root=None) -> None:
+        target = Path(root) if root else home() / ".local" / "share" / "opencode"
+        # `with_root` aims every parser at exactly one path: a store tree for the
+        # file-based readers, the database file for the SQLite ones (zcode,
+        # cherrystudio and the app-data family all take it as `db_path`). opencode
+        # was the one SQLite reader carrying a directory handle instead, which is
+        # why a sanitized fixture of this store came out with 0 sessions and why
+        # no test could aim this parser at anything. Accept both, and expose the
+        # `db_path` handle the rest of the codebase looks for.
+        self.root = target.parent if target.is_file() else target
+        self.db_path = target if target.is_file() else target / "opencode.db"
 
     def available(self) -> bool:
         return self._db().is_file()
 
     def _db(self):
-        from pathlib import Path
-
-        return Path(self.root) / "opencode.db"
+        return self.db_path
 
     def _connect(self) -> sqlite3.Connection:
         # WAL files can be live; read-only URI avoids locking the app out.

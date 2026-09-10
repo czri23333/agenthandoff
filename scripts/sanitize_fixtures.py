@@ -169,6 +169,10 @@ STATIC_NAMES = {
     "compression-v2",
     "memory",
     "db.sqlite",
+    # opencode's database: the parser locates it by name inside its store, so the
+    # name is a handle rather than identity (hashing it left `with_root` pointing
+    # at a file that no longer existed).
+    "opencode.db",
     # desktop-app sqlite stores are located by filename (Parser.with_root aims
     # at the file itself), so they cannot be hashed either.
     "agents.db",
@@ -276,6 +280,12 @@ def _scrub_patterns() -> list[re.Pattern[str]]:
             or "(?!)",
             re.I,
         ),
+        # An address, at ANY position — not just where a value *starts* with one.
+        # The opencode store carries identity in the middle of longer tokens
+        # (`…@message.part.updated`), and the value-level `_EMAIL_RE.match` above is
+        # anchored, so a fixture went to the publish-safety scan with an email-shaped
+        # string in it. A fixture must never contain one, however it was formed.
+        re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
     ]
     return patterns
 
@@ -374,8 +384,15 @@ class Sanitizer:
         return fake
 
     def string(self, key: str, value: str) -> str:
+        # `_clean` runs on *every* string, including the ones that must otherwise
+        # survive verbatim. The scrub list is absolute ("must never appear at ANY
+        # position"), but the enum and schema-vocabulary branches below return
+        # early, so a value like opencode's `event.type` — a vendor constant that
+        # happens to be shaped `…@message.part.updated` — reached the publish-safety
+        # scan unscrubbed. If a CHECK constraint really enumerates the value, the
+        # rebuild fails in the audit instead of shipping, which is the loud failure.
         if value in self.keep.get(key or "", ()):
-            return value  # schema vocabulary: scrubbing it breaks the rebuild
+            return self._clean(value)
         return self._clean(self._string(key, value))
 
     def _string(self, key: str, value: str) -> str:
@@ -660,23 +677,46 @@ def _is_fts_shadow(name: str, sql: str) -> bool:
     ) and "fts" in lowered
 
 
-def transform_sqlite(src: Path, dst: Path, san: Sanitizer, sessions: list[str]) -> dict:
+def transform_sqlite(
+    src: Path,
+    dst: Path,
+    san: Sanitizer,
+    sessions: list[str],
+    only: tuple[str, ...] | None = None,
+) -> dict:
     """Rebuild the database: same schema, sanitized text, chosen sessions only.
 
     The first version copied every row of every table, so the zcode fixture
     carried all 223 of the maintainer's sessions - other projects, other paths,
     125 MB. Row counts are capped per table and the cap is reported in the
     manifest, so a fixture states what it is a sample of.
+
+    ``only`` narrows the mirror to the tables the *reader* queries. A store can be
+    mostly an append-only event log (opencode's is: 2.3 GB of `event` rows beside a
+    small conversation store), and mirroring it costs size, costs the publish scan,
+    and tests nothing the reader ever looks at.
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         dst.unlink()
-    stats: dict = {"rows": 0, "tables": 0, "capped": [], "unfiltered": [], "empty": []}
+    stats: dict = {
+        "rows": 0,
+        "tables": 0,
+        "capped": [],
+        "unfiltered": [],
+        "empty": [],
+        "skipped_unread": [],
+    }
     con = sqlite3.connect(dst)
     with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as source:
         schema = list(
             source.execute("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL")
         )
+        skipped_names = {
+            name
+            for typ, name, _sql in schema
+            if typ == "table" and only is not None and name not in only
+        }
         for _typ, _name, sql in schema:
             # FTS5 shadow tables (xxx_fts_data/idx/content/docsize/config) are
             # virtual-table internals: re-creating them by hand collides with
@@ -685,11 +725,26 @@ def transform_sqlite(src: Path, dst: Path, san: Sanitizer, sessions: list[str]) 
             # so they go too. Parsers only read the plain tables.
             if _name.startswith("sqlite_") or _is_fts_shadow(_name, sql or ""):
                 continue
+            if only is not None:
+                if _typ == "table" and _name not in only:
+                    stats["skipped_unread"].append(_name)
+                    continue
+                if _typ != "table":
+                    # An index, trigger or view belonging to a table we are not
+                    # mirroring cannot be replayed at all: it names a table that
+                    # will not exist ("no such table: main.event"). Match the name
+                    # anywhere in the statement rather than only after `ON`, which
+                    # misses views.
+                    pattern = "|".join(re.escape(s) for s in sorted(skipped_names))
+                    if pattern and re.search(rf'(?<![\w"])"?({pattern})"?(?![\w])', sql or ""):
+                        continue
             con.execute(sql)
         for typ, name, sql in schema:
             if typ != "table" or name.startswith("sqlite_"):
                 continue
             if _is_fts_shadow(name, sql or ""):
+                continue
+            if only is not None and name not in only:
                 continue
             san.keep = {k.lower(): set(v) for k, v in _check_vocabulary(sql or "").items()}
             cols = [r[1] for r in source.execute(f'PRAGMA table_info("{name}")')]
@@ -720,6 +775,13 @@ def transform_sqlite(src: Path, dst: Path, san: Sanitizer, sessions: list[str]) 
                 con.execute(insert, values)
                 stats["rows"] += 1
     con.commit()
+    # VACUUM before the fixture is published. A SQLite file keeps the bytes of
+    # anything it has freed — overflow pages from the pre-scrub value, in this
+    # case — and the privacy scan reads the whole file, not the logical rows. The
+    # opencode fixture was clean table-by-table and still carried an email-shaped
+    # string in its free space. Compaction is the difference between "the rows are
+    # sanitized" and "the file is safe to publish".
+    con.execute("VACUUM")
     con.close()
     san.keep = {}
     return stats
@@ -819,8 +881,33 @@ def select_files(base: Path, root: Path, sessions: list[str]) -> list[Path]:
     return [p for p in wanted if not (p in seen or seen.add(p))][:24]
 
 
+def _is_sqlite_file(path: Path) -> bool:
+    """True when the file opens as a SQLite database (header check, no schema read)."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
 def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -> dict:
-    root = Path(getattr(parser, "root", None) or parser.db_path)
+    declared_root = getattr(parser, "root", None)
+    db_path = Path(parser.db_path)
+    # A parser can expose both a store directory *and* the SQLite file it reads
+    # (opencode: root=~/.local/share/opencode, db_path=<root>/opencode.db). Mirroring
+    # the directory is worthless there: the walker selects files by name, `opencode.db`
+    # is not one of the listed names, and the result was a fixture with 0 sessions
+    # built from a store the live parser reads 222 from. When the parser's own
+    # db_path is an existing SQLite file inside its root, that file *is* the store.
+    root = Path(declared_root or db_path)
+    if (
+        declared_root is not None
+        and db_path.is_file()
+        and _is_sqlite_file(db_path)
+        and root.is_dir()
+        and root in db_path.parents
+    ):
+        root = db_path
     base = root.parent if cli in MIRROR_FROM_PARENT else root
     out_dir = OUT_ROOT / cli
     if out_dir.exists():
@@ -862,7 +949,15 @@ def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -
         dst.parent.mkdir(parents=True, exist_ok=True)
         extra: dict = {}
         if payload is None:
-            extra = {"sqlite": transform_sqlite(src, dst, san, sessions)}
+            extra = {
+                "sqlite": transform_sqlite(
+                    src,
+                    dst,
+                    san,
+                    sessions,
+                    only=getattr(parser, "fixture_tables", None),
+                )
+            }
         else:
             dst.write_bytes(payload)
         written.append(
@@ -870,6 +965,12 @@ def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -
         )
     # Record what a parser must be aimed at: the mirrored equivalent of the live
     # root (a directory for store-dir CLIs, the file itself for SQLite).
+    # Empty directories are pruned: an earlier failed run left the stale tree
+    # behind (only *files* were cleared), so a regenerated fixture carried the
+    # shape of a store it no longer mirrored.
+    for stale in sorted(out_dir.rglob("*"), reverse=True):
+        if stale.is_dir() and not any(stale.iterdir()):
+            stale.rmdir()
     if base.is_file():
         with_root_path = out_dir / base.name
     elif base == root:

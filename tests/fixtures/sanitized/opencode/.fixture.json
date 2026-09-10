@@ -1,0 +1,52 @@
+{
+  "cli": "opencode",
+  "with_root": "opencode\\opencode.db",
+  "mirrors": "~/.local/share/opencode/opencode.db",
+  "sessions": [
+    "jose736647a85",
+    "cay931f5655bf",
+    "sanecd54d6a925"
+  ],
+  "files": [
+    {
+      "rel": "opencode.db",
+      "bytes": 356352,
+      "sampled": false,
+      "sqlite": {
+        "rows": 417,
+        "tables": 4,
+        "capped": [
+          "message",
+          "part"
+        ],
+        "unfiltered": [],
+        "empty": [],
+        "skipped_unread": [
+          "workspace",
+          "data_migration",
+          "account_state",
+          "account",
+          "control_account",
+          "credential",
+          "event_sequence",
+          "event",
+          "permission",
+          "project_directory",
+          "project",
+          "session_context_epoch",
+          "session_input",
+          "session_message",
+          "session_share",
+          "migration"
+        ]
+      }
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 466,
+  "sampled_records": false,
+  "source_messages": 518,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

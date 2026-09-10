@@ -25,7 +25,7 @@ output, so bundles are diffable and trustworthy.
 ## Supported CLIs
 
 <!-- MATRIX BEGIN: generated, do not edit -->
-This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 11 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
+This table is derived from the sanitized real-format fixtures under `tests/fixtures/sanitized/` - not typed by hand (the derivation date lives in `config/support-matrix.json`). 12 rows carry fixture evidence you can reproduce after a clone with `pip install -e . && python -m agent_handoff.evidence --check`; the other labels name evidence gaps, not feature promises.
 
 | CLI | store | reader | fixtures | proven from fixtures | fingerprint | status |
 |---|---|---|---|---|---|---|
@@ -42,7 +42,7 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ stable (fixture-proven) |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |
 | `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 439 msg | ✓ | ✅ stable (fixture-proven) |
-| `opencode` | SQLite | ✓ | — | — | — | ⚠️ unverified (no fixture) |
+| `opencode` | SQLite | ✓ | 2 | 3 ses / 18 msg | ✓ | ✅ stable (fixture-proven) |
 | `qoderwake` | SQLite + shared JSONL | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake-cn` | SQLite + shared JSONL | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwork-app` | SQLite (app data) | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ stable (fixture-proven) |
