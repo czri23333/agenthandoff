@@ -38,6 +38,16 @@ cd web && npm ci && npm run build   # vite emits into ../src/agent_handoff/serve
 git add -A src/agent_handoff/server/static   # commit the rebuilt bundle in the same PR
 ```
 
+CI enforces this: the `frontend` job runs `npm ci`, `tsc -b`, `npm run build`
+and then fails if the committed dist differs from a fresh build — a forgotten
+rebuild used to ship a stale UI with every other gate green.
+
+That job runs on **windows-latest only**, and deliberately: the committed
+artifacts are authored on Windows, so a Linux-built tree can differ in ways
+that are not defects. If you build the frontend on Linux or macOS, expect the
+freshness step to flag your bundle; regenerate it on Windows before merging,
+or open an issue so the check can be widened with a normalizing step.
+
 `handoff ui --open` serves it at `http://127.0.0.1:8620` (loopback only).
 During development, `npm run dev` proxies `/api` to that port.
 

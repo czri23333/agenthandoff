@@ -36,3 +36,46 @@ jobs:
           handoff --version
           handoff doctor
           handoff matrix
+
+  frontend:
+    # The cockpit's built assets are committed (src/agent_handoff/server/static)
+    # and shipped inside the wheel, so a TypeScript error, a broken Vite build,
+    # or a forgotten rebuild all reach users while every Python gate stays
+    # green. This job typechecks, builds, and proves the committed dist is what
+    # the source produces.
+    #
+    # It runs on Windows because that is where the committed artifacts are
+    # authored: comparing a Linux-built tree against a Windows-built one would
+    # report formatting differences as failures, and a gate that cries wolf is
+    # ignored. A Linux-based contributor would see this flag their rebuild;
+    # CONTRIBUTING records the trade.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend deps
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck the cockpit
+        working-directory: web
+        run: npx tsc -b
+      - name: Build the cockpit
+        working-directory: web
+        run: npm run build
+      - name: Committed dist matches the source
+        shell: bash
+        run: |
+          # --porcelain (not just diff) so an asset the build no longer emits,
+          # or a new one it started emitting, is caught too.
+          if [ -n "$(git status --porcelain -- src/agent_handoff/server/static)" ]; then
+            git --no-pager diff --stat -- src/agent_handoff/server/static
+            git status --porcelain -- src/agent_handoff/server/static
+            echo "::error title=stale cockpit dist::the committed dist is not what web/ builds. Run 'npm ci && npm run build' in web/ and commit src/agent_handoff/server/static."
+            exit 1
+          fi
+          echo "committed dist matches a fresh build"
+
