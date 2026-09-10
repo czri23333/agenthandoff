@@ -34,8 +34,9 @@
        a hover on a surface ....... medium1        (250ms), emphasized — the outline
                                                    firms up; a surface is not a control
        a large surface resizing ... medium1-medium2, emphasized
+       a container unfolding ..... short4          (200ms), expressive-over
        an endless loop ............ extra-long4, linear                        */
-  --ah-motion-stagger: 12ms;
+  --ah-motion-stagger-row: 12ms;
   --ah-motion-duration-short2: 100ms;
   --ah-motion-duration-short3: 150ms;
   --ah-motion-duration-short4: 200ms;
@@ -313,15 +314,17 @@ body {
   border: 1px solid var(--ah-line);
   border-radius: var(--ah-shape-md);
   /* The state layer used to snap on instantly; M3E eases it, and lifts the row
-     a hair so the pointer's target reads as a physical thing. `filter`, `color`
-     and `box-shadow` are here too because many rows *are* <button>s: a class
-     shorthand (0,1,0) outranks the element-level pressable rule below (0,0,1),
-     so leaving them out makes `:active`'s brightness snap while the scale eases. */
+     a hair so the pointer's target reads as a physical thing. `filter`, `color`,
+     `opacity` and `box-shadow` are here too because many rows *are* <button>s:
+     a class shorthand (0,1,0) outranks the element-level pressable rule below
+     (0,0,1), so leaving them out makes `:active`'s brightness snap while the
+     scale eases. */
   transition:
     background-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     border-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     transform var(--ah-motion-duration-short2) var(--ah-motion-easing-expressive-out),
     filter var(--ah-motion-duration-short2) var(--ah-motion-easing-standard),
+    opacity var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     box-shadow var(--ah-motion-duration-short3) var(--ah-motion-easing-standard);
 }
@@ -338,7 +341,11 @@ body {
   border-radius: var(--ah-radius);
 }
 
-/* Tactile interaction spec: every pressable answers within ~100ms --------- */
+/* Tactile interaction spec: every pressable answers within ~100ms.
+   `opacity` is in the list because an unlayered element rule beats *every*
+   cascade layer regardless of specificity, so this shorthand also decides
+   whether a Tailwind utility such as `transition-opacity` can animate at all
+   on a button. Omit it and the copy button's hover fade snaps. */
 button,
 [role="button"],
 select,
@@ -346,6 +353,7 @@ input[type="range"] {
   transition:
     transform var(--ah-motion-duration-short2) var(--ah-motion-easing-expressive-out),
     filter var(--ah-motion-duration-short2) var(--ah-motion-easing-standard),
+    opacity var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     background-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     border-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
@@ -424,13 +432,13 @@ button:disabled {
   animation: row-in var(--ah-motion-duration-short4) var(--ah-motion-easing-standard-decelerate)
     both;
 }
-.row-enter:nth-child(2) { animation-delay: calc(var(--ah-motion-stagger) * 1); }
-.row-enter:nth-child(3) { animation-delay: calc(var(--ah-motion-stagger) * 2); }
-.row-enter:nth-child(4) { animation-delay: calc(var(--ah-motion-stagger) * 3); }
-.row-enter:nth-child(5) { animation-delay: calc(var(--ah-motion-stagger) * 4); }
-.row-enter:nth-child(6) { animation-delay: calc(var(--ah-motion-stagger) * 5); }
-.row-enter:nth-child(7) { animation-delay: calc(var(--ah-motion-stagger) * 6); }
-.row-enter:nth-child(8) { animation-delay: calc(var(--ah-motion-stagger) * 7); }
+.row-enter:nth-child(2) { animation-delay: calc(var(--ah-motion-stagger-row) * 1); }
+.row-enter:nth-child(3) { animation-delay: calc(var(--ah-motion-stagger-row) * 2); }
+.row-enter:nth-child(4) { animation-delay: calc(var(--ah-motion-stagger-row) * 3); }
+.row-enter:nth-child(5) { animation-delay: calc(var(--ah-motion-stagger-row) * 4); }
+.row-enter:nth-child(6) { animation-delay: calc(var(--ah-motion-stagger-row) * 5); }
+.row-enter:nth-child(7) { animation-delay: calc(var(--ah-motion-stagger-row) * 6); }
+.row-enter:nth-child(8) { animation-delay: calc(var(--ah-motion-stagger-row) * 7); }
 
 @keyframes shimmer {
   0% {

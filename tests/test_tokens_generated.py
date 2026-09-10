@@ -93,13 +93,32 @@ def test_motion_tokens_are_well_formed():
         "cubic-bezier(a, b, c, d)",  # not numbers
         "cubic-bezier(0.2 0 0 1)",  # missing commas
         "ease-in-out",  # not a cubic-bezier at all
+        "cubic-bezier(1., 0, 0, 1)",  # a trailing dot is not a CSS number
+        "cubic-bezier(1.2.3, 0, 0, 1)",  # matches [\d.]+ but is not a number
+        "cubic-bezier(, 0, 0, 1)",  # empty operand
     ],
 )
 def test_the_easing_gate_rejects_values_the_browser_would_drop(broken: str):
-    """A prefix check passed all of these while both the docstring and T2 called
+    """A prefix check passed the first five while both the docstring and T2 called
     the assertion "well-formed" — a gate that validates `startswith` teaches a
-    reviewer to trust it for something it never checked."""
+    reviewer to trust it for something it never checked. The last three are the
+    number grammar: the browser rejects them, and a `[\\d.]+` pattern followed by
+    an unguarded `float()` raised a ValueError on the last two instead of
+    reporting the token."""
     assert gen.easing_problem(broken) is not None
+
+
+def test_the_easing_gate_accepts_css_numbers_python_would_miss():
+    """`1e-5` is a valid CSS control point; a dtype-naive pattern rejects it."""
+    assert gen.easing_problem("cubic-bezier(1e-5, 0, 0, 1)") is None
+    assert gen.easing_problem("cubic-bezier(.5, 0, 1, 1)") is None
+
+
+def test_the_stagger_is_a_token_not_a_literal():
+    """It was a bare `12ms` in the stylesheet while the docs called it a token."""
+    motion = _committed()["motion"]
+    assert motion["stagger"]["row"] == "12ms"
+    assert "stagger" in _committed()["motion"]
 
 
 def test_the_duration_gate_names_a_bad_value_instead_of_raising():

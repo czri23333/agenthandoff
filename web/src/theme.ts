@@ -68,6 +68,7 @@ export interface ShapeScale {
 export interface MotionTokens {
   duration: Record<string, string>;
   easing: Record<string, string>;
+  stagger: Record<string, string>;
 }
 
 /* The token *names* are a closed set, so a typo must not compile. Typing these
@@ -130,6 +131,7 @@ function cssVars(p: Palette): string {
     `--ah-shape-pill:${shape.pill}px;`,
     ...Object.entries(motion.duration).map(([k, v]) => `--ah-motion-duration-${k}:${v};`),
     ...Object.entries(motion.easing).map(([k, v]) => `--ah-motion-easing-${k}:${v};`),
+    ...Object.entries(motion.stagger).map(([k, v]) => `--ah-motion-stagger-${k}:${v};`),
   ].join("");
 }
 

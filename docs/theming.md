@@ -82,14 +82,26 @@ How they are spent — the rule `index.css` follows, so a reviewer can check it:
 | a view or panel changing | `medium2` (300 ms) | `emphasized-decelerate` |
 | hovering a *surface* (outline firms up; no state layer) | `medium1` (250 ms) | `emphasized` |
 | a surface resizing (progress, gauge) | `medium1`–`medium2` | `emphasized` |
+| a container unfolding (sub-sessions) | `short4` (200 ms) | `expressive-over` |
 | an endless loop (skeleton shimmer) | `extra-long4` (1000 ms) | `linear` |
 
-Two tokens are ours, not Google's, and both are labelled as such in
-`tokens.json`: `expressive-over`/`expressive-out` (the M3E spring overshoot) and
-the `--ah-motion-stagger` step (12 ms, the list rhythm — M3 publishes no stagger
-token). The stagger is capped at the eighth row *of a list*: past that a delay
+Three values are ours, not Google's, and all three are labelled as such *in
+`tokens.json` and gated by `gen_tokens.py`*: `expressive-over` / `expressive-out`
+(the M3E spring overshoot) and `motion.stagger.row` (`--ah-motion-stagger-row`,
+12 ms — M3 publishes no stagger token, but the list rhythm still deserves an
+owner). The stagger is capped at the eighth row *of a list*: past that a delay
 stops being a flourish and becomes a wait. It is pure CSS `nth-child`, so the
 counter is per `<ul>` and a domain-grouped view restarts the rhythm per group.
+
+Two cascade rules are load-bearing here, because breaking either is silent:
+
+- An **unlayered** element rule beats *every* cascade layer regardless of
+  specificity. `index.css`'s `button { transition: … }` is unlayered and
+  Tailwind's `.transition-*` utilities are layered, so the pressable shorthand
+  decides whether a utility can animate at all: `opacity` is in that list
+  because the copy button relies on it.
+- A class shorthand outranks the element one, so `.ah-row` (many rows are
+  `<button>`s) repeats the pressable property list rather than inheriting it.
 
 Adding or changing motion is a token change first: edit `gen_tokens.py`, rerun
 it, rebuild, and the new timing reaches CSS, antd and the tests together. Motion

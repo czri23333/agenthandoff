@@ -147,22 +147,36 @@ MOTION_EASINGS: dict[str, str] = {
     "expressive-out": "cubic-bezier(0.22, 1.2, 0.36, 1)",
 }
 
+# Stagger steps, in ms. M3 publishes no such token (its lists do not stagger),
+# so this one is ours and is labelled as such — but it lives in the token file
+# all the same, so "the rhythm between rows" is a value with an owner and a
+# check rather than a literal someone typed into the stylesheet.
+MOTION_STAGGER: dict[str, str] = {"row": "12ms"}
+
 # Both shapes below are what the browser actually accepts: a CSS cubic-bezier
 # takes exactly four numbers, and its two x control points must lie in [0, 1]
 # (y may exceed 1 — that overshoot is the point of `expressive-*`). A gate that
 # only checked the prefix would happily ship `cubic-bezier(0.2, 0, 0)`, which
-# the browser drops on the floor.
+# the browser drops on the floor. The number pattern is CSS's, not Python's:
+# `1e-5` is valid and `1.` is not (`CSS.supports` disagrees with `float()` on
+# both), and it cannot match `1.2.3`, so the `float()` below cannot raise.
+_NUMBER = r"-?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?"
 _EASING_RE = re.compile(
-    r"cubic-bezier\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)"
+    rf"cubic-bezier\(\s*({_NUMBER})\s*,\s*({_NUMBER})\s*,\s*({_NUMBER})\s*,\s*({_NUMBER})\s*\)"
 )
 _DURATION_RE = re.compile(r"(\d+)ms")
 
 
 def easing_problem(value: str) -> str | None:
-    """Why this value is not a usable cubic-bezier, or None when it is."""
+    """Why this value is not a usable cubic-bezier, or None when it is.
+
+    A validator must report, never raise: this function is called from the
+    build gate that `--check` and the tests run, so a traceback here replaces
+    the one message the contributor needs ("which token, and what is wrong").
+    """
     match = _EASING_RE.fullmatch(value)
     if not match:
-        return "not cubic-bezier(a, b, c, d) with four numbers"
+        return "not cubic-bezier(a, b, c, d) with four plain numbers"
     for group in (1, 3):  # the x control points
         x = float(match.group(group))
         if not 0.0 <= x <= 1.0:
@@ -389,6 +403,10 @@ def build() -> tuple[dict, list[str]]:
         if problem:
             problems.append(f"motion easing {name}: {problem} ({value})")
 
+    for name, value in MOTION_STAGGER.items():
+        if not _DURATION_RE.fullmatch(value):
+            problems.append(f"motion stagger {name} must be a plain ms value, got {value!r}")
+
     tokens = {
         "_readme": (
             "Cockpit design tokens — the single source of truth for both themes. theme.ts "
@@ -405,12 +423,14 @@ def build() -> tuple[dict, list[str]]:
         "shape": SHAPE,
         "motion": {
             "_source": (
-                "Durations and standard/emphasized easings are Google's, from material-web "
-                "tokens/versions/v0_192/_md-sys-motion.scss. `expressive-over`/`expressive-out` "
-                "are ours (M3E spring overshoot), not Google values."
+                "Durations and standard/emphasized/linear easings are Google's, from "
+                "material-web tokens/versions/v0_192/_md-sys-motion.scss. `expressive-over`/"
+                "`expressive-out` and the `stagger` steps are ours (M3E spring overshoot; M3 "
+                "publishes no stagger token), not Google values."
             ),
             "duration": MOTION_DURATIONS,
             "easing": MOTION_EASINGS,
+            "stagger": MOTION_STAGGER,
         },
         "contrast": {"text": TEXT_PAIR_MIN, "graphic": GRAPHIC_MIN},
         "cli": ids,
