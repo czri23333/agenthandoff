@@ -148,15 +148,18 @@ def test_font_floor_is_enforced_across_the_frontend() -> None:
         if float(value) < MIN_FONT_PX:
             offenders.append(f"index.css: literal {value}px is under the {MIN_FONT_PX}px floor")
 
+    # The justification is read from the *class attribute*, not from the line: a
+    # review showed a same-line check waves through a `text-[11px]` whose
+    # `font-mono` sits on the next line of a wrapped attribute.
     for path in sorted((WEB / "src").rglob("*.tsx")):
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            for match in re.finditer(r"text-\[(\d+(?:\.\d+)?)px\]", line):
-                size = float(match.group(1))
-                if size < MIN_FONT_PX and "font-mono" not in line:
-                    offenders.append(
-                        f"{path.name}:{lineno}: {size}px without a mono family "
-                        f"(label-small is latin-only)"
-                    )
+        text = path.read_text(encoding="utf-8")
+        for quoted, template in re.findall(r"className=(?:\"([^\"]*)\"|\{`([^`]*)`\})", text):
+            classes = quoted or template
+            sizes = [float(s) for s in re.findall(r"text-\[(\d+(?:\.\d+)?)px\]", classes)]
+            if sizes and min(sizes) < MIN_FONT_PX and "font-mono" not in classes:
+                offenders.append(
+                    f"{path.name}: {classes.strip()[:60]}… sets {min(sizes)}px without font-mono"
+                )
 
     assert not offenders, "text under the CJK floor:\n  " + "\n  ".join(offenders[:10])
 

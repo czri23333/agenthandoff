@@ -47,11 +47,23 @@ OFFICIAL_ELEVATION_DP = {
     "level4": 8,
     "level5": 12,
 }
-OFFICIAL_LEVEL1_SHADOW = (
-    "0px 2px 1px -1px rgba(0, 0, 0, 0.2), "
-    "0px 1px 1px 0px rgba(0, 0, 0, 0.14), "
-    "0px 1px 3px 0px rgba(0, 0, 0, 0.12)"
-)
+# MDC-Web's umbra/penumbra/ambient maps at 0.2/0.14/0.12 black, for each of M3's
+# six dp levels. An independent review verified levels 2-5 against the source but
+# noted only level 1 was pinned here — a typo in the other four would have passed
+# CI, so all six are written out.
+OFFICIAL_SHADOWS = {
+    "level0": "none",
+    "level1": "0px 2px 1px -1px rgba(0, 0, 0, 0.2), 0px 1px 1px 0px rgba(0, 0, 0, 0.14), "
+    "0px 1px 3px 0px rgba(0, 0, 0, 0.12)",
+    "level2": "0px 3px 3px -2px rgba(0, 0, 0, 0.2), 0px 3px 4px 0px rgba(0, 0, 0, 0.14), "
+    "0px 1px 8px 0px rgba(0, 0, 0, 0.12)",
+    "level3": "0px 3px 5px -1px rgba(0, 0, 0, 0.2), 0px 6px 10px 0px rgba(0, 0, 0, 0.14), "
+    "0px 1px 18px 0px rgba(0, 0, 0, 0.12)",
+    "level4": "0px 5px 5px -3px rgba(0, 0, 0, 0.2), 0px 8px 10px 1px rgba(0, 0, 0, 0.14), "
+    "0px 3px 14px 2px rgba(0, 0, 0, 0.12)",
+    "level5": "0px 7px 8px -4px rgba(0, 0, 0, 0.2), 0px 12px 17px 2px rgba(0, 0, 0, 0.14), "
+    "0px 5px 22px 4px rgba(0, 0, 0, 0.12)",
+}
 
 # material-web v0_192 / _md-sys-typescale.scss, rem × 16 → px
 OFFICIAL_ROLES = {
@@ -97,10 +109,9 @@ def test_state_disabled_is_labelled_as_ours():
     assert "ours" in TOKENS["state"]["_source"]
 
 
-def test_elevation_levels_are_googles_and_level0_is_no_shadow():
+def test_elevation_levels_are_googles_and_every_recipe_matches():
     assert TOKENS["elevation"]["levels"] == OFFICIAL_ELEVATION_DP
-    assert TOKENS["elevation"]["shadow"]["level0"] == "none"
-    assert TOKENS["elevation"]["shadow"]["level1"] == OFFICIAL_LEVEL1_SHADOW
+    assert TOKENS["elevation"]["shadow"] == OFFICIAL_SHADOWS
 
 
 def test_every_type_role_matches_googles_scale():

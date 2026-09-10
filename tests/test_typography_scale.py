@@ -94,22 +94,37 @@ def test_jsx_uses_only_official_sizes():
 
 
 def test_no_weight_heavier_than_m3s_medium():
-    """M3 publishes regular (400) and medium (500). 600 is off the scale."""
+    """M3 publishes regular (400) and medium (500) — nothing else.
+
+    Checked as a *closed set* on the declaration's value rather than as a numeric
+    range: an independent review showed the earlier `font-weight:\\s*(\\d+)` pattern
+    let the CSS keyword `bold` through, which is the same off-scale weight spelled
+    a different way.
+    """
     offenders: list[str] = []
-    for pattern, label in (
-        (r"font-weight:\s*(\d+)", "css font-weight"),
-        (r"font-(semibold|bold|extrabold|black)\b", "jsx weight utility"),
-    ):
-        for path in [WEB / "index.css", *sorted(WEB.rglob("*.tsx"))]:
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                for match in re.finditer(pattern, line):
-                    value = match.group(1)
-                    off_scale = (value.isdigit() and int(value) not in M3_WEIGHTS) or (
-                        not value.isdigit()
-                    )
-                    if off_scale:
-                        offenders.append(f"{path.name}:{lineno}: {label} {value}")
+    for path in [WEB / "index.css", *sorted(WEB.rglob("*.tsx"))]:
+        text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for match in re.finditer(r"font-weight:\s*([^;}\n]+)", line):
+                value = match.group(1).strip()
+                if value not in {"400", "500"} and not re.fullmatch(
+                    r"var\(--ah-type-[a-z-]+-weight\)", value
+                ):
+                    offenders.append(f"{path.name}:{lineno}: font-weight {value}")
+            for match in re.finditer(r"font-(?:semibold|bold|extrabold|black)\b", line):
+                offenders.append(f"{path.name}:{lineno}: utility {match.group(0)}")
     assert not offenders, "weights M3 does not define:\n  " + "\n  ".join(offenders[:10])
+
+
+def test_jsx_has_no_inline_font_size():
+    """An inline `fontSize` bypasses the role exactly as an inline tracking would."""
+    offenders = [
+        f"{path.name}:{lineno}"
+        for path in sorted(WEB.rglob("*.tsx"))
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"fontSize", line)
+    ]
+    assert not offenders, f"inline font-size bypasses the role: {offenders}"
 
 
 def test_jsx_has_no_hand_written_letter_spacing():
