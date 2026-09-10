@@ -1,4 +1,13 @@
 @import "tailwindcss";
+/* The pre-JS first paint, generated from the same palette as everything else:
+   `--ah-surface-0` only exists once `theme.ts` has run, and until it does the
+   canvas has no paint at all — which is what made a dark-theme screenshot come
+   out white. Must be imported before any rule that could paint the root. */
+@import "./firstpaint.css";
+/* Material 3 component anatomy. Imported before the rules below so this sheet's
+   element-level pressable shorthand still decides what a button can animate, and
+   because every `@import` has to precede other rules. */
+@import "./m3.css";
 
 /* ── Cockpit style system ─────────────────────────────────────────────────────
    Colours come only from CSS custom properties injected by theme.ts out of
@@ -365,7 +374,9 @@ body {
 .ah-row {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
-  border-radius: var(--ah-shape-md);
+  /* ListTokens.ItemContainerShape at rest, and the M3E morph: the row widens to
+     corner-medium on hover and corner-large once it is pressed or selected. */
+  border-radius: var(--ah-c-list-item-shape-rest);
   /* `filter`, `color`, `opacity` and `box-shadow` are here too because many rows
      *are* <button>s: a class shorthand (0,1,0) outranks the element-level
      pressable rule below (0,0,1), and leaving a property out of this list makes
@@ -373,6 +384,7 @@ body {
   transition:
     background-color var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
     border-color var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
     transform var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
     opacity var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
     color var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
@@ -381,15 +393,30 @@ body {
 
 /* Hover is the official state layer: the row's own content colour composited at
    M3's 8%, *over* the surface it already has — not a different background token.
-   Composed as an inset shadow so no extra DOM is needed, and paired with the
-   M3E lift (a hovered row rises to elevation 1). */
+   Composed as an inset shadow so no extra DOM is needed.
+
+   The row does not lift, and that is a correction: the previous slice raised a
+   hovered row to elevation 1 on the belief that M3E lifts list rows. ListTokens
+   says a list item is level 0 at rest, and its *dragged* elevation — level 4 —
+   is the only level it ever reaches. What M3E actually does to a hovered list
+   item is widen its corner (extra-small → medium), which is what happens here. */
 .ah-row:hover {
   border-color: var(--ah-line-strong);
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 0 0 9999px
-      color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-hover), transparent),
-    var(--ah-elevation-level1);
+  border-radius: var(--ah-c-list-item-shape-hover);
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-hover), transparent);
+}
+
+/* `:not(:disabled)` is not decoration: it lifts this rule to (0,3,0), which is
+   what it takes to beat the element-level `button:active:not(:disabled)`
+   shorthand further down the file at (0,2,1). */
+.ah-row:active:not(:disabled),
+.ah-row[aria-selected="true"] {
+  border-radius: var(--ah-c-list-item-shape-active);
+  /* The generic press scale is for a *control*; an M3 list item answers a press
+     by widening its corner and compositing the 12% layer, and resizing a row
+     full of text would reflow the thing the reader is looking at. */
+  transform: none;
 }
 
 .ah-skeleton {
@@ -409,6 +436,9 @@ select,
 input[type="range"] {
   transition:
     transform var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    /* border-radius is here because the M3E press *is* a radius change on a
+       button: leaving it out would snap the shape while the rest eases. */
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
     opacity var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
     background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
     color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
@@ -562,22 +592,6 @@ html {
   }
 }
 
-/* Progress bar for the search index build. */
-.ah-progress {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--ah-surface-2);
-  overflow: hidden;
-}
-
-.ah-progress > i {
-  display: block;
-  height: 100%;
-  background: var(--ah-accent);
-  /* A width change is a surface resizing, so it moves on a spring. */
-  transition: width var(--ah-dur-default-spatial) var(--ah-ease-default-spatial);
-}
-
 /* The budget gauge is the same "surface resizing" case as the progress bar: the
    fill is sized inline by React, so easing the width is what makes a sampling
    update read as the gauge moving rather than jumping between two numbers. */
@@ -592,19 +606,16 @@ html {
 
 .ah-shell {
   display: grid;
-  gap: 12px;
   grid-template-columns: 1fr;
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  padding: 12px;
+  /* gap and padding live in m3.css, off the M3 spacing scale. */
 }
 
 @media (min-width: 1200px) {
   .ah-shell {
     grid-template-columns: minmax(0, 1fr) 400px;
-    padding: 16px;
-    gap: 16px;
   }
 }
 

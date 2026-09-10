@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 TOKENS = REPO / "web" / "src" / "tokens.json"
+FIRSTPAINT = REPO / "web" / "src" / "firstpaint.css"
 
 _spec = importlib.util.spec_from_file_location("gen_tokens", REPO / "scripts" / "gen_tokens.py")
 assert _spec and _spec.loader
@@ -132,3 +134,43 @@ def test_the_duration_gate_names_a_bad_value_instead_of_raising():
     finally:
         gen.MOTION_DURATIONS["medium1"] = saved
     assert any("medium1" in p and "1.1s" in p for p in problems), problems
+
+
+# ── the pre-JS first paint ───────────────────────────────────────────────────
+# `--ah-surface-0` lives inside the JS bundle, so between the first byte of
+# navigation and `theme.ts` running, `body { background: var(--ah-surface-0) }`
+# is a guaranteed-invalid substitution and the page has *no* canvas paint. An
+# independent probe measured that window at 44–99 ms on this machine and showed
+# that a screenshot taken inside it composites onto the compositor's base colour
+# (white), while a DOM read one round-trip later reports the correct dark
+# `rgb(20, 18, 24)` — which is exactly the contradiction that was reported.
+
+
+def test_first_paint_stylesheet_is_generated_and_current():
+    tokens, _ = gen.build()
+    assert FIRSTPAINT.is_file(), "the pre-JS first paint is missing"
+    assert FIRSTPAINT.read_text(encoding="utf-8") == gen.render_firstpaint(tokens), (
+        "firstpaint.css drifted from scripts/gen_tokens.py — regenerate"
+    )
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_first_paint_is_the_real_surface_colour(theme: str):
+    """Not a second source of truth: the hex is the palette's own surface0."""
+    surface0 = _committed()["themes"][theme]["surface0"]
+    css = FIRSTPAINT.read_text(encoding="utf-8")
+    assert surface0 in css, f"the {theme} first paint does not use {surface0}"
+    assert len(set(re.findall(r"#[0-9a-f]{6}", css))) == 2, (
+        "the first paint should contain exactly the two surface colours"
+    )
+
+
+def test_first_paint_is_imported_before_any_rule_that_paints_the_root():
+    """An `@import` after a style rule is dropped by the browser, silently."""
+    css = (REPO / "web" / "src" / "index.css").read_text(encoding="utf-8")
+    lines = css.splitlines()
+    import_line = next(i for i, line in enumerate(lines) if "./firstpaint.css" in line)
+    first_rule = next(
+        i for i, line in enumerate(lines) if line.strip().endswith("{") and "@import" not in line
+    )
+    assert import_line < first_rule, "firstpaint.css is imported after a style rule"

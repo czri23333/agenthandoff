@@ -42,6 +42,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "web" / "src" / "tokens.json"
+FIRSTPAINT = REPO / "web" / "src" / "firstpaint.css"
 
 # CLI identity hues (kept from the original palette; lightness is derived).
 CLI_HUES: dict[str, str] = {
@@ -200,13 +201,16 @@ _AMBIENT: dict[int, str] = {
 # be used anywhere a CJK glyph can land.
 CJK_FLOOR_PX = 12
 TYPESCALE: dict[str, dict] = {
+    "body-large": {"size": 16, "line": 24, "tracking": 0.5, "weight": 400},
     "body-medium": {"size": 14, "line": 20, "tracking": 0.25, "weight": 400},
     "body-small": {"size": 12, "line": 16, "tracking": 0.4, "weight": 400},
+    "headline-small": {"size": 24, "line": 32, "tracking": 0, "weight": 400},
     "label-large": {"size": 14, "line": 20, "tracking": 0.1, "weight": 500},
     "label-medium": {"size": 12, "line": 16, "tracking": 0.5, "weight": 500},
     "label-small": {"size": 11, "line": 16, "tracking": 0.5, "weight": 500, "mono_only": True},
     "title-small": {"size": 14, "line": 20, "tracking": 0.1, "weight": 500},
     "title-medium": {"size": 16, "line": 24, "tracking": 0.15, "weight": 500},
+    "title-large": {"size": 22, "line": 28, "tracking": 0, "weight": 400},
 }
 
 # Official M3E springs: a damping ratio and a stiffness. MotionScheme picks
@@ -281,6 +285,534 @@ MOTION_EASINGS: dict[str, str] = {
 # all the same, so "the rhythm between rows" is a value with an owner and a
 # check rather than a literal someone typed into the stylesheet.
 MOTION_STAGGER: dict[str, str] = {"row": "12ms"}
+
+# ── Component anatomy ────────────────────────────────────────────────────────
+# The official per-component numbers, so a control's *shape* is a token the way
+# its colour already was. Values are referenced rather than copied: `@shape:x`
+# resolves to the shape scale above, `@type:r` to a type role, `@elev:l` to an
+# elevation level, `@role:r` to an official colour role — `build()` refuses to
+# run if a reference does not resolve, so a rename cannot leave a component
+# pointing at a rung that no longer exists.
+#
+# Sources, all fetched first-hand on 2026-09-10. androidx material3 pins this
+# layer to tokens v0_14_0 (androidx-main):
+#   https://raw.githubusercontent.com/androidx/androidx/androidx-main/
+#     compose/material3/material3/src/commonMain/kotlin/androidx/compose/material3/tokens/
+# and material-web — which implements far fewer components but publishes the CSS
+# geometry — to design-system v0_192:
+#   https://raw.githubusercontent.com/material-components/material-web/main/tokens/
+#   https://raw.githubusercontent.com/material-components/material-web/main/<c>/internal/
+# Each family below names the exact files it came from.
+#
+# Where the two projects disagree the disagreement is kept in the open (the
+# filled field's focus indicator is 3px in material-web's current field token set
+# and 2px in its own pinned v0_192 copy); `docs/theming.md` records which one we
+# spend and why.
+COMPONENTS: dict[str, dict] = {
+    "button": {
+        "_source": (
+            "androidx tokens: BaselineButtonTokens.kt, ButtonSmallTokens.kt, "
+            "ButtonMediumTokens.kt, ButtonLargeTokens.kt, FilledButtonTokens.kt, "
+            "FilledTonalButtonTokens.kt, ElevatedButtonTokens.kt, OutlinedButtonTokens.kt, "
+            "TextButtonTokens.kt. CSS geometry cross-checked against material-web "
+            "button/internal/_shared.scss (min-height, gap, padding-inline, "
+            "padding-block = (height - max(line, icon)) / 2, min-width 64)."
+        ),
+        # 40 / 56 / 96 are Google's three button sizes. `shape` is the resting
+        # corner, `shapePressed` the morph M3E applies while the button is held.
+        "sizes": {
+            "small": {
+                "height": 40,
+                "leading": 16,
+                "trailing": 16,
+                "icon": 20,
+                "gap": 8,
+                "shape": "@shape:full",
+                "shapeSquare": "@shape:md",
+                "shapePressed": "@shape:sm",
+                "outlineWidth": 1,
+            },
+            "medium": {
+                "height": 56,
+                "leading": 24,
+                "trailing": 24,
+                "icon": 24,
+                "gap": 8,
+                "shape": "@shape:full",
+                "shapeSquare": "@shape:lg",
+                "shapePressed": "@shape:md",
+                "outlineWidth": 1,
+            },
+            "large": {
+                "height": 96,
+                "leading": 48,
+                "trailing": 48,
+                "icon": 32,
+                "gap": 12,
+                "shape": "@shape:full",
+                "shapeSquare": "@shape:xl",
+                "shapePressed": "@shape:lg",
+                "outlineWidth": 2,
+            },
+        },
+        "minWidth": 64,
+        "typeRole": "@type:label-large",
+        # FilledButtonTokens.DisabledContainerOpacity / DisabledLabelTextOpacity.
+        "disabledContainer": 0.1,
+        "disabledContent": 0.38,
+        # HoveredContainerElevation on a filled (and on a tonal) button is level
+        # 1; the resting level of a filled button and of that same button while
+        # pressed is 0. An elevated button rests at level 1, rises to level 2 on
+        # hover and settles back to level 1 while pressed; an outlined or text
+        # button is level 0 in every state, which is why OutlinedButtonTokens
+        # publishes no elevation at all.
+        "elevation": {"rest": "@elev:level0", "hover": "@elev:level1", "pressed": "@elev:level0"},
+        "elevationElevated": {
+            "rest": "@elev:level1",
+            "hover": "@elev:level2",
+            "pressed": "@elev:level1",
+        },
+        "variant": {
+            "filled": {"container": "@role:primary", "content": "@role:on-primary"},
+            "tonal": {
+                "container": "@role:secondary-container",
+                "content": "@role:on-secondary-container",
+            },
+            "elevated": {"container": "@role:surface-container-low", "content": "@role:primary"},
+            "outlined": {
+                "container": None,
+                "content": "@role:on-surface-variant",
+                "outline": "@role:outline-variant",
+            },
+            "text": {"container": None, "content": "@role:on-surface-variant"},
+        },
+    },
+    "iconButton": {
+        "_source": (
+            "androidx tokens: SmallIconButtonTokens.kt (40dp container, corner-full round / "
+            "corner-medium square / corner-small pressed, icon 24, narrow 4 / default 8 / "
+            "wide 14 spaces, outlined outline 1dp), plus the colour roles from "
+            "IconButtonTokens.kt, FilledIconButtonTokens.kt, "
+            "FilledTonalIconButtonTokens.kt and OutlinedIconButtonTokens.kt."
+        ),
+        "small": {
+            "height": 40,
+            "icon": 24,
+            "shape": "@shape:full",
+            "shapeSquare": "@shape:md",
+            "shapePressed": "@shape:sm",
+            "space": {"narrow": 4, "default": 8, "wide": 14},
+            "outlineWidth": 1,
+        },
+        "disabledContainer": 0.1,
+        "disabledContent": 0.38,
+        "variant": {
+            "standard": {"container": None, "content": "@role:on-surface-variant"},
+            "filled": {"container": "@role:primary", "content": "@role:on-primary"},
+            "tonal": {
+                "container": "@role:secondary-container",
+                "content": "@role:on-secondary-container",
+            },
+            "outlined": {
+                "container": None,
+                "content": "@role:on-surface-variant",
+                "outline": "@role:outline-variant",
+            },
+        },
+    },
+    "fab": {
+        "_source": (
+            "androidx tokens: FabBaselineTokens.kt (56dp, corner-large, icon 24), "
+            "FabSmallTokens.kt (40dp, corner-medium), FabMediumTokens.kt (80dp, icon 28), "
+            "FabLargeTokens.kt (96dp, corner-extra-large, icon 32)."
+        ),
+        "sizes": {
+            "small": {"size": 40, "shape": "@shape:md", "icon": 24},
+            "regular": {"size": 56, "shape": "@shape:lg", "icon": 24},
+            "medium": {"size": 80, "shape": "@shape:lg", "icon": 28},
+            "large": {"size": 96, "shape": "@shape:xl", "icon": 32},
+        },
+        "container": "@role:primary-container",
+        "content": "@role:on-primary-container",
+        "elevation": {"rest": "@elev:level3", "hover": "@elev:level4"},
+    },
+    "chip": {
+        "_source": (
+            "androidx tokens: AssistChipTokens.kt, FilterChipTokens.kt, InputChipTokens.kt "
+            "(32dp container, corner-small, leading/trailing icon 18dp, label-large, "
+            "unselected outline 1dp outline-variant, selected container secondary-container, "
+            "selected outline width 0dp) and ChipsTokens.kt — the M3E base — whose "
+            "unselected corner is corner-medium, selected corner-full and pressed "
+            "corner-small, i.e. the chip answers a press with a shape morph. material-web "
+            "chips/internal/_shared.scss supplies the 48px touch target "
+            "(`margin: max(0, (48px - height) / 2)`)."
+        ),
+        "height": 32,
+        "touchTarget": 48,
+        "icon": 18,
+        "avatar": 24,
+        "typeRole": "@type:label-large",
+        "variant": {
+            "assist": {
+                "shape": "@shape:sm",
+                "shapePressed": "@shape:sm",
+                "container": None,
+                "content": "@role:on-surface",
+                "iconColor": "@role:primary",
+                "outline": "@role:outline-variant",
+            },
+            "filter": {
+                "shape": "@shape:md",
+                "shapePressed": "@shape:sm",
+                "container": None,
+                "content": "@role:on-surface-variant",
+                "outline": "@role:outline-variant",
+            },
+            "input": {
+                "shape": "@shape:sm",
+                "shapePressed": "@shape:sm",
+                "container": None,
+                "content": "@role:on-surface-variant",
+                "outline": "@role:outline-variant",
+            },
+        },
+        "selected": {
+            "shape": "@shape:full",
+            "container": "@role:secondary-container",
+            "content": "@role:on-secondary-container",
+            "iconColor": "@role:on-secondary-container",
+            "outlineWidth": 0,
+        },
+        "unselectedOutlineWidth": 1,
+        "disabledContainer": 0.12,
+        "disabledContent": 0.38,
+    },
+    "listItem": {
+        "_source": (
+            "androidx tokens: ListTokens.kt — one/two/three-line container heights 56/72/88dp, "
+            "leading icon 24dp at 16dp leading space, 16dp trailing space, leading avatar 40dp, "
+            "label body-large, supporting text body-medium, overline and trailing supporting "
+            "text label-small, and the M3E state shapes: corner-extra-small at rest, "
+            "corner-medium hovered, corner-large focused/pressed/selected/dragged. "
+            "Cross-checked against material-web tokens/versions/v0_192/_md-comp-list.scss."
+        ),
+        "height": {"oneLine": 56, "twoLine": 72, "threeLine": 88},
+        "leadingSpace": 16,
+        "trailingSpace": 16,
+        "icon": 24,
+        "avatar": 40,
+        "gap": 12,
+        "typeRole": {
+            "label": "@type:body-large",
+            "supporting": "@type:body-medium",
+            "overline": "@type:label-small",
+        },
+        "shape": {"rest": "@shape:xs", "hover": "@shape:md", "active": "@shape:lg"},
+        "container": "@role:surface",
+        "label": "@role:on-surface",
+        "supporting": "@role:on-surface-variant",
+        "iconColor": "@role:on-surface-variant",
+        # ListTokens.ItemDisabledLabelTextOpacity is 0.38 in androidx and 0.3 in
+        # material-web's list token file; see the deviation table.
+        "disabledContent": 0.38,
+    },
+    "textField": {
+        "_source": (
+            "material-web tokens/_md-comp-filled-field.scss and "
+            "tokens/_md-comp-outlined-field.scss (the current field token set): top-space 16, "
+            "bottom-space 16, leading/trailing space 16, content-space 16, with-label top and "
+            "bottom space 8, supporting-text top space 4 and 16 leading/trailing, "
+            "outline-label-padding 4, label-text-padding-bottom 8, focus indicator "
+            "(filled) 3px, focus outline (outlined) 3px, outline 1px. Content line-height is "
+            "body-large (24px), so 16 + 24 + 16 = the 56dp container; androidx "
+            "OutlinedTextFieldTokens.kt states container height 56dp for the outlined variant. "
+            "Colour roles from FilledTextFieldTokens.kt / OutlinedTextFieldTokens.kt."
+        ),
+        "height": 56,
+        # Ours: M3's published token set has no dense variant, so this is the
+        # 56px geometry with the container spaces halved (8 + 24 + 8 = 40).
+        "heightDense": 40,
+        "denseSpaces": 8,
+        "space": {"top": 16, "bottom": 16, "leading": 16, "trailing": 16, "content": 16},
+        "withLabel": {"top": 8, "bottom": 8},
+        "supporting": {"top": 4, "leading": 16, "trailing": 16},
+        "outlineLabelPadding": 4,
+        "labelPaddingBottom": 8,
+        "iconSize": 24,
+        "labelTypeRole": "@type:body-large",
+        "populatedTypeRole": "@type:body-small",
+        "inputTypeRole": "@type:body-large",
+        "supportingTypeRole": "@type:body-small",
+        "filled": {
+            "shape": "@corner:extra-small-top",
+            "container": "@role:surface-container-highest",
+            "indicator": "@role:on-surface-variant",
+            "indicatorHeight": 1,
+            "focusIndicator": "@role:primary",
+            "focusIndicatorHeight": 3,
+            "label": "@role:on-surface-variant",
+            "labelFocus": "@role:primary",
+            "input": "@role:on-surface",
+        },
+        "outlined": {
+            "shape": "@shape:xs",
+            "outline": "@role:outline",
+            "outlineWidth": 1,
+            "focusOutline": "@role:primary",
+            "focusOutlineWidth": 3,
+            "hoverOutline": "@role:on-surface",
+            "label": "@role:on-surface-variant",
+            "labelFocus": "@role:primary",
+            "input": "@role:on-surface",
+        },
+        "error": {"color": "@role:error", "content": "@role:on-error-container"},
+        "disabled": {"container": 0.04, "content": 0.38, "outline": 0.12},
+    },
+    "switch": {
+        "_source": (
+            "androidx tokens: SwitchTokens.kt — track 52×32dp corner-full with a 2dp outline, "
+            "handle 24dp selected / 16dp unselected / 28dp pressed, icon 16dp and a 40dp "
+            "state layer."
+        ),
+        "track": {"width": 52, "height": 32, "outlineWidth": 2, "shape": "@shape:full"},
+        "handle": {"selected": 24, "unselected": 16, "pressed": 28, "icon": 16},
+        "stateLayer": 40,
+        "selected": {
+            "track": "@role:primary",
+            "handle": "@role:on-primary",
+            "icon": "@role:on-primary-container",
+        },
+        "unselected": {
+            "track": "@role:surface-container-highest",
+            "handle": "@role:outline",
+            "outline": "@role:outline",
+            "icon": "@role:surface-container-highest",
+        },
+        "disabled": {"trackOpacity": 0.12, "contentOpacity": 0.38},
+    },
+    "checkbox": {
+        "_source": (
+            "androidx tokens: CheckboxTokens.kt — 18dp container at a 2dp radius, 2dp "
+            "unselected outline, 40dp state layer, selected container primary with an "
+            "on-primary 18dp icon."
+        ),
+        "size": 18,
+        "radius": 2,
+        "outlineWidth": 2,
+        "stateLayer": 40,
+        "icon": 18,
+        "selected": {"container": "@role:primary", "icon": "@role:on-primary"},
+        "unselected": {"outline": "@role:on-surface-variant"},
+        "disabled": {"opacity": 0.38},
+    },
+    "radio": {
+        "_source": "androidx tokens: RadioButtonTokens.kt — 20dp icon and a 40dp state layer.",
+        "size": 20,
+        "stateLayer": 40,
+        "selected": {"icon": "@role:primary"},
+        "unselected": {"icon": "@role:on-surface-variant"},
+        "disabled": {"opacity": 0.38},
+    },
+    "segmented": {
+        "_source": (
+            "androidx tokens: OutlinedSegmentedButtonTokens.kt — 40dp container, corner-full, "
+            "1dp outline, selected container secondary-container with on-secondary-container "
+            "content, 18dp icon, label-large label."
+        ),
+        "height": 40,
+        "shape": "@shape:full",
+        "outlineWidth": 1,
+        "icon": 18,
+        "typeRole": "@type:label-large",
+        "outline": "@role:outline",
+        "selected": {
+            "container": "@role:secondary-container",
+            "content": "@role:on-secondary-container",
+        },
+        "unselected": {"content": "@role:on-surface"},
+        "disabled": {"content": 0.38, "outline": 0.12},
+    },
+    "dialog": {
+        "_source": (
+            "androidx tokens: DialogTokens.kt — corner-extra-large, surface-container-high, "
+            "elevation 3, headline-small headline, body-medium supporting text, label-large "
+            "actions on primary, 24dp icon on secondary — and ScrimTokens.kt "
+            "(scrim colour, container opacity 0.32)."
+        ),
+        "shape": "@shape:xl",
+        "container": "@role:surface-container-high",
+        "elevation": "@elev:level3",
+        "headline": "@role:on-surface",
+        "supporting": "@role:on-surface-variant",
+        "action": "@role:primary",
+        "icon": "@role:secondary",
+        "iconSize": 24,
+        "headlineTypeRole": "@type:headline-small",
+        "supportingTypeRole": "@type:body-medium",
+        "actionTypeRole": "@type:label-large",
+        "scrim": {"role": "@role:scrim", "opacity": 0.32},
+        "enter": "@spring:expressive-default-spatial",
+        "exit": "@spring:expressive-fast-spatial",
+    },
+    "progress": {
+        "_source": (
+            "androidx tokens: LinearProgressIndicatorTokens.kt — height 4dp, track thickness "
+            "4dp, track-to-active space 4dp, stop 4dp, wave wavelength 40dp — and "
+            "CircularProgressIndicatorTokens.kt (40dp, 4dp thickness), with the shared roles "
+            "from ProgressIndicatorTokens.kt (active primary, track secondary-container, stop "
+            "primary, every shape corner-full)."
+        ),
+        "linear": {"height": 4, "trackSpace": 4, "stop": 4, "wavelength": 40},
+        "circular": {"size": 40, "thickness": 4},
+        "shape": "@shape:full",
+        "active": "@role:primary",
+        "track": "@role:secondary-container",
+        "stop": "@role:primary",
+    },
+    "tooltip": {
+        "_source": (
+            "androidx tokens: PlainTooltipTokens.kt — inverse-surface container at "
+            "corner-extra-small, body-small supporting text."
+        ),
+        "container": "@role:inverse-surface",
+        "content": "@role:inverse-on-surface",
+        "shape": "@shape:xs",
+        "typeRole": "@type:body-small",
+    },
+    "badge": {
+        "_source": (
+            "androidx tokens: BadgeTokens.kt — a 6dp dot and a 16dp large badge, corner-full, "
+            "error container with an on-error label-small."
+        ),
+        "dot": 6,
+        "large": 16,
+        "shape": "@shape:full",
+        "container": "@role:error",
+        "content": "@role:on-error",
+        "typeRole": "@type:label-small",
+    },
+    "divider": {
+        "_source": "androidx tokens: DividerTokens.kt — 1dp thickness in outline-variant.",
+        "thickness": 1,
+        "color": "@role:outline-variant",
+    },
+    "snackbar": {
+        "_source": (
+            "androidx tokens: SnackbarTokens.kt — inverse-surface container at "
+            "corner-extra-small and elevation 3, 48dp single-line and 68dp two-line heights, "
+            "body-medium supporting text, label-large action in inverse-primary, 24dp icon."
+        ),
+        "container": "@role:inverse-surface",
+        "content": "@role:inverse-on-surface",
+        "action": "@role:inverse-primary",
+        "shape": "@shape:xs",
+        "elevation": "@elev:level3",
+        "singleLine": 48,
+        "twoLine": 68,
+        "iconSize": 24,
+        "typeRole": "@type:body-medium",
+        "actionTypeRole": "@type:label-large",
+    },
+    "appBar": {
+        "_source": (
+            "androidx tokens: AppBarSmallTokens.kt — 64dp container, title-large title, "
+            "label-medium subtitle. AppBarMediumTokens.kt (112dp, headline-small) is recorded "
+            "for the medium bar; this cockpit ships only the small one."
+        ),
+        "small": {
+            "height": 64,
+            "titleTypeRole": "@type:title-large",
+            "subtitleTypeRole": "@type:label-medium",
+        },
+        "medium": {"height": 112},
+    },
+    "navigationBar": {
+        "_source": (
+            "androidx tokens: NavigationBarTokens.kt — 64dp container (80dp tall variant) at "
+            "elevation 2 on surface-container, item indicator corner-full in "
+            "secondary-container, active icon on-secondary-container, active label secondary, "
+            "inactive on-surface-variant, label-medium; "
+            "NavigationBarHorizontalItemTokens.kt for the 40dp indicator height, 16dp leading "
+            "and trailing space and the 24dp icon."
+        ),
+        "height": 64,
+        "tallHeight": 80,
+        "container": "@role:surface-container",
+        "elevation": "@elev:level2",
+        "indicator": {
+            "role": "@role:secondary-container",
+            "height": 40,
+            "shape": "@shape:full",
+            "leading": 16,
+            "trailing": 16,
+        },
+        "icon": 24,
+        "labelTypeRole": "@type:label-medium",
+        "active": {"icon": "@role:on-secondary-container", "label": "@role:secondary"},
+        "inactive": {"icon": "@role:on-surface-variant", "label": "@role:on-surface-variant"},
+    },
+    "navigationRail": {
+        "_source": (
+            "androidx tokens: NavigationRailBaselineItemTokens.kt — 64dp item container, 6dp "
+            "vertical space between items, a corner-full active indicator with 16dp leading "
+            "and trailing space and an 8dp icon-label space, a 40dp minimum header space and a "
+            "24dp icon, on a corner-none container."
+        ),
+        "item": {
+            "height": 64,
+            "verticalSpace": 6,
+            "leading": 16,
+            "trailing": 16,
+            "iconLabelSpace": 8,
+            "icon": 24,
+            "headerSpace": 40,
+        },
+        "indicator": {"shape": "@shape:full"},
+    },
+    "slider": {
+        "_source": (
+            "androidx tokens: SliderTokens.kt — the M3E handle is a 4×44dp corner-full bar, "
+            "not a knob; track bars are 16dp tall and corner-full, active track primary, "
+            "inactive track secondary-container, handle primary, stop indicator 4dp "
+            "secondary-container with 6dp trailing space, and the value indicator is "
+            "inverse-surface at label-large."
+        ),
+        "handle": {
+            "width": 4,
+            "height": 44,
+            "pressedWidth": 2,
+            "focusWidth": 2,
+            "shape": "@shape:full",
+        },
+        "track": {"height": 16, "shape": "@shape:full"},
+        "stop": {"size": 4, "trailingSpace": 6},
+        "active": "@role:primary",
+        "inactive": "@role:secondary-container",
+        "handleColor": "@role:primary",
+        "stopColor": "@role:secondary-container",
+        "valueIndicator": {
+            "container": "@role:inverse-surface",
+            "content": "@role:inverse-on-surface",
+            "typeRole": "@type:label-large",
+        },
+        "disabled": {"activeTrack": 0.38, "inactiveTrack": 0.12, "handle": 0.38},
+    },
+    "spacing": {
+        "_source": (
+            "Ours. M3 publishes no spacing scale; this is the 4dp grid its component "
+            "geometry is built on (every number in the families above is a multiple of 4), "
+            "named so layout stops inventing 10px and 13px gaps."
+        ),
+        "steps": {
+            "xs": 4,
+            "sm": 8,
+            "md": 12,
+            "lg": 16,
+            "xl": 24,
+            "xxl": 32,
+        },
+    },
+}
 
 # Both shapes below are what the browser actually accepts: a CSS cubic-bezier
 # takes exactly four numbers, and its two x control points must lie in [0, 1]
@@ -689,6 +1221,98 @@ def spring_curve(damping: float, stiffness: float) -> tuple[str, int]:
     return f"linear(0, {stops}, 1)", round(settle * 1000)
 
 
+# A component token never restates a value that already has an owner: it points
+# at one. `@shape:full` is the shape scale, `@role:on-primary` an official colour
+# role, `@type:label-large` a type role, `@elev:level3` an elevation level and
+# `@spring:expressive-fast-spatial` one of the M3E springs. The resolver below
+# *rewrites* the reference to the value it names and records a problem for
+# anything that does not resolve, so renaming a rung cannot leave a component
+# quietly pointing at nothing (which is how `shape.pill` went missing once).
+_REFERENCE_RE = re.compile(r"^@(shape|corner|type|elev|role|spring):([A-Za-z0-9-]+)$")
+
+
+def _reference_target(kind: str, name: str) -> tuple[object, str | None]:
+    """The value a `@kind:name` reference resolves to, or why it cannot.
+
+    Only `shape` resolves to a bare number (a radius in px). The other four keep
+    their kind as a prefix — `role:on-primary`, `type:label-large`,
+    `elev:level3`, `spring:expressive-fast-spatial` — because the frontend has to
+    treat them differently (a role becomes `var(--ah-<role>)`, a type role becomes
+    four `var(--ah-type-<role>-{size,line,tracking,weight})` references, an
+    elevation a shadow, a spring a duration/easing pair). Tagging them makes that
+    switch mechanical instead of a guess, and keeps the committed JSON readable.
+    """
+    if kind == "shape":
+        if name not in SHAPE:
+            return None, f"unknown shape step {name!r}; known: {sorted(SHAPE)}"
+        return SHAPE[name], None
+    if kind == "corner":
+        if name not in COMPOSED_CORNERS:
+            return None, (
+                f"unknown composed corner {name!r}; known: {sorted(COMPOSED_CORNERS)}"
+            )
+        return f"corner:{name}", None
+    if kind == "type":
+        if name not in TYPESCALE:
+            return None, f"unknown type role {name!r}; known: {sorted(TYPESCALE)}"
+        return f"type:{name}", None
+    if kind == "elev":
+        if name not in ELEVATION_DP:
+            return None, f"unknown elevation level {name!r}; known: {sorted(ELEVATION_DP)}"
+        return f"elev:{name}", None
+    if kind == "role":
+        if name not in M3_ROLE_REFS["dark"]:
+            return None, f"unknown M3 colour role {name!r}"
+        return f"role:{name}", None
+    if name not in SPRINGS:
+        return None, f"unknown spring {name!r}; known: {sorted(SPRINGS)}"
+    return f"spring:{name}", None
+
+
+def resolve_component_tokens(problems: list[str]) -> dict:
+    """COMPONENTS with every `@kind:name` reference replaced by the value it names.
+
+    Validators here report, never raise: `--check` and the tests both run this,
+    and a traceback would replace the one message a contributor needs (which
+    family, which key, which reference) with a stack.
+    """
+
+    def walk(node: object, path: str) -> object:
+        if isinstance(node, dict):
+            return {k: walk(v, f"{path}.{k}") for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v, f"{path}[{i}]") for i, v in enumerate(node)]
+        if isinstance(node, str):
+            m = _REFERENCE_RE.match(node)
+            if m:
+                value, problem = _reference_target(m.group(1), m.group(2))
+                if problem:
+                    problems.append(f"component{path}: {problem}")
+                    return None
+                return value
+        return node
+
+    resolved = walk(COMPONENTS, "")
+    assert isinstance(resolved, dict)
+
+    # A family without a citation is a family nobody can check. The three
+    # legitimate answers are Google's two repositories or an explicit "ours".
+    for family, spec in COMPONENTS.items():
+        source = spec.get("_source", "")
+        if len(source) < 40:
+            problems.append(f"component.{family}: missing or too-short _source")
+        elif not any(mark in source for mark in ("androidx", "material-web", "Ours")):
+            problems.append(
+                f"component.{family}: _source names neither Google's files nor 'Ours'"
+            )
+    if len(COMPONENTS) < 15:
+        problems.append(
+            f"component token block covers only {len(COMPONENTS)} families; "
+            "a shrinking block means families were dropped without a note"
+        )
+    return resolved
+
+
 def build() -> tuple[dict, list[str]]:
     problems: list[str] = []
     ids = cli_ids()
@@ -790,6 +1414,71 @@ def build() -> tuple[dict, list[str]]:
         if not 40 <= settle_ms <= 4000:
             problems.append(f"spring {name}: settle time {settle_ms}ms is out of range")
 
+    components = resolve_component_tokens(problems)
+
+    # Invariants that are cheap to state and expensive to notice by eye. Each one
+    # is a claim the stylesheet relies on, so a generated file that breaks it
+    # would be spent by CSS as a silent layout bug.
+    def _floats(node: object, path: str = "component") -> list[tuple[str, float]]:
+        if isinstance(node, dict):
+            return [p for k, v in node.items() for p in _floats(v, f"{path}.{k}")]
+        if isinstance(node, list):
+            return [p for i, v in enumerate(node) for p in _floats(v, f"{path}[{i}]")]
+        return [(path, node)] if isinstance(node, float) else []
+
+    for path, value in _floats(components):
+        if not 0.0 < value < 1.0:
+            problems.append(f"{path}: an opacity must be a fraction in (0, 1), got {value}")
+
+    btn = components["button"]["sizes"]
+    order = ["small", "medium", "large"]
+    heights = [btn[size]["height"] for size in order]
+    if heights != sorted(heights) or len(set(heights)) != 3:
+        problems.append(f"button heights must be strictly increasing, got {heights}")
+    for size in order:
+        if btn[size]["shape"] == btn[size]["shapePressed"]:
+            problems.append(f"button {size}: the press shape must differ from the resting shape")
+        if btn[size]["leading"] != btn[size]["trailing"]:
+            problems.append(f"button {size}: M3 publishes symmetric leading/trailing space")
+        if btn[size]["shape"] <= btn[size]["shapePressed"]:
+            problems.append(
+                f"button {size}: the pressed corner must be tighter than the rest corner"
+            )
+
+    fab_sizes = [v["size"] for v in components["fab"]["sizes"].values()]
+    if fab_sizes != sorted(fab_sizes):
+        problems.append(f"fab sizes must be non-decreasing, got {fab_sizes}")
+
+    li_heights = list(components["listItem"]["height"].values())
+    if li_heights != sorted(li_heights):
+        problems.append(f"list-item heights must be non-decreasing, got {li_heights}")
+    li_shape = components["listItem"]["shape"]
+    if not li_shape["rest"] < li_shape["hover"] < li_shape["active"]:
+        problems.append("listItem.shape must widen rest → hover → active")
+
+    sw = components["switch"]
+    if sw["track"]["width"] <= sw["track"]["height"]:
+        problems.append("switch track must be wider than it is tall")
+    if not sw["handle"]["pressed"] >= sw["handle"]["selected"] > sw["handle"]["unselected"]:
+        problems.append("switch handles must satisfy pressed >= selected > unselected")
+
+    lin = components["progress"]["linear"]
+    if not (lin["height"] == lin["trackSpace"] == lin["stop"]):
+        problems.append(
+            "the linear indicator's height, track space and stop indicator are all 4dp in "
+            f"LinearProgressIndicatorTokens.kt, got {lin}"
+        )
+
+    if components["textField"]["height"] != (
+        components["textField"]["space"]["top"]
+        + TYPESCALE["body-large"]["line"]
+        + components["textField"]["space"]["bottom"]
+    ):
+        problems.append(
+            "a text field is top-space + body-large line-height + bottom-space; "
+            "the official numbers are 16 + 24 + 16 = 56"
+        )
+
     # Report the offending *value*, never raise on it: `int(v[:-2])` used to
     # blow up with a ValueError traceback on `"1.1s"` — the exact style the
     # sheet shipped before this change — instead of naming the bad token.
@@ -880,6 +1569,19 @@ def build() -> tuple[dict, list[str]]:
             "cjkFloor": CJK_FLOOR_PX,
             "roles": TYPESCALE,
         },
+        "component": {
+            "_readme": (
+                "Per-component anatomy, so a control's *shape* is a token the way its colour "
+                "already is. Values are references resolved by this script: a string is a plain "
+                "value, an integer is px, a fraction in (0, 1) is an opacity, and the references "
+                "have already been substituted — `shape` steps and elevation levels are px/dp "
+                "numbers or level names, `typeRole` names a key of typescale.roles, and every "
+                "colour is the *name* of an official role, to be read as var(--ah-<role>), so a "
+                "role and its component use cannot drift apart. Each family carries the files it "
+                "came from."
+            ),
+            **{k: v for k, v in components.items()},
+        },
         "motion": {
             "_source": (
                 "Durations and the standard/emphasized/linear easings are Google's, from "
@@ -919,6 +1621,39 @@ def render(tokens: dict) -> str:
     return json.dumps(tokens, indent=2, ensure_ascii=False) + "\n"
 
 
+def render_firstpaint(tokens: dict) -> str:
+    """The one stylesheet that must be valid *before* JavaScript runs.
+
+    The cockpit's only opaque paint is `body { background: var(--ah-surface-0) }`,
+    and `--ah-surface-0` is written by `theme.ts`, which is inside the JS bundle.
+    Between `commit` and that bundle executing — measured at 44–99 ms on this
+    machine — the `var()` is a guaranteed-invalid substitution, the declaration is
+    dropped, and the page has *no* canvas paint at all; a screenshot taken in that
+    window composites onto the compositor's base colour and comes out white on a
+    dark theme, even though a DOM read one round-trip later reports
+    `body: rgb(20, 18, 24)`.
+
+    So the two first-paint colours have to exist in the CSS bundle. They are
+    *generated* from the same palette rather than typed into the stylesheet,
+    because a hand-written copy is exactly the kind of second source of truth
+    `--check` exists to eliminate. `auto` is covered by a media query on the
+    attribute-less root, which is the state `index.html`'s pre-paint script can
+    leave behind for the instant before React mounts.
+    """
+    dark = tokens["themes"]["dark"]["surface0"]
+    light = tokens["themes"]["light"]["surface0"]
+    return (
+        "/* Generated by scripts/gen_tokens.py — do not edit.\n"
+        "   The pre-JS first paint: --ah-surface-0 does not exist until theme.ts\n"
+        "   injects it, and a canvas with no paint screenshots as white. */\n"
+        f"html {{ background: {dark}; }}\n"
+        f'html[data-theme="light"] {{ background: {light}; }}\n'
+        "@media (prefers-color-scheme: light) {\n"
+        f'  html:not([data-theme]) {{ background: {light}; }}\n'
+        "}\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     # Unknown flags refuse to run rather than fall through to a write: a typo
@@ -934,18 +1669,28 @@ def main(argv: list[str] | None = None) -> int:
         print("gate failed:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1
     fresh = render(tokens)
+    fresh_firstpaint = render_firstpaint(tokens)
     if check:
-        committed = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
-        if committed != fresh:
+        stale = [
+            path
+            for path, want in ((OUT, fresh), (FIRSTPAINT, fresh_firstpaint))
+            if (path.read_text(encoding="utf-8") if path.is_file() else "") != want
+        ]
+        if stale:
             print(
-                f"{OUT} is stale: run `python scripts/gen_tokens.py` and commit the result",
+                f"{', '.join(str(p) for p in stale)} stale: run "
+                "`python scripts/gen_tokens.py` and commit the result",
                 file=sys.stderr,
             )
             return 1
-        print(f"{OUT} matches the generator ({len(tokens['cli'])} CLI identities)")
+        print(
+            f"{OUT.name} and {FIRSTPAINT.name} match the generator "
+            f"({len(tokens['cli'])} CLI identities)"
+        )
         return 0
     OUT.write_text(fresh, encoding="utf-8", newline="\n")
-    print(f"wrote {OUT}")
+    FIRSTPAINT.write_text(fresh_firstpaint, encoding="utf-8", newline="\n")
+    print(f"wrote {OUT} and {FIRSTPAINT}")
     for name, theme in tokens["themes"].items():
         worst_text = min(
             ratio(theme[t], theme[s])

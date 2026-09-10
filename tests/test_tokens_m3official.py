@@ -67,13 +67,16 @@ OFFICIAL_SHADOWS = {
 
 # material-web v0_192 / _md-sys-typescale.scss, rem × 16 → px
 OFFICIAL_ROLES = {
+    "body-large": (16, 24, 0.5, 400),
     "body-medium": (14, 20, 0.25, 400),
     "body-small": (12, 16, 0.4, 400),
+    "headline-small": (24, 32, 0, 400),
     "label-large": (14, 20, 0.1, 500),
     "label-medium": (12, 16, 0.5, 500),
     "label-small": (11, 16, 0.5, 500),
     "title-small": (14, 20, 0.1, 500),
     "title-medium": (16, 24, 0.15, 500),
+    "title-large": (22, 28, 0, 400),
 }
 
 # androidx material3 v0_14_0, Expressive/StandardMotionTokens.kt

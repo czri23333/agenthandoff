@@ -102,6 +102,28 @@ export interface TypescaleTokens {
 }
 
 /**
+ * Per-component anatomy, from tokens.json. Every value here is Google's, and
+ * every nestable one is a *reference* the generator already validated, keeping
+ * its kind as a prefix so this file can switch on it instead of guessing:
+ *
+ *   role:<name>   → var(--ah-<name>)                        (official colour role)
+ *   type:<role>   → var(--ah-type-<role>-{size,line,tracking,weight})
+ *   elev:<level>  → var(--ah-elevation-<level>)             (a shadow recipe)
+ *   corner:<name> → var(--ah-corner-<name>)                 (a composed corner)
+ *   spring:<name> → var(--ah-spring-<name>-{duration,easing})
+ *
+ * A plain integer is px; a plain fraction in (0, 1) is an opacity and is emitted
+ * as a percentage, because the only thing that spends one is `color-mix`. The
+ * generator's gate asserts both halves of that convention (every fraction is in
+ * (0, 1), every length is an integer), and the consumption gate — mirrored in
+ * `tests/test_tokens_components.py` — refuses a `--ah-c-*` custom property that
+ * `m3.css` reads but this function never emits, or emits but nothing reads.
+ */
+export interface ComponentTokens {
+  [family: string]: unknown;
+}
+
+/**
  * M3E motion contract, from tokens.json. Durations and the standard/emphasized/
  * linear easings are Google's (material-web v0_192). `spring` is Google's M3E
  * motion scheme (androidx material3 tokens v0_14_0) realised for the web: the
@@ -131,6 +153,17 @@ type SpringName = keyof (typeof tokensJson)["motion"]["spring"];
 type TypeRole = keyof (typeof tokensJson)["typescale"]["roles"];
 type ElevationLevel = keyof (typeof tokensJson)["elevation"]["levels"];
 
+/**
+ * camelCase token keys become kebab-case custom properties (`oneLine` →
+ * `one-line`, `shapePressed` → `shape-pressed`), so every `--ah-c-*` name in the
+ * stylesheet is lower-case and a `.` in the token path is always a `-` in the
+ * property. `tests/test_tokens_components.py` applies the same transform, which
+ * is what makes the consumption gate a comparison rather than an opinion.
+ */
+function kebab(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
 const TOKENS = tokensJson as unknown as {
   themes: Record<Effective, Palette>;
   cli: string[];
@@ -140,6 +173,7 @@ const TOKENS = tokensJson as unknown as {
   state: StateTokens;
   elevation: ElevationTokens;
   typescale: TypescaleTokens;
+  component: ComponentTokens;
   motion: MotionTokens;
 };
 const KEY = "ah-theme";
@@ -210,7 +244,73 @@ function contractVars(): string {
       `--ah-spring-${name}-easing:${s.easing};`,
       `--ah-spring-${name}-fallback:${s.fallback};`,
     ]),
+    componentVars(),
   ].join("");
+}
+
+/**
+ * Flatten `tokens.json`'s `component` block into `--ah-c-<path>` custom
+ * properties, resolving the references the generator validated. The path is the
+ * token path verbatim (`component.button.sizes.small.height` →
+ * `--ah-c-button-sizes-small-height`) so a value in the stylesheet can always be
+ * traced back to a line of the token file by reading its own name.
+ */
+function componentVars(): string {
+  const out: string[] = [];
+  const walk = (node: unknown, path: string[]): void => {
+    if (node !== null && typeof node === "object" && !Array.isArray(node)) {
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        // `_source` / `_readme` are documentation, not values.
+        if (key.startsWith("_")) continue;
+        walk(value, [...path, key]);
+      }
+      return;
+    }
+    if (node === null || node === undefined) return;
+    const name = `--ah-c-${path.map(kebab).join("-")}`;
+    if (typeof node === "number") {
+      out.push(
+        Number.isInteger(node)
+          ? `${name}:${node}px;`
+          : `${name}:${Number((node * 100).toFixed(2))}%;`,
+      );
+      return;
+    }
+    if (typeof node !== "string") return;
+    const [kind, target] = node.split(":", 2);
+    switch (kind) {
+      case "role":
+        out.push(`${name}:var(--ah-${target});`);
+        break;
+      case "elev":
+        out.push(`${name}:var(--ah-elevation-${target});`);
+        break;
+      case "corner":
+        out.push(`${name}:var(--ah-corner-${target});`);
+        break;
+      case "type":
+        out.push(
+          `${name}-size:var(--ah-type-${target}-size);`,
+          `${name}-line:var(--ah-type-${target}-line);`,
+          `${name}-tracking:var(--ah-type-${target}-tracking);`,
+          `${name}-weight:var(--ah-type-${target}-weight);`,
+        );
+        break;
+      case "spring":
+        out.push(
+          `${name}-duration:var(--ah-spring-${target}-duration);`,
+          `${name}-easing:var(--ah-spring-${target}-easing);`,
+        );
+        break;
+      default:
+        // Throwing here is deliberate: the only way to reach it is a token the
+        // generator emitted with a reference kind this switch does not know, and
+        // a silent skip would ship a component reading an undefined property.
+        throw new Error(`component token ${path.join(".")}: unknown kind in ${node}`);
+    }
+  };
+  walk(TOKENS.component, []);
+  return out.join("");
 }
 
 function cssVars(p: Palette): string {
@@ -336,20 +436,67 @@ export function useTheme(): { mode: ThemeMode; effective: Effective; set: (m: Th
 
 /* -- antd bridge ------------------------------------------------------------ */
 
-/** Shared accent so antd widgets and our own tokens never drift apart. */
-const PRIMARY = "#5b8def";
+/**
+ * Read a component token out of the generated block, e.g.
+ * `num("button.sizes.small.height")`. Throws instead of defaulting: a fallback
+ * would turn a renamed token into a control that renders at antd's default size
+ * and looks *almost* right, which is the failure mode this slice exists to
+ * remove. `tokens.json` is generated and `--check`-gated, so reaching the throw
+ * means the generator and this file disagree — a bug, not a runtime condition.
+ */
+function dig(path: string): unknown {
+  let node: unknown = TOKENS.component;
+  for (const key of path.split(".")) {
+    if (node === null || typeof node !== "object") return undefined;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return node;
+}
+
+function num(path: string): number {
+  const value = dig(path);
+  if (typeof value !== "number") {
+    throw new Error(`component token ${path} is not a number: ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/** A px length from a component token, e.g. `px("appBar.small.height")` → "64px". */
+function px(path: string): string {
+  return `${num(path)}px`;
+}
+
+/** The 49 official colour roles for a theme, by role name. */
+function roles(effective: Effective): Record<string, string> {
+  return TOKENS.colorRoles.roles[effective];
+}
+
+/**
+ * The official state layer at a component's own opacity, composed over whatever
+ * the element already paints. M3 defines feedback as this composition, never as
+ * a different background or a filter, and antd exposes several "hover
+ * background" tokens — so they take this string rather than a colour.
+ */
+function layer(role: string, opacityToken: string): string {
+  return `color-mix(in srgb, ${role} var(${opacityToken}), transparent)`;
+}
 
 export function antdConfig(effective: Effective): NonNullable<ConfigProviderProps["theme"]> {
   const p = palettes[effective];
+  const r = roles(effective);
+  const stateHover = "--ah-state-hover";
   return {
     algorithm: effective === "dark" ? antdAlgorithms.darkAlgorithm : antdAlgorithms.defaultAlgorithm,
     token: {
-      colorPrimary: PRIMARY,
-      // M3E shape scale: cards lg(16), controls md(12), chips full.
-      borderRadius: 12,
-      borderRadiusLG: 16,
-      borderRadiusSM: 8,
-      borderRadiusXS: 4,
+      // The accent is the official primary role, not a hand-picked blue: the
+      // previous `PRIMARY = "#5b8def"` was the last literal colour in the theme
+      // engine and could drift from `--ah-primary` without any gate noticing.
+      colorPrimary: r["primary"],
+      // M3E shape scale, from the token file: cards lg, controls md, hairlines xs.
+      borderRadius: shape.md,
+      borderRadiusLG: shape.lg,
+      borderRadiusSM: shape.sm,
+      borderRadiusXS: shape.xs,
       // The tiers in tokens.json are AA-verified against our surfaces; antd's
       // defaults are not, and its *secondary* text is what most meta rows use.
       colorText: p.text1,
@@ -368,7 +515,15 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
       boxShadow: elevation("level3"),
       boxShadowSecondary: elevation("level2"),
       boxShadowTertiary: elevation("level1"),
-      fontSize: 14,
+      // M3 has no 32px control: the small step is 40. antd's three control
+      // heights map onto Google's button/text-field sizes.
+      controlHeight: num("button.sizes.small.height"),
+      controlHeightSM: num("button.sizes.small.height"),
+      controlHeightLG: num("button.sizes.medium.height"),
+      fontSize: typeRole("body-medium").size,
+      // A tooltip is a plain-tooltip: inverse surface with inverse-on-surface ink.
+      colorBgSpotlight: r["inverse-surface"],
+      colorTextLightSolid: r["inverse-on-surface"],
       // antd's own widgets move on the same curves as ours, so a chip and a
       // Select popup never disagree about what "300ms emphasized" means.
       motionDurationFast: dur("short4"),
@@ -379,18 +534,83 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
     },
     components: {
       Layout: {
-        headerBg: p.surface1,
+        // The official small top app bar: 64px on surface-container.
+        headerBg: r["surface-container"],
         bodyBg: p.surface0,
-        headerHeight: 52,
-        headerPadding: "0 20px",
+        headerHeight: num("appBar.small.height"),
+        headerPadding: `0 ${px("spacing.steps.lg")}`,
+        headerColor: r["on-surface"],
       },
-      Card: { colorBgContainer: p.surface1, colorBorderSecondary: p.line },
+      Button: {
+        // antd's own button stylesheet is the owner of padding, weight and the
+        // shadows; m3.css adds only what antd has no token for (the radius and
+        // the M3E press morph). M3 publishes no 32px button, so antd's `small`
+        // and `middle` both land on Google's *small* (40px), and antd's `large`
+        // on Google's *medium* (56px).
+        paddingInline: num("button.sizes.small.leading"),
+        paddingInlineSM: num("button.sizes.small.leading"),
+        paddingInlineLG: num("button.sizes.medium.leading"),
+        paddingBlock: 0,
+        paddingBlockSM: 0,
+        paddingBlockLG: 0,
+        contentFontSize: typeRole("label-large").size,
+        contentFontSizeSM: typeRole("label-large").size,
+        contentFontSizeLG: typeRole("label-large").size,
+        contentLineHeight: typeRole("label-large").line,
+        contentLineHeightSM: typeRole("label-large").line,
+        contentLineHeightLG: typeRole("label-large").line,
+        fontWeight: typeRole("label-large").weight,
+        iconGap: num("button.sizes.small.gap"),
+        onlyIconSize: num("button.sizes.small.icon"),
+        onlyIconSizeSM: num("button.sizes.small.icon"),
+        onlyIconSizeLG: num("button.sizes.medium.icon"),
+        // M3 elevation is not antd's default button shadow: a filled button is
+        // level 1 only while it is hovered, and an outlined one never.
+        defaultShadow: "none",
+        primaryShadow: "none",
+        dangerShadow: "none",
+        defaultBg: "transparent",
+        defaultColor: r["on-surface-variant"],
+        defaultBorderColor: r["outline-variant"],
+        defaultHoverBg: "transparent",
+        defaultHoverColor: r["on-surface-variant"],
+        defaultHoverBorderColor: r["outline"],
+        defaultActiveBg: "transparent",
+        defaultActiveColor: r["on-surface-variant"],
+        defaultActiveBorderColor: r["outline"],
+        primaryColor: r["on-primary"],
+        textTextColor: r["on-surface-variant"],
+        textTextHoverColor: r["on-surface-variant"],
+        textTextActiveColor: r["on-surface-variant"],
+        solidTextColor: r["on-primary"],
+        borderColorDisabled: "transparent",
+        defaultBgDisabled: "transparent",
+        dashedBgDisabled: "transparent",
+      },
+      Card: {
+        // A card is surface-container-low with an outline, level 0, radius 16.
+        colorBgContainer: r["surface-container-low"],
+        colorBorderSecondary: r["outline-variant"],
+      },
       Table: {
-        headerBg: p.surface2,
-        headerColor: p.text2,
-        rowHoverBg: p.surface2,
+        headerBg: r["surface-container-high"],
+        headerColor: r["on-surface-variant"],
+        // M3 publishes no data table, so the cell metrics are ours, taken from
+        // the spacing scale; the row hover is the official state layer rather
+        // than a swapped background, which is what makes it the same feedback
+        // mechanism as every other row in the app.
+        rowHoverBg: layer(r["on-surface"], stateHover),
         colorBgContainer: p.surface1,
         borderColor: p.line,
+        cellPaddingBlock: num("spacing.steps.md"),
+        cellPaddingInline: num("spacing.steps.lg"),
+        cellPaddingBlockMD: num("spacing.steps.md"),
+        cellPaddingInlineMD: num("spacing.steps.lg"),
+        cellPaddingBlockSM: num("spacing.steps.sm"),
+        cellPaddingInlineSM: num("spacing.steps.md"),
+        cellFontSize: typeRole("body-medium").size,
+        cellFontSizeMD: typeRole("body-medium").size,
+        cellFontSizeSM: typeRole("body-small").size,
       },
       Tag: {
         // Our chips are tokenised; keep antd's own tags legible too (the old bug
@@ -400,9 +620,69 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
       },
       Descriptions: { labelColor: p.text2 },
       Empty: { colorTextDescription: p.text2 },
-      Input: { colorBgContainer: p.surface1, colorTextPlaceholder: p.placeholder },
+      Input: {
+        colorBgContainer: r["surface-container-highest"],
+        colorTextPlaceholder: r["on-surface-variant"],
+        paddingInline: num("textField.space.leading"),
+      },
       Select: { colorTextPlaceholder: p.placeholder },
       Typography: { colorText: p.text1, colorTextDescription: p.text2 },
+      Switch: {
+        // M3's switch: a 52×32 track with a 24px handle when selected.
+        trackHeight: num("switch.track.height"),
+        trackMinWidth: num("switch.track.width"),
+        handleSize: num("switch.handle.selected"),
+        handleBg: r["on-primary"],
+      },
+      Segmented: {
+        // An M3 segmented button is a set of outlined buttons, not a filled
+        // track: the selected segment carries secondary-container itself.
+        trackBg: "transparent",
+        trackPadding: 0,
+        itemColor: r["on-surface"],
+        itemHoverBg: layer(r["on-surface"], stateHover),
+        itemActiveBg: layer(r["on-surface"], stateHover),
+        itemSelectedBg: r["secondary-container"],
+        itemSelectedColor: r["on-secondary-container"],
+      },
+      Alert: {
+        borderRadius: shape.lg,
+        defaultPadding: `${px("spacing.steps.md")} ${px("spacing.steps.lg")}`,
+        withDescriptionPadding: `${px("spacing.steps.md")} ${px("spacing.steps.lg")}`,
+      },
+      Badge: {
+        indicatorHeight: num("badge.large"),
+        dotSize: num("badge.dot"),
+        textFontSize: typeRole("label-small").size,
+        paddingInline: num("spacing.steps.xs"),
+      },
+      Divider: { verticalMarginInline: num("spacing.steps.md") },
+      List: { itemPadding: `${px("spacing.steps.lg")} ${px("spacing.steps.lg")}` },
+      Slider: {
+        // The M3E slider's handle is a 4×44 bar and its track is 16px tall.
+        railSize: num("slider.track.height"),
+        handleSize: num("slider.handle.height"),
+        handleSizeHover: num("slider.handle.height"),
+        railBg: r["secondary-container"],
+        railHoverBg: r["secondary-container"],
+        trackBg: r["primary"],
+        trackHoverBg: r["primary"],
+        handleColor: r["primary"],
+        handleActiveColor: r["primary"],
+        dotBorderColor: r["secondary-container"],
+        trackBgDisabled: layer(r["on-surface"], "--ah-c-slider-disabled-inactive-track"),
+      },
+      Modal: {
+        // Dialog: corner-extra-large on surface-container-high.
+        contentBg: r["surface-container-high"],
+        headerBg: r["surface-container-high"],
+        titleColor: r["on-surface"],
+      },
+      Progress: {
+        defaultColor: r["primary"],
+        remainingColor: r["secondary-container"],
+        lineBorderRadius: shape.full,
+      },
     },
   };
 }

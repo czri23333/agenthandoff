@@ -111,9 +111,17 @@ def test_no_component_hardcodes_a_colour() -> None:
     Guards the class of bug where a component picks a colour name that its
     component library does not recognise and silently renders unreadable text.
     """
+    # Generated stylesheets are exempt *because they are generated*: every hex in
+    # them is a palette value copied out of tokens.json by the same run that
+    # writes the token file, and `test_first_paint_is_the_real_surface_colour`
+    # asserts the copy is the real one. Hand-written literals have no such proof,
+    # which is the whole distinction this gate is drawing.
+    generated = {"firstpaint.css"}
     offenders: list[str] = []
     for path in sorted((WEB / "src").rglob("*")):
         if path.suffix not in {".tsx", ".ts", ".css"}:
+            continue
+        if path.name in generated:
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if _is_comment(line):

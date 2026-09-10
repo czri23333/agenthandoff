@@ -130,15 +130,19 @@ export default function App() {
   return (
     <Layout className="mx-auto h-screen max-w-[1500px]">
       <Layout.Header
-        className="!flex !h-auto !flex-wrap !items-center gap-x-4 gap-y-1.5 !px-5 !py-2.5"
+        className="ah-appbar !flex !h-auto !flex-wrap !items-center gap-x-4 gap-y-1.5 !px-4 !py-2.5"
         style={{ borderBottom: "1px solid var(--ah-line)" }}
       >
-        <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
+        {/* An <h1> rather than antd's `Typography.Title level={5}`: the app bar's
+            title role is M3's title-large (22px), and antd's own heading rule is
+            `h5.ant-typography` plus its runtime hash class, so a single-class
+            override loses and the bar kept a 16px heading. */}
+        <h1 className="ah-appbar__title m-0 whitespace-nowrap">
           agenthandoff{" "}
           <span className="ah-label ah-label-plain">
             cockpit
           </span>
-        </Typography.Title>
+        </h1>
         {/* A Segmented control instead of antd's horizontal Menu: the Menu's
             selected item paints its own container colour and measured 3.66:1 on
             our header surface, while Segmented inherits the token palette. */}

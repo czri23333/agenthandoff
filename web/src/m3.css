@@ -1,0 +1,1459 @@
+/* ── Material 3 component anatomy ────────────────────────────────────────────
+   Everything below is *anatomy*. Colour, shape, size, elevation, type role,
+   spring and spacing all arrive as `--ah-c-*` custom properties that `theme.ts`
+   injects straight out of `tokens.json`, whose `component` block is an
+   independent transcription of Google's per-component token files (androidx
+   material3 v0_14_0) cross-checked against material-web (design system v0_192).
+   No rule here writes a px length, a hex colour or a bare duration, and
+   `tests/test_tokens_components.py` fails the build if one appears.
+
+   Division of labour with antd: antd keeps behaviour — focus management, the
+   keyboard model, aria attributes, Table virtualisation — and keeps ownership of
+   any property it exposes as a *named* token, which `antdConfig()` in theme.ts
+   now sets from the same token file. This sheet owns the anatomy antd has no
+   token for: the M3E press shape morph, the state-layer composition, the chip
+   families, the list-item morph, the floating label and the progress stop. One
+   owner per property, so there is no "half antd, half M3" state to reason about.
+
+   Why the `:root` prefix on antd selectors: antd v6 injects its styles into
+   <head> at runtime, i.e. *after* this bundle, so a same-specificity rule would
+   lose. `:root .ant-btn` is (0,2,0) against antd's (0,1,0), which wins on
+   specificity instead of on insertion order.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────
+   Google's three sizes: 40 (small), 56 (medium), 96 (large). `corner-full` at
+   rest, and the M3E shape morph replaces it with corner-small / -medium /
+   -large while the button is held. Height, leading and trailing space, icon
+   size and the gap between icon and label are Button{Small,Medium,Large}Tokens. */
+
+.ah-btn,
+/* The doubled class is deliberate and is the one place this sheet fights antd on
+   specificity: antd's compact-button rules (`.css-<hash>.ant-btn-compact-item`)
+   are (0,2,0), and a plain `.ant-btn` override ties with them and then loses on
+   insertion order, because antd injects its stylesheet at runtime — after this
+   bundle. `.ant-btn.ant-btn` is (0,2,0) *plus* the `:root` ancestor for (0,3,0),
+   which is what makes the radius below the radius the browser actually uses. */
+:root .ant-btn.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ah-c-button-sizes-small-gap);
+  height: var(--ah-c-button-sizes-small-height);
+  min-width: var(--ah-c-button-min-width);
+  padding-block: 0;
+  padding-inline: var(--ah-c-button-sizes-small-leading) var(--ah-c-button-sizes-small-trailing);
+  border-radius: var(--ah-c-button-sizes-small-shape);
+  font-size: var(--ah-c-button-type-role-size);
+  line-height: var(--ah-c-button-type-role-line);
+  letter-spacing: var(--ah-c-button-type-role-tracking);
+  font-weight: var(--ah-c-button-type-role-weight);
+  text-wrap: nowrap;
+  cursor: pointer;
+  box-shadow: var(--ah-c-button-elevation-rest);
+  /* Per-variant elevation, as one indirection. The default is *no* shadow —
+     `0 0 0 0 transparent` is a real shadow of zero size, so it can sit in the
+     same comma-separated list as the state layer, which `none` cannot — and the
+     filled, tonal and elevated variants opt back in below. Getting this
+     backwards is how an outlined button ended up lifting on hover. */
+  --_btn-hover-elevation: 0 0 0 0 transparent;
+  --_btn-pressed-elevation: 0 0 0 0 transparent;
+  /* antd ships `transition: all 0.3s`, which is not a token and would animate
+     the radius on the wrong curve. */
+  transition: box-shadow var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    border-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    transform var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    opacity var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-btn:hover:not(:disabled),
+:root .ant-btn:hover:not(:disabled) {
+  box-shadow:
+    inset 0 0 0 9999px
+      color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-hover), transparent),
+    var(--_btn-hover-elevation);
+}
+
+/* The morph, and the reason M3E buttons feel like M3E buttons. It is geometry,
+   so it moves on a spatial spring — and `transform: none` retires the generic
+   scale press from index.css, because M3's press feedback is the layer plus the
+   corner, not a shrinking button. */
+.ah-btn:active:not(:disabled),
+:root .ant-btn:active:not(:disabled) {
+  border-radius: var(--ah-c-button-sizes-small-shape-pressed);
+  transform: none;
+  box-shadow:
+    inset 0 0 0 9999px
+      color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-pressed), transparent),
+    var(--_btn-pressed-elevation);
+}
+
+/* FilledButtonTokens.DisabledContainerOpacity (0.1) and
+   DisabledLabelTextOpacity (0.38) — composed, not an element-level `opacity`,
+   so a disabled button does not also fade its own focus ring. */
+.ah-btn:disabled,
+:root .ant-btn:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-button-disabled-container), transparent);
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-button-disabled-content), transparent);
+  box-shadow: none;
+}
+
+.ah-btn > .anticon,
+.ah-btn > svg {
+  font-size: var(--ah-c-button-sizes-small-icon);
+}
+
+.ah-btn--medium {
+  height: var(--ah-c-button-sizes-medium-height);
+  min-width: var(--ah-c-button-min-width);
+  gap: var(--ah-c-button-sizes-medium-gap);
+  padding-inline: var(--ah-c-button-sizes-medium-leading) var(--ah-c-button-sizes-medium-trailing);
+}
+
+.ah-btn--medium:active:not(:disabled) {
+  border-radius: var(--ah-c-button-sizes-medium-shape-pressed);
+}
+
+.ah-btn--large {
+  height: var(--ah-c-button-sizes-large-height);
+  gap: var(--ah-c-button-sizes-large-gap);
+  padding-inline: var(--ah-c-button-sizes-large-leading) var(--ah-c-button-sizes-large-trailing);
+}
+
+.ah-btn--large:active:not(:disabled) {
+  border-radius: var(--ah-c-button-sizes-large-shape-pressed);
+}
+
+/* Variants. A variant changes container, content and — for the outlined one —
+   the outline width that OutlinedButtonTokens carries per size. */
+.ah-btn--tonal,
+:root .ant-btn-primary.ah-btn--tonal {
+  background: var(--ah-c-button-variant-tonal-container);
+  color: var(--ah-c-button-variant-tonal-content);
+  --ah-state-layer-color: var(--ah-c-button-variant-tonal-content);
+}
+
+.ah-btn--elevated {
+  background: var(--ah-c-button-variant-elevated-container);
+  color: var(--ah-c-button-variant-elevated-content);
+  box-shadow: var(--ah-c-button-elevation-elevated-rest);
+  --ah-state-layer-color: var(--ah-c-button-variant-elevated-content);
+  --_btn-hover-elevation: var(--ah-c-button-elevation-elevated-hover);
+  --_btn-pressed-elevation: var(--ah-c-button-elevation-elevated-pressed);
+}
+
+.ah-btn--outlined,
+.ah-btn--text {
+  --_btn-hover-elevation: 0 0 0 0 transparent;
+  --_btn-pressed-elevation: 0 0 0 0 transparent;
+}
+
+/* The *container* is the variant's business, not the shared rule's. This block
+   is what a bare `.ah-btn` means: M3's filled button. antd's `default` button
+   is not filled, and painting it from here is how an outlined button briefly
+   shipped with a primary container. */
+.ah-btn {
+  border: 0;
+  background: var(--ah-c-button-variant-filled-container);
+  color: var(--ah-c-button-variant-filled-content);
+  /* A filled surface composites its *on*-colour, which is
+     ButtonSmallTokens.HoveredLabelTextColor — not the label's own colour. */
+  --ah-state-layer-color: var(--ah-c-button-variant-filled-content);
+}
+
+/* FilledButtonTokens.HoveredContainerElevation and
+   FilledTonalButtonTokens.HoverContainerElevation are both level 1, and
+   PressedContainerElevation is level 0 in both — the button lifts under the
+   pointer and settles when it is held, which is the opposite of the press
+   behaviour a "brightness filter" would produce. */
+.ah-btn--filled,
+.ah-btn--tonal,
+:root .ant-btn-primary {
+  --_btn-hover-elevation: var(--ah-c-button-elevation-hover);
+  --_btn-pressed-elevation: var(--ah-c-button-elevation-pressed);
+}
+
+.ah-btn--outlined,
+:root .ant-btn-default {
+  background: transparent;
+  color: var(--ah-c-button-variant-outlined-content);
+  --ah-state-layer-color: var(--ah-c-button-variant-outlined-content);
+}
+
+.ah-btn--outlined {
+  border: var(--ah-c-button-sizes-small-outline-width) solid var(--ah-c-button-variant-outlined-outline);
+}
+
+.ah-btn--text,
+:root .ant-btn-text,
+:root .ant-btn-link {
+  background: transparent;
+  color: var(--ah-c-button-variant-text-content);
+  --ah-state-layer-color: var(--ah-c-button-variant-text-content);
+  --_btn-hover-elevation: 0 0 0 0 transparent;
+  --_btn-pressed-elevation: 0 0 0 0 transparent;
+}
+
+:root .ant-btn-primary {
+  background: var(--ah-c-button-variant-filled-container);
+  color: var(--ah-c-button-variant-filled-content);
+  --ah-state-layer-color: var(--ah-c-button-variant-filled-content);
+}
+
+:root .ant-btn-dangerous {
+  background: var(--ah-error);
+  color: var(--ah-on-error);
+  --ah-state-layer-color: var(--ah-on-error);
+}
+
+/* antd's own `size="small"` is 32px, which M3 does not publish a button for;
+   the cockpit maps it onto M3's *small* (40px) rather than leaving a 32px
+   rectangle in an M3 toolbar. */
+:root .ant-btn-sm {
+  height: var(--ah-c-button-sizes-small-height);
+  font-size: var(--ah-c-button-type-role-size);
+}
+
+/* ── Icon buttons ────────────────────────────────────────────────────────────
+   SmallIconButtonTokens: a 40px square, corner-full (round) or corner-medium
+   (square), corner-small while pressed, a 24px icon and 4 / 8 / 14px space for
+   the narrow / default / wide variants. */
+
+.ah-iconbtn,
+:root .ant-btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ah-c-icon-button-small-height);
+  height: var(--ah-c-icon-button-small-height);
+  min-width: var(--ah-c-icon-button-small-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ah-c-icon-button-small-shape);
+  background: transparent;
+  color: var(--ah-c-icon-button-variant-standard-content);
+  --ah-state-layer-color: var(--ah-c-icon-button-variant-standard-content);
+}
+
+.ah-iconbtn:active:not(:disabled),
+:root .ant-btn-icon-only:active:not(:disabled) {
+  border-radius: var(--ah-c-icon-button-small-shape-pressed);
+  transform: none;
+}
+
+.ah-iconbtn--filled {
+  background: var(--ah-c-icon-button-variant-filled-container);
+  color: var(--ah-c-icon-button-variant-filled-content);
+  --ah-state-layer-color: var(--ah-c-icon-button-variant-filled-content);
+}
+
+.ah-iconbtn--tonal {
+  background: var(--ah-c-icon-button-variant-tonal-container);
+  color: var(--ah-c-icon-button-variant-tonal-content);
+  --ah-state-layer-color: var(--ah-c-icon-button-variant-tonal-content);
+}
+
+.ah-iconbtn--outlined {
+  border: var(--ah-c-icon-button-small-outline-width) solid var(--ah-c-icon-button-variant-outlined-outline);
+  color: var(--ah-c-icon-button-variant-outlined-content);
+}
+
+.ah-iconbtn > .anticon,
+.ah-iconbtn > svg {
+  font-size: var(--ah-c-icon-button-small-icon);
+}
+
+/* ── FAB ─────────────────────────────────────────────────────────────────────
+   Fab{Baseline,Small,Medium,Large}Tokens: 56 / 40 / 80 / 96, corners
+   large / medium / large / extra-large, icons 24 / 24 / 28 / 32. */
+
+.ah-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ah-c-fab-sizes-regular-size);
+  height: var(--ah-c-fab-sizes-regular-size);
+  border: 0;
+  border-radius: var(--ah-c-fab-sizes-regular-shape);
+  background: var(--ah-c-fab-container);
+  color: var(--ah-c-fab-content);
+  box-shadow: var(--ah-c-fab-elevation-rest);
+  --ah-state-layer-color: var(--ah-c-fab-content);
+}
+
+.ah-fab:hover:not(:disabled) {
+  box-shadow: var(--ah-c-fab-elevation-hover);
+}
+
+.ah-fab--small {
+  width: var(--ah-c-fab-sizes-small-size);
+  height: var(--ah-c-fab-sizes-small-size);
+  border-radius: var(--ah-c-fab-sizes-small-shape);
+}
+
+.ah-fab--medium {
+  width: var(--ah-c-fab-sizes-medium-size);
+  height: var(--ah-c-fab-sizes-medium-size);
+  border-radius: var(--ah-c-fab-sizes-medium-shape);
+}
+
+.ah-fab--large {
+  width: var(--ah-c-fab-sizes-large-size);
+  height: var(--ah-c-fab-sizes-large-size);
+  border-radius: var(--ah-c-fab-sizes-large-shape);
+}
+
+/* ── Chips ───────────────────────────────────────────────────────────────────
+   A *different component* from `.ah-chip`, which is the CLI identity label and
+   deliberately has no press state (see docs/theming.md). These are M3's three
+   interactive families at 32px with an 18px leading icon and a 48px touch
+   target, expressed as `margin: max(0, (48px - 32px) / 2)` around the 32px box
+   exactly as material-web's chips/internal/_shared.scss does it. */
+
+.ah-mchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ah-c-chip-icon);
+  height: var(--ah-c-chip-height);
+  margin-block: calc((var(--ah-c-chip-touch-target) - var(--ah-c-chip-height)) / 2);
+  padding-inline: var(--ah-c-spacing-steps-md);
+  border: var(--ah-c-chip-unselected-outline-width) solid var(--ah-c-chip-variant-assist-outline);
+  border-radius: var(--ah-c-chip-variant-assist-shape);
+  background: transparent;
+  color: var(--ah-c-chip-variant-assist-content);
+  font-size: var(--ah-c-chip-type-role-size);
+  line-height: var(--ah-c-chip-type-role-line);
+  letter-spacing: var(--ah-c-chip-type-role-tracking);
+  font-weight: var(--ah-c-chip-type-role-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  --ah-state-layer-color: currentColor;
+}
+
+.ah-mchip:active:not(:disabled) {
+  border-radius: var(--ah-c-chip-variant-assist-shape-pressed);
+  transform: none;
+}
+
+.ah-mchip > .anticon,
+.ah-mchip > svg {
+  font-size: var(--ah-c-chip-icon);
+}
+
+/* AssistChipTokens.IconColor is primary, and the M3E base chip's selected
+   leading icon switches to on-secondary-container with the container. */
+.ah-mchip--assist > .anticon,
+.ah-mchip--assist > svg {
+  color: var(--ah-c-chip-variant-assist-icon-color);
+}
+
+.ah-mchip--filter[aria-pressed="true"] > .anticon,
+.ah-mchip--filter[aria-pressed="true"] > svg {
+  color: var(--ah-c-chip-selected-icon-color);
+}
+
+/* filter: the M3E base chip, whose resting corner is corner-medium and whose
+   selected corner is corner-full — so the chip visibly rounds off as it is
+   chosen. `ChipsTokens.kt` is the source of that pair. */
+.ah-mchip--filter {
+  border-radius: var(--ah-c-chip-variant-filter-shape);
+  color: var(--ah-c-chip-variant-filter-content);
+  --ah-state-layer-color: var(--ah-c-chip-variant-filter-content);
+}
+
+.ah-mchip--filter:active:not(:disabled) {
+  border-radius: var(--ah-c-chip-variant-filter-shape-pressed);
+}
+
+.ah-mchip--filter[aria-pressed="true"] {
+  border-width: var(--ah-c-chip-selected-outline-width);
+  border-color: transparent;
+  border-radius: var(--ah-c-chip-selected-shape);
+  background: var(--ah-c-chip-selected-container);
+  color: var(--ah-c-chip-selected-content);
+  --ah-state-layer-color: var(--ah-c-chip-selected-content);
+}
+
+.ah-mchip--input {
+  border-radius: var(--ah-c-chip-variant-input-shape);
+  color: var(--ah-c-chip-variant-input-content);
+}
+
+.ah-mchip:disabled {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-chip-disabled-container), transparent);
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-chip-disabled-content), transparent);
+}
+
+/* The filter chip's leading check mark only exists while it is on, which is
+   FilterChipTokens' selected-leading-icon slot. */
+.ah-mchip__check {
+  display: none;
+  align-items: center;
+  font-size: var(--ah-c-chip-icon);
+}
+
+.ah-mchip--filter[aria-pressed="true"] .ah-mchip__check {
+  display: inline-flex;
+}
+
+/* ── List items ──────────────────────────────────────────────────────────────
+   ListTokens: 56 / 72 / 88px for one / two / three lines, a 24px leading icon
+   at 16px leading space, 16px trailing space, a body-large label, a body-medium
+   supporting line and a label-small overline — plus the M3E morph, where the
+   container widens from corner-extra-small (4) at rest to corner-medium (12) on
+   hover and corner-large (16) once it is pressed or selected. */
+
+.ah-li {
+  display: flex;
+  align-items: center;
+  gap: var(--ah-c-list-item-gap);
+  min-height: var(--ah-c-list-item-height-one-line);
+  padding-inline: var(--ah-c-list-item-leading-space) var(--ah-c-list-item-trailing-space);
+  border: 0;
+  border-radius: var(--ah-c-list-item-shape-rest);
+  background: var(--ah-c-list-item-container);
+  color: var(--ah-c-list-item-label);
+  text-align: start;
+  transition: border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial);
+}
+
+.ah-li:hover {
+  border-radius: var(--ah-c-list-item-shape-hover);
+}
+
+.ah-li:active,
+.ah-li[aria-selected="true"] {
+  border-radius: var(--ah-c-list-item-shape-active);
+}
+
+.ah-li--two-line {
+  min-height: var(--ah-c-list-item-height-two-line);
+}
+
+.ah-li--three-line {
+  min-height: var(--ah-c-list-item-height-three-line);
+  align-items: flex-start;
+}
+
+.ah-li__label {
+  font-size: var(--ah-c-list-item-type-role-label-size);
+  line-height: var(--ah-c-list-item-type-role-label-line);
+  letter-spacing: var(--ah-c-list-item-type-role-label-tracking);
+  font-weight: var(--ah-c-list-item-type-role-label-weight);
+}
+
+.ah-li__supporting {
+  color: var(--ah-c-list-item-supporting);
+  font-size: var(--ah-c-list-item-type-role-supporting-size);
+  line-height: var(--ah-c-list-item-type-role-supporting-line);
+  letter-spacing: var(--ah-c-list-item-type-role-supporting-tracking);
+  font-weight: var(--ah-c-list-item-type-role-supporting-weight);
+}
+
+.ah-li__overline {
+  color: var(--ah-c-list-item-supporting);
+  font-size: var(--ah-c-list-item-type-role-overline-size);
+  line-height: var(--ah-c-list-item-type-role-overline-line);
+  letter-spacing: var(--ah-c-list-item-type-role-overline-tracking);
+  font-weight: var(--ah-c-list-item-type-role-overline-weight);
+}
+
+.ah-li__icon {
+  flex: none;
+  width: var(--ah-c-list-item-icon);
+  height: var(--ah-c-list-item-icon);
+  color: var(--ah-c-list-item-icon-color);
+}
+
+.ah-li:disabled {
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-list-item-disabled-content), transparent);
+}
+
+/* ── Text fields ─────────────────────────────────────────────────────────────
+   A filled field is top-space + body-large line-height + bottom-space =
+   16 + 24 + 16 = 56px, which is the container height androidx publishes. The
+   label rests on that line and shrinks to body-small as it floats onto the
+   active indicator. `.ah-field--dense` halves the two spaces to 8 + 24 + 8 = 40;
+   M3's published token set has no dense variant, so that one is ours. */
+
+.ah-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: var(--ah-c-text-field-height);
+  border-radius: var(--ah-c-text-field-filled-shape);
+  background: var(--ah-c-text-field-filled-container);
+}
+
+.ah-field--outlined {
+  background: transparent;
+  border: var(--ah-c-text-field-outlined-outline-width) solid var(--ah-c-text-field-outlined-outline);
+  border-radius: var(--ah-c-text-field-outlined-shape);
+}
+
+.ah-field--outlined:focus-within {
+  border-color: var(--ah-c-text-field-outlined-focus-outline);
+  border-width: var(--ah-c-text-field-outlined-focus-outline-width);
+}
+
+.ah-field--dense {
+  min-height: var(--ah-c-text-field-height-dense);
+}
+
+.ah-field__input {
+  flex: 1;
+  min-width: 0;
+  padding-block: var(--ah-c-text-field-space-top) var(--ah-c-text-field-space-bottom);
+  padding-inline: var(--ah-c-text-field-space-leading) var(--ah-c-text-field-space-trailing);
+  border: 0;
+  background: transparent;
+  color: var(--ah-c-text-field-filled-input);
+  font-size: var(--ah-c-text-field-input-type-role-size);
+  line-height: var(--ah-c-text-field-input-type-role-line);
+  letter-spacing: var(--ah-c-text-field-input-type-role-tracking);
+  outline: none;
+}
+
+.ah-field--with-label .ah-field__input {
+  padding-block-start: calc(
+    var(--ah-c-text-field-with-label-top) + var(--ah-c-text-field-populated-type-role-line)
+  );
+  padding-block-end: var(--ah-c-text-field-with-label-bottom);
+}
+
+/* The label's float is a *size* change, so it reads the two official roles:
+   body-large at rest, body-small once it is riding the indicator. */
+.ah-field__label {
+  position: absolute;
+  inset-inline-start: var(--ah-c-text-field-space-leading);
+  top: var(--ah-c-text-field-space-top);
+  pointer-events: none;
+  color: var(--ah-c-text-field-filled-label);
+  font-size: var(--ah-c-text-field-label-type-role-size);
+  line-height: var(--ah-c-text-field-label-type-role-line);
+  letter-spacing: var(--ah-c-text-field-label-type-role-tracking);
+  transition:
+    font-size var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    top var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-field:focus-within .ah-field__label,
+.ah-field--populated .ah-field__label {
+  top: var(--ah-c-text-field-with-label-top);
+  color: var(--ah-c-text-field-filled-label-focus);
+  font-size: var(--ah-c-text-field-populated-type-role-size);
+  line-height: var(--ah-c-text-field-populated-type-role-line);
+}
+
+/* The filled variant's active indicator: 1px at rest, 3px and primary on focus
+   (material-web's current field token set; its own pinned v0_192 copy still says
+   2px — see the deviation table in docs/theming.md). */
+.ah-field__indicator {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: var(--ah-c-text-field-filled-indicator-height);
+  background: var(--ah-c-text-field-filled-indicator);
+}
+
+.ah-field:focus-within .ah-field__indicator {
+  height: var(--ah-c-text-field-filled-focus-indicator-height);
+  background: var(--ah-c-text-field-filled-focus-indicator);
+}
+
+.ah-field__supporting {
+  padding-block-start: var(--ah-c-text-field-supporting-top);
+  padding-inline: var(--ah-c-text-field-supporting-leading) var(--ah-c-text-field-supporting-trailing);
+  color: var(--ah-c-text-field-filled-label);
+  font-size: var(--ah-c-text-field-supporting-type-role-size);
+  line-height: var(--ah-c-text-field-supporting-type-role-line);
+  letter-spacing: var(--ah-c-text-field-supporting-type-role-tracking);
+}
+
+.ah-field--error,
+.ah-field--error .ah-field__label,
+.ah-field--error .ah-field__supporting {
+  color: var(--ah-c-text-field-error-color);
+  border-color: var(--ah-c-text-field-error-color);
+}
+
+.ah-field:has(input:disabled) {
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-text-field-disabled-container), transparent);
+}
+
+/* ── Switch ──────────────────────────────────────────────────────────────────
+   SwitchTokens: a 52×32 corner-full track with a 2px outline, and a handle that
+   is 24px when the switch is on but 16px when it is off — the M3 switch's
+   handle grows as it travels. Both are centred on the track, computed from the
+   tokens rather than measured. */
+
+:root .ant-switch {
+  min-width: var(--ah-c-switch-track-width);
+  width: var(--ah-c-switch-track-width);
+  height: var(--ah-c-switch-track-height);
+  border-radius: var(--ah-c-switch-track-shape);
+  border: var(--ah-c-switch-track-outline-width) solid var(--ah-c-switch-unselected-outline);
+  background: var(--ah-c-switch-unselected-track);
+  box-shadow: none;
+  padding: 0;
+}
+
+:root .ant-switch .ant-switch-handle {
+  width: var(--ah-c-switch-handle-unselected);
+  height: var(--ah-c-switch-handle-unselected);
+  top: calc((var(--ah-c-switch-track-height) - var(--ah-c-switch-handle-unselected)) / 2);
+  inset-inline-start: calc((var(--ah-c-switch-track-height) - var(--ah-c-switch-handle-unselected)) / 2);
+}
+
+:root .ant-switch .ant-switch-handle::before {
+  background: var(--ah-c-switch-unselected-handle);
+  box-shadow: none;
+}
+
+:root .ant-switch.ant-switch-checked {
+  border-color: transparent;
+  background: var(--ah-c-switch-selected-track);
+}
+
+:root .ant-switch.ant-switch-checked .ant-switch-handle {
+  width: var(--ah-c-switch-handle-selected);
+  height: var(--ah-c-switch-handle-selected);
+  top: calc((var(--ah-c-switch-track-height) - var(--ah-c-switch-handle-selected)) / 2);
+  inset-inline-start: calc(
+    var(--ah-c-switch-track-width) - var(--ah-c-switch-handle-selected) -
+      (var(--ah-c-switch-track-height) - var(--ah-c-switch-handle-selected)) / 2 -
+      var(--ah-c-switch-track-outline-width) * 2
+  );
+}
+
+:root .ant-switch.ant-switch-checked .ant-switch-handle::before {
+  background: var(--ah-c-switch-selected-handle);
+}
+
+/* The official state layer is 40px, i.e. larger than the 32px track, so it is
+   an inset shadow on the track rather than an outline. */
+:root .ant-switch:hover:not(.ant-switch-disabled) {
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-c-switch-selected-handle) var(--ah-state-hover), transparent);
+}
+
+:root .ant-switch.ant-switch-disabled {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-switch-disabled-track-opacity), transparent);
+}
+
+/* ── Checkbox and radio ──────────────────────────────────────────────────────
+   CheckboxTokens: an 18px container at a 2px radius inside a 40px state layer.
+   RadioButtonTokens: a 20px icon inside the same 40px layer. */
+
+:root .ant-checkbox .ant-checkbox-inner {
+  width: var(--ah-c-checkbox-size);
+  height: var(--ah-c-checkbox-size);
+  border: var(--ah-c-checkbox-outline-width) solid var(--ah-c-checkbox-unselected-outline);
+  border-radius: var(--ah-c-checkbox-radius);
+  background: transparent;
+}
+
+:root .ant-checkbox-checked .ant-checkbox-inner {
+  border-color: var(--ah-c-checkbox-selected-container);
+  background: var(--ah-c-checkbox-selected-container);
+}
+
+:root .ant-checkbox-checked .ant-checkbox-inner::after {
+  border-color: var(--ah-c-checkbox-selected-icon);
+}
+
+/* antd paints a 40px-square hover layer around the box already; M3's is a
+   corner-full layer at the same size, so it only needs the shape. */
+:root .ant-checkbox::after {
+  border-radius: var(--ah-c-checkbox-state-layer);
+}
+
+:root .ant-radio .ant-radio-inner {
+  width: var(--ah-c-radio-size);
+  height: var(--ah-c-radio-size);
+  border-color: var(--ah-c-radio-unselected-icon);
+  background: transparent;
+}
+
+:root .ant-radio-checked .ant-radio-inner {
+  border-color: var(--ah-c-radio-selected-icon);
+}
+
+:root .ant-radio-checked .ant-radio-inner::after {
+  background: var(--ah-c-radio-selected-icon);
+}
+
+/* ── Segmented button ────────────────────────────────────────────────────────
+   OutlinedSegmentedButtonTokens: 40px, corner-full, a 1px outline, and a
+   selected segment in secondary-container with on-secondary-container content.
+   antd animates a floating thumb between segments; it takes the same selected
+   container so the moving thumb and a static selection never disagree. */
+
+:root .ant-segmented {
+  height: var(--ah-c-segmented-height);
+  padding: 0;
+  border: var(--ah-c-segmented-outline-width) solid var(--ah-c-segmented-outline);
+  border-radius: var(--ah-c-segmented-shape);
+  background: transparent;
+}
+
+:root .ant-segmented .ant-segmented-item,
+:root .ant-segmented .ant-segmented-thumb {
+  border-radius: var(--ah-c-segmented-shape);
+  color: var(--ah-c-segmented-unselected-content);
+  font-size: var(--ah-c-segmented-type-role-size);
+  line-height: var(--ah-c-segmented-type-role-line);
+  letter-spacing: var(--ah-c-segmented-type-role-tracking);
+  font-weight: var(--ah-c-segmented-type-role-weight);
+}
+
+:root .ant-segmented .ant-segmented-item-selected,
+:root .ant-segmented .ant-segmented-thumb,
+:root .ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) {
+  background: var(--ah-c-segmented-selected-container);
+  color: var(--ah-c-segmented-selected-content);
+  box-shadow: none;
+}
+
+:root .ant-segmented .ant-segmented-item:active {
+  border-radius: var(--ah-c-segmented-shape);
+  transform: none;
+}
+
+:root .ant-segmented .ant-segmented-item-label {
+  min-height: calc(var(--ah-c-segmented-height) - var(--ah-c-segmented-outline-width) * 2);
+  line-height: calc(var(--ah-c-segmented-height) - var(--ah-c-segmented-outline-width) * 2);
+  padding-inline: var(--ah-c-spacing-steps-md);
+}
+
+/* ── Dialog ──────────────────────────────────────────────────────────────────
+   DialogTokens: corner-extra-large, surface-container-high, elevation 3, a
+   headline-small headline, body-medium supporting text and label-large actions
+   on primary; ScrimTokens gives the scrim its colour and 0.32 opacity. The
+   enter and exit are M3E springs. */
+
+:root .ant-modal .ant-modal-content {
+  border-radius: var(--ah-c-dialog-shape);
+  background: var(--ah-c-dialog-container);
+  box-shadow: var(--ah-c-dialog-elevation);
+}
+
+:root .ant-modal .ant-modal-title {
+  color: var(--ah-c-dialog-headline);
+  font-size: var(--ah-c-dialog-headline-type-role-size);
+  line-height: var(--ah-c-dialog-headline-type-role-line);
+  letter-spacing: var(--ah-c-dialog-headline-type-role-tracking);
+  font-weight: var(--ah-c-dialog-headline-type-role-weight);
+}
+
+:root .ant-modal .ant-modal-body {
+  color: var(--ah-c-dialog-supporting);
+  font-size: var(--ah-c-dialog-supporting-type-role-size);
+  line-height: var(--ah-c-dialog-supporting-type-role-line);
+}
+
+:root .ant-modal-root .ant-modal-mask {
+  background: color-mix(in srgb, var(--ah-c-dialog-scrim-role) calc(var(--ah-c-dialog-scrim-opacity) * 100%), transparent);
+}
+
+@keyframes ah-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+:root .ant-modal .ant-modal-content {
+  animation: ah-dialog-in var(--ah-c-dialog-enter-duration) var(--ah-c-dialog-enter-easing) both;
+}
+
+/* ── Progress ────────────────────────────────────────────────────────────────
+   LinearProgressIndicatorTokens: 4px tall, corner-full, a 4px gap between the
+   active indicator and a 4px stop indicator, on a secondary-container track
+   with primary for both the active bar and the stop. */
+
+.ah-progress {
+  position: relative;
+  height: var(--ah-c-progress-linear-height);
+  /* The gap between the active indicator and the stop is reserved as padding, so
+     an inline `width: 100%` stops exactly one gap short of the stop instead of
+     being clipped by it. */
+  padding-inline-end: calc(var(--ah-c-progress-linear-track-space) + var(--ah-c-progress-linear-stop));
+  box-sizing: border-box;
+  border-radius: var(--ah-c-progress-shape);
+  background: var(--ah-c-progress-track);
+  overflow: hidden;
+}
+
+.ah-progress > i {
+  display: block;
+  height: 100%;
+  border-radius: var(--ah-c-progress-shape);
+  background: var(--ah-c-progress-active);
+  transition: width var(--ah-dur-default-spatial) var(--ah-ease-default-spatial);
+}
+
+/* The stop indicator: M3 marks the end of the track so an indeterminate bar and
+   a nearly-complete one cannot be confused. */
+.ah-progress::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
+  width: var(--ah-c-progress-linear-stop);
+  height: var(--ah-c-progress-linear-stop);
+  border-radius: var(--ah-c-progress-shape);
+  background: var(--ah-c-progress-stop);
+}
+
+:root .ant-progress .ant-progress-bg,
+:root .ant-progress .ant-progress-inner {
+  border-radius: var(--ah-c-progress-shape);
+  background: var(--ah-c-progress-track);
+}
+
+:root .ant-progress .ant-progress-bg {
+  background: var(--ah-c-progress-active);
+}
+
+/* ── Tooltip, badge, divider, snackbar ─────────────────────────────────────── */
+
+:root .ant-tooltip .ant-tooltip-inner {
+  border-radius: var(--ah-c-tooltip-shape);
+  background: var(--ah-c-tooltip-container);
+  color: var(--ah-c-tooltip-content);
+  font-size: var(--ah-c-tooltip-type-role-size);
+  line-height: var(--ah-c-tooltip-type-role-line);
+  letter-spacing: var(--ah-c-tooltip-type-role-tracking);
+  box-shadow: none;
+}
+
+:root .ant-tooltip .ant-tooltip-arrow::before {
+  background: var(--ah-c-tooltip-container);
+}
+
+:root .ant-badge .ant-badge-dot {
+  width: var(--ah-c-badge-dot);
+  height: var(--ah-c-badge-dot);
+  min-width: var(--ah-c-badge-dot);
+  background: var(--ah-c-badge-container);
+  box-shadow: none;
+}
+
+:root .ant-badge .ant-badge-count {
+  min-width: var(--ah-c-badge-large);
+  height: var(--ah-c-badge-large);
+  border-radius: var(--ah-c-badge-shape);
+  background: var(--ah-c-badge-container);
+  color: var(--ah-c-badge-content);
+  font-size: var(--ah-c-badge-type-role-size);
+  box-shadow: none;
+}
+
+:root .ant-divider {
+  border-block-start-color: var(--ah-c-divider-color);
+  border-block-start-width: var(--ah-c-divider-thickness);
+}
+
+:root .ant-divider-vertical {
+  border-inline-start-color: var(--ah-c-divider-color);
+  border-inline-start-width: var(--ah-c-divider-thickness);
+}
+
+/* A snackbar (antd's `message`): inverse-surface at corner-extra-small and
+   elevation 3, 48px on one line. */
+:root .ant-message .ant-message-notice-content {
+  min-height: var(--ah-c-snackbar-single-line);
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--ah-c-snackbar-shape);
+  background: var(--ah-c-snackbar-container);
+  color: var(--ah-c-snackbar-content);
+  box-shadow: var(--ah-c-snackbar-elevation);
+  font-size: var(--ah-c-snackbar-type-role-size);
+  line-height: var(--ah-c-snackbar-type-role-line);
+}
+
+:root .ant-message .ant-message-notice-content .ant-message-custom-content {
+  color: inherit;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────────
+   TopAppBarSmallTokens: a 64px bar. The shell's gaps and padding come off the
+   4dp spacing scale so the page cannot invent a 10px gutter. */
+
+.ah-appbar {
+  min-height: var(--ah-c-app-bar-small-height);
+}
+
+/* Two classes on purpose: the brand is an antd `Typography.Title level={5}`,
+   whose own `h5.ant-typography` rule is (0,1,1) — a single-class override would
+   lose and the app bar would keep antd's 16px heading. */
+.ah-appbar .ah-appbar__title {
+  color: var(--ah-on-surface);
+  font-size: var(--ah-c-app-bar-small-title-type-role-size);
+  line-height: var(--ah-c-app-bar-small-title-type-role-line);
+  letter-spacing: var(--ah-c-app-bar-small-title-type-role-tracking);
+  font-weight: var(--ah-c-app-bar-small-title-type-role-weight);
+}
+
+.ah-shell {
+  gap: var(--ah-c-spacing-steps-md);
+  padding: var(--ah-c-spacing-steps-md);
+}
+
+/* Tablet and up: the spacing scale's 16px step, and a 400px side column. */
+@media (min-width: 1200px) {
+  .ah-shell {
+    gap: var(--ah-c-spacing-steps-lg);
+    padding: var(--ah-c-spacing-steps-lg);
+  }
+}
+
+/* Navigation bar / rail geometry, for a future shell that uses them: a 64px
+   container with a 40px corner-full indicator around a 24px icon. */
+.ah-navbar {
+  min-height: var(--ah-c-navigation-bar-height);
+  background: var(--ah-c-navigation-bar-container);
+  box-shadow: var(--ah-c-navigation-bar-elevation);
+}
+
+.ah-navbar__indicator {
+  height: var(--ah-c-navigation-bar-indicator-height);
+  border-radius: var(--ah-c-navigation-bar-indicator-shape);
+  background: var(--ah-c-navigation-bar-indicator-role);
+}
+
+.ah-navrail__item {
+  min-height: var(--ah-c-navigation-rail-item-height);
+  margin-block: calc(var(--ah-c-navigation-rail-item-vertical-space) / 2);
+  gap: var(--ah-c-navigation-rail-item-icon-label-space);
+}
+
+.ah-navrail__indicator {
+  border-radius: var(--ah-c-navigation-rail-indicator-shape);
+  background: var(--ah-c-navigation-bar-indicator-role);
+}
+
+/* ── Slider ──────────────────────────────────────────────────────────────────
+   SliderTokens: the M3E handle is a 4×44 corner-full *bar*, not a knob, on a
+   16px-tall corner-full track whose inactive half is secondary-container and
+   whose active half is primary. */
+
+:root .ant-slider .ant-slider-rail {
+  height: var(--ah-c-slider-track-height);
+  border-radius: var(--ah-c-slider-track-shape);
+  background: var(--ah-c-slider-inactive);
+}
+
+:root .ant-slider .ant-slider-track {
+  height: var(--ah-c-slider-track-height);
+  border-radius: var(--ah-c-slider-track-shape);
+  background: var(--ah-c-slider-active);
+}
+
+:root .ant-slider .ant-slider-handle::after {
+  width: var(--ah-c-slider-handle-width);
+  height: var(--ah-c-slider-handle-height);
+  /* Centred inside antd's square handle box, whose side is the same token the
+     ConfigProvider hands antd as `handleSize`. */
+  inset-inline-start: calc(
+    (var(--ah-c-slider-handle-height) - var(--ah-c-slider-handle-width)) / 2
+  );
+  inset-block-start: 0;
+  border-radius: var(--ah-c-slider-handle-shape);
+  background: var(--ah-c-slider-handle-color);
+  box-shadow: none;
+}
+
+:root .ant-slider:active .ant-slider-handle::after {
+  width: var(--ah-c-slider-handle-pressed-width);
+  inset-inline-start: calc(
+    (var(--ah-c-slider-handle-height) - var(--ah-c-slider-handle-pressed-width)) / 2
+  );
+}
+
+:root .ant-slider .ant-slider-dot {
+  width: var(--ah-c-slider-stop-size);
+  height: var(--ah-c-slider-stop-size);
+  inset-block-start: calc(
+    (var(--ah-c-slider-track-height) - var(--ah-c-slider-stop-size)) / 2
+  );
+  inset-inline-end: var(--ah-c-slider-stop-trailing-space);
+  border: 0;
+  border-radius: var(--ah-c-slider-stop-size);
+  background: var(--ah-c-slider-stop-color);
+}
+
+:root .ant-slider:disabled .ant-slider-rail {
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-slider-disabled-inactive-track), transparent);
+}
+
+:root .ant-slider:disabled .ant-slider-track {
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-slider-disabled-active-track), transparent);
+}
+
+:root .ant-slider:disabled .ant-slider-handle::after {
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-slider-disabled-handle), transparent);
+}
+
+:root .ant-slider:focus-within .ant-slider-handle::after {
+  width: var(--ah-c-slider-handle-focus-width);
+  inset-inline-start: calc(
+    (var(--ah-c-slider-handle-height) - var(--ah-c-slider-handle-focus-width)) / 2
+  );
+}
+
+/* The value indicator (the label that rides above a dragged handle). */
+.ah-slider-value {
+  padding-inline: var(--ah-c-spacing-steps-sm);
+  border-radius: var(--ah-c-slider-track-shape);
+  background: var(--ah-c-slider-value-indicator-container);
+  color: var(--ah-c-slider-value-indicator-content);
+  font-size: var(--ah-c-slider-value-indicator-type-role-size);
+  line-height: var(--ah-c-slider-value-indicator-type-role-line);
+  letter-spacing: var(--ah-c-slider-value-indicator-type-role-tracking);
+  font-weight: var(--ah-c-slider-value-indicator-type-role-weight);
+}
+
+/* ── Variants and states the cockpit does not render yet ─────────────────────
+   Google publishes four more corners, three icon-button space steps, a second
+   app-bar size, a navigation bar with an 80px variant, a circular progress
+   indicator and a two-line snackbar. They are in the token block because
+   dropping them would make it a partial transcription; they are read here so
+   that "published but unspent" stays a short, deliberate list rather than
+   creeping. */
+
+/* The square (non-round) button: ButtonSmallTokens.ContainerShapeSquare etc. */
+.ah-btn--square {
+  border-radius: var(--ah-c-button-sizes-small-shape-square);
+}
+
+.ah-btn--square.ah-btn--medium {
+  border-radius: var(--ah-c-button-sizes-medium-shape-square);
+}
+
+.ah-btn--square.ah-btn--large {
+  border-radius: var(--ah-c-button-sizes-large-shape-square);
+}
+
+.ah-btn--medium {
+  border-radius: var(--ah-c-button-sizes-medium-shape);
+}
+
+.ah-btn--large {
+  border-radius: var(--ah-c-button-sizes-large-shape);
+}
+
+.ah-btn--medium > .anticon,
+.ah-btn--medium > svg {
+  font-size: var(--ah-c-button-sizes-medium-icon);
+}
+
+.ah-btn--large > .anticon,
+.ah-btn--large > svg {
+  font-size: var(--ah-c-button-sizes-large-icon);
+}
+
+/* OutlinedButtonTokens.OutlineWidth is 1 by default and 2 at the 96px size. */
+.ah-btn--large.ah-btn--outlined {
+  border-width: var(--ah-c-button-sizes-large-outline-width);
+}
+
+.ah-btn--medium.ah-btn--outlined {
+  border-width: var(--ah-c-button-sizes-medium-outline-width);
+}
+
+.ah-iconbtn--square {
+  border-radius: var(--ah-c-icon-button-small-shape-square);
+}
+
+/* SmallIconButtonTokens' three padding steps: 4 (narrow), 8 (default), 14 (wide). */
+.ah-iconbtn--narrow {
+  width: calc(var(--ah-c-icon-button-small-height) - var(--ah-c-icon-button-small-space-narrow));
+  padding-inline: var(--ah-c-icon-button-small-space-narrow);
+}
+
+.ah-iconbtn--wide {
+  width: calc(var(--ah-c-icon-button-small-height) + var(--ah-c-icon-button-small-space-wide));
+  padding-inline: var(--ah-c-icon-button-small-space-wide);
+}
+
+.ah-iconbtn--default {
+  padding-inline: var(--ah-c-icon-button-small-space-default);
+}
+
+.ah-iconbtn:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-icon-button-disabled-container), transparent);
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-icon-button-disabled-content), transparent);
+}
+
+.ah-fab--small > .anticon,
+.ah-fab--small > svg {
+  font-size: var(--ah-c-fab-sizes-small-icon);
+}
+
+.ah-fab > .anticon,
+.ah-fab > svg {
+  font-size: var(--ah-c-fab-sizes-regular-icon);
+}
+
+.ah-fab--medium > .anticon,
+.ah-fab--medium > svg {
+  font-size: var(--ah-c-fab-sizes-medium-icon);
+}
+
+.ah-fab--large > .anticon,
+.ah-fab--large > svg {
+  font-size: var(--ah-c-fab-sizes-large-icon);
+}
+
+.ah-mchip__avatar {
+  width: var(--ah-c-chip-avatar);
+  height: var(--ah-c-chip-avatar);
+  border-radius: var(--ah-c-chip-selected-shape);
+}
+
+.ah-mchip--filter {
+  border-color: var(--ah-c-chip-variant-filter-outline);
+}
+
+.ah-mchip--input {
+  border-color: var(--ah-c-chip-variant-input-outline);
+}
+
+.ah-mchip--input:active:not(:disabled) {
+  border-radius: var(--ah-c-chip-variant-input-shape-pressed);
+}
+
+.ah-li__avatar {
+  flex: none;
+  width: var(--ah-c-list-item-avatar);
+  height: var(--ah-c-list-item-avatar);
+  border-radius: var(--ah-c-chip-selected-shape);
+}
+
+/* CheckboxTokens.IconSize and the 40px state layer both land on antd's box. */
+:root .ant-checkbox .ant-checkbox-inner::after {
+  width: var(--ah-c-checkbox-icon);
+  height: var(--ah-c-checkbox-icon);
+}
+
+:root .ant-checkbox::after {
+  width: var(--ah-c-checkbox-state-layer);
+  height: var(--ah-c-checkbox-state-layer);
+}
+
+:root .ant-radio::after {
+  width: var(--ah-c-radio-state-layer);
+  height: var(--ah-c-radio-state-layer);
+}
+
+:root .ant-checkbox-disabled .ant-checkbox-inner,
+:root .ant-radio-disabled .ant-radio-inner {
+  opacity: var(--ah-c-checkbox-disabled-opacity);
+}
+
+:root .ant-radio-disabled .ant-radio-inner {
+  opacity: var(--ah-c-radio-disabled-opacity);
+}
+
+/* Dialog action button and the leading icon. */
+:root .ant-modal .ant-modal-footer .ant-btn-primary {
+  color: var(--ah-c-dialog-action);
+  background: transparent;
+  --ah-state-layer-color: var(--ah-c-dialog-action);
+  font-size: var(--ah-c-dialog-action-type-role-size);
+  line-height: var(--ah-c-dialog-action-type-role-line);
+  letter-spacing: var(--ah-c-dialog-action-type-role-tracking);
+  font-weight: var(--ah-c-dialog-action-type-role-weight);
+}
+
+:root .ant-modal .ant-modal-confirm-title {
+  color: var(--ah-c-dialog-headline);
+  font-size: var(--ah-c-dialog-headline-type-role-size);
+}
+
+:root .ant-modal .ant-modal-confirm-body > .anticon {
+  color: var(--ah-c-dialog-icon);
+  font-size: var(--ah-c-dialog-icon-size);
+}
+
+/* DialogTokens.SupportingTextFont is body-medium: tracking and weight included. */
+:root .ant-modal .ant-modal-confirm-paragraph {
+  letter-spacing: var(--ah-c-dialog-supporting-type-role-tracking);
+  font-weight: var(--ah-c-dialog-supporting-type-role-weight);
+}
+
+@keyframes ah-dialog-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+:root .ant-zoom-leave .ant-modal-content,
+:root .ant-modal-wrap:has(.ant-modal[style*="display: none"]) .ant-modal-content {
+  animation: ah-dialog-out var(--ah-c-dialog-exit-duration) var(--ah-c-dialog-exit-easing) both;
+}
+
+/* The circular progress indicator: 40dp at 4dp thickness. */
+.ah-progress-circular {
+  width: var(--ah-c-progress-circular-size);
+  height: var(--ah-c-progress-circular-size);
+  border-radius: var(--ah-c-progress-shape);
+  border: var(--ah-c-progress-circular-thickness) solid var(--ah-c-progress-track);
+  border-block-start-color: var(--ah-c-progress-active);
+  animation: ah-spin var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-linear) infinite;
+}
+
+@keyframes ah-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The indeterminate linear wave's wavelength is LinearProgressIndicatorTokens'
+   40dp; a determinate bar does not use it, so the token is spent on the
+   animation that would. */
+@keyframes ah-progress-wave {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--ah-c-progress-linear-wavelength));
+  }
+}
+
+.ah-progress--indeterminate > i {
+  animation: ah-progress-wave var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-linear) infinite;
+}
+
+:root .ant-segmented-disabled .ant-segmented-item {
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-segmented-disabled-content), transparent);
+}
+
+:root .ant-segmented-disabled {
+  border-color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-segmented-disabled-outline), transparent);
+}
+
+.ah-segmented__icon {
+  font-size: var(--ah-c-segmented-icon);
+}
+
+:root .ant-switch::after {
+  width: var(--ah-c-switch-state-layer);
+  height: var(--ah-c-switch-state-layer);
+}
+
+:root .ant-switch .ant-switch-handle:active {
+  width: var(--ah-c-switch-handle-pressed);
+  height: var(--ah-c-switch-handle-pressed);
+}
+
+:root .ant-switch .ant-switch-loading-icon,
+:root .ant-switch .ant-switch-inner-checked,
+:root .ant-switch .ant-switch-inner-unchecked {
+  width: var(--ah-c-switch-handle-icon);
+  height: var(--ah-c-switch-handle-icon);
+}
+
+:root .ant-switch-checked .ant-switch-inner-checked {
+  color: var(--ah-c-switch-selected-icon);
+}
+
+:root .ant-switch .ant-switch-inner-unchecked {
+  color: var(--ah-c-switch-unselected-icon);
+}
+
+:root .ant-switch.ant-switch-disabled {
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-switch-disabled-content-opacity), transparent);
+}
+
+/* Text field: the slots the search box and any future form need. */
+.ah-field__icon {
+  flex: none;
+  width: var(--ah-c-text-field-icon-size);
+  height: var(--ah-c-text-field-icon-size);
+  color: var(--ah-c-text-field-filled-label);
+}
+
+.ah-field__input::placeholder {
+  color: var(--ah-c-text-field-filled-label);
+  font-weight: var(--ah-c-text-field-input-type-role-weight);
+}
+
+.ah-field--outlined .ah-field__label {
+  padding-inline: var(--ah-c-text-field-outline-label-padding);
+  padding-block-end: var(--ah-c-text-field-label-padding-bottom);
+  font-weight: var(--ah-c-text-field-label-type-role-weight);
+}
+
+.ah-field--outlined:hover:not(:focus-within) {
+  border-color: var(--ah-c-text-field-outlined-hover-outline);
+}
+
+.ah-field--outlined .ah-field__input {
+  color: var(--ah-c-text-field-outlined-input);
+}
+
+.ah-field--outlined .ah-field__label {
+  color: var(--ah-c-text-field-outlined-label);
+}
+
+.ah-field--outlined:focus-within .ah-field__label,
+.ah-field--outlined.ah-field--populated .ah-field__label {
+  color: var(--ah-c-text-field-outlined-label-focus);
+  letter-spacing: var(--ah-c-text-field-populated-type-role-tracking);
+  font-weight: var(--ah-c-text-field-populated-type-role-weight);
+}
+
+.ah-field--dense .ah-field__input {
+  padding-block: var(--ah-c-text-field-dense-spaces);
+}
+
+.ah-field .ah-field__supporting {
+  padding-inline-start: var(--ah-c-text-field-space-content);
+  font-weight: var(--ah-c-text-field-supporting-type-role-weight);
+}
+
+.ah-field--error .ah-field__input {
+  color: var(--ah-c-text-field-error-content);
+}
+
+.ah-field:has(input:disabled) .ah-field__input {
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-text-field-disabled-content), transparent);
+}
+
+.ah-field--outlined:has(input:disabled) {
+  border-color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-text-field-disabled-outline), transparent);
+}
+
+/* Snackbar: label-large action in inverse-primary, a 24px icon, 68px on two. */
+.ah-snackbar--two-line {
+  min-height: var(--ah-c-snackbar-two-line);
+}
+
+.ah-snackbar__action {
+  color: var(--ah-c-snackbar-action);
+  font-size: var(--ah-c-snackbar-action-type-role-size);
+  line-height: var(--ah-c-snackbar-action-type-role-line);
+  letter-spacing: var(--ah-c-snackbar-action-type-role-tracking);
+  font-weight: var(--ah-c-snackbar-action-type-role-weight);
+}
+
+:root .ant-message .ant-message-notice-content .anticon {
+  font-size: var(--ah-c-snackbar-icon-size);
+}
+
+:root .ant-message .ant-message-notice-content .ant-message-custom-content {
+  letter-spacing: var(--ah-c-snackbar-type-role-tracking);
+  font-weight: var(--ah-c-snackbar-type-role-weight);
+}
+
+.ah-appbar--medium {
+  min-height: var(--ah-c-app-bar-medium-height);
+}
+
+.ah-appbar .ah-appbar__subtitle {
+  font-size: var(--ah-c-app-bar-small-subtitle-type-role-size);
+  line-height: var(--ah-c-app-bar-small-subtitle-type-role-line);
+  letter-spacing: var(--ah-c-app-bar-small-subtitle-type-role-tracking);
+  font-weight: var(--ah-c-app-bar-small-subtitle-type-role-weight);
+}
+
+.ah-navbar--tall {
+  min-height: var(--ah-c-navigation-bar-tall-height);
+}
+
+.ah-navbar__item {
+  font-size: var(--ah-c-navigation-bar-label-type-role-size);
+  line-height: var(--ah-c-navigation-bar-label-type-role-line);
+  letter-spacing: var(--ah-c-navigation-bar-label-type-role-tracking);
+  font-weight: var(--ah-c-navigation-bar-label-type-role-weight);
+}
+
+.ah-navbar__item > .anticon,
+.ah-navbar__item > svg {
+  font-size: var(--ah-c-navigation-bar-icon);
+}
+
+.ah-navbar__item--active {
+  color: var(--ah-c-navigation-bar-active-label);
+}
+
+.ah-navbar__item--active > .anticon,
+.ah-navbar__item--active > svg {
+  color: var(--ah-c-navigation-bar-active-icon);
+}
+
+.ah-navbar__item--inactive {
+  color: var(--ah-c-navigation-bar-inactive-label);
+}
+
+.ah-navbar__item--inactive > .anticon,
+.ah-navbar__item--inactive > svg {
+  color: var(--ah-c-navigation-bar-inactive-icon);
+}
+
+.ah-navbar__indicator {
+  padding-inline: var(--ah-c-navigation-bar-indicator-leading) var(--ah-c-navigation-bar-indicator-trailing);
+}
+
+.ah-navrail__item > .anticon,
+.ah-navrail__item > svg {
+  font-size: var(--ah-c-navigation-rail-item-icon);
+}
+
+.ah-navrail__item {
+  padding-inline: var(--ah-c-navigation-rail-item-leading) var(--ah-c-navigation-rail-item-trailing);
+}
+
+.ah-navrail__header {
+  min-height: var(--ah-c-navigation-rail-item-header-space);
+}
+
+/* Tooltip, badge and the spacing scale's remaining steps. */
+:root .ant-tooltip .ant-tooltip-inner {
+  font-weight: var(--ah-c-tooltip-type-role-weight);
+}
+
+:root .ant-badge .ant-badge-count {
+  line-height: var(--ah-c-badge-type-role-line);
+  letter-spacing: var(--ah-c-badge-type-role-tracking);
+  font-weight: var(--ah-c-badge-type-role-weight);
+}
+
+/* The spacing scale's remaining steps, spent on surfaces this slice introduces
+   rather than on existing ones: padding a class that already carries Tailwind's
+   `p-3` would silently win (an unlayered rule beats a layered utility) and move
+   every card in the app. */
+.ah-dialog {
+  padding: var(--ah-c-spacing-steps-xl);
+}
+
+.ah-dialog__actions {
+  gap: var(--ah-c-spacing-steps-sm);
+}
+
+.ah-empty {
+  padding-block: var(--ah-c-spacing-steps-xxl);
+}
+
+.ah-navrail__header {
+  padding-block: var(--ah-c-spacing-steps-xs);
+}
