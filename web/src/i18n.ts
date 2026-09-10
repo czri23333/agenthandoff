@@ -44,6 +44,7 @@ const dict = {
     collapseSubs: "收起子会话",
     taskKind: "任务类型",
     automation: "自动化任务",
+    automationHint: "自动化任务的执行记录默认不出现在会话列表里（与官方一致）；点一下就能看到",
     titleSource: "标题来源",
     titleSourceHint: "generated 是模型起的，first_input 是用户原话",
     permission: "权限模式",
@@ -267,6 +268,8 @@ const dict = {
     collapseSubs: "collapse sub-sessions",
     taskKind: "task kind",
     automation: "automation",
+    automationHint:
+      "Scheduled-automation runs stay out of the session list by default (the official client does the same); click to show them",
     titleSource: "title source",
     titleSourceHint: "generated = model-written, first_input = the user's own words",
     permission: "permission",

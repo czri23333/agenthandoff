@@ -83,6 +83,13 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     }
   }, [collapsed]);
   const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
+  // Official behaviour (asar rule 6): a scheduled-automation execution is a worker
+  // transcript, not a conversation, and the product keeps it out of the chat list —
+  // it is reachable from the task that spawned it instead. We have no such per-task
+  // surface, so hiding them without a way back would delete information rather than
+  // tidy it. Same default as the product, one click to see them, and the button says
+  // how many are hidden.
+  const [hideAutomation, setHideAutomation] = useState(true);
   const [groupMode, setGroupMode] = useState<GroupMode>(() => {
     // Refresh-safe like the fold state below.
     try {
@@ -298,7 +305,12 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const visible = sorted.filter(
     (s) =>
       (!domainFilter || s.domain === domainFilter) &&
-      (!needsReplyOnly || s.needs_reply === true),
+      (!needsReplyOnly || s.needs_reply === true) &&
+      (!hideAutomation || !s.automation),
+  );
+  const hiddenAutomation = useMemo(
+    () => (hideAutomation ? sorted.filter((s) => s.automation).length : 0),
+    [sorted, hideAutomation],
   );
   const grouped = useMemo(() => {
     if (groupMode === "flat") return [["", visible] as [string, SessionMeta[]]];
@@ -432,6 +444,16 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             {needsReplyCount > 0 && (
               <span className="ml-1 font-mono">{needsReplyCount}</span>
             )}
+          </Button>
+        </Tooltip>
+        <Tooltip title={t("automationHint")}>
+          <Button
+            size="small"
+            type={hideAutomation ? "default" : "primary"}
+            onClick={() => setHideAutomation((v) => !v)}
+          >
+            ⚙ {t("automation")}
+            {hiddenAutomation > 0 && <span className="ml-1 font-mono">{hiddenAutomation}</span>}
           </Button>
         </Tooltip>
         <div className="ml-auto flex items-center gap-3">
