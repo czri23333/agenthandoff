@@ -34,19 +34,19 @@
 | `qoderwork` | JSONL 目录 | ✓ | 4 | 2 ses / 4 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwork-cn` | JSONL 目录 | ✓ | 25 | 2 ses / 295 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qodercn-ide` | JSONL 目录 | ✓ | 25 | 3 ses / 262 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `qoder-ide` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoder-ide` | JSONL 目录 + SQLite 覆盖层 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qwenwork` | JSONL 目录 | ✓ | 3 | 1 ses / 3 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `workbuddy` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `workbuddy` | JSONL 目录 + SQLite 覆盖层 | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ 仅形态（源存档无对话内容） |
 | `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 439 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `opencode` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `qoderwake` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `qoderwake-cn` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `qoderwork-app` | unknown | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `qoderwork-cn-app` | unknown | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ 稳定（有夹具证据） |
-| `qwenwork-app` | unknown | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `cherrystudio` | unknown | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `opencode` | SQLite | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoderwake` | SQLite + 共享 JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoderwake-cn` | SQLite + 共享 JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoderwork-app` | SQLite（应用数据） | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qoderwork-cn-app` | SQLite（应用数据） | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `qwenwork-app` | SQLite（应用数据） | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `cherrystudio` | SQLite（应用数据） | ✓ | 2 | 3 ses / 1816 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `trae` | IDE SQLite；只读，绝不写入 | — | — | — | — | 🔜 路线图 |
 
 图例：稳定 = 夹具能解析出真实对话；仅形态 = 源存档本身没有对话内容；未验证 = 有读取器但没有夹具；夹具解析失败 = 夹具读不出来；路线图 = 尚无读取器；本机不可用 = 这里缺可选解码器。

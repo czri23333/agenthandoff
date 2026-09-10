@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-09",
+  "generated": "2026-09-10",
   "rows": [
     {
       "cli": "zcode",
@@ -115,7 +115,7 @@
     },
     {
       "cli": "qoder-ide",
-      "store": "unknown",
+      "store": "JSONL dir + SQLite overlays",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -145,7 +145,7 @@
     },
     {
       "cli": "workbuddy",
-      "store": "unknown",
+      "store": "JSONL dir + SQLite overlays",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -209,7 +209,7 @@
     },
     {
       "cli": "opencode",
-      "store": "unknown",
+      "store": "SQLite",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -224,7 +224,7 @@
     },
     {
       "cli": "qoderwake",
-      "store": "unknown",
+      "store": "SQLite + shared JSONL",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -239,7 +239,7 @@
     },
     {
       "cli": "qoderwake-cn",
-      "store": "unknown",
+      "store": "SQLite + shared JSONL",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -254,7 +254,7 @@
     },
     {
       "cli": "qoderwork-app",
-      "store": "unknown",
+      "store": "SQLite (app data)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 1,
@@ -269,7 +269,7 @@
     },
     {
       "cli": "qoderwork-cn-app",
-      "store": "unknown",
+      "store": "SQLite (app data)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 2,
@@ -284,7 +284,7 @@
     },
     {
       "cli": "qwenwork-app",
-      "store": "unknown",
+      "store": "SQLite (app data)",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -299,7 +299,7 @@
     },
     {
       "cli": "cherrystudio",
-      "store": "unknown",
+      "store": "SQLite (app data)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 3,

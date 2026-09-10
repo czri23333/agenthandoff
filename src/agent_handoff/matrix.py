@@ -38,7 +38,10 @@ FIXTURE_ROOT = fixtures.FIXTURE_ROOT
 BASELINE_ROOT = fixtures.BASELINE_ROOT
 
 # Facts that cannot be derived from code: the on-disk shape each store uses and
-# the roadmap entries we intend to fill. Everything else is measured.
+# the roadmap entries we intend to fill. Everything else is measured. Every
+# registered parser must appear here — `test_matrix.py` fails otherwise, because a
+# missing key is not a gap in the table, it is a cell that reads "unknown" beside
+# a reader we ship.
 STORE_KINDS: dict[str, str] = {
     "zcode": "SQLite (read-only URI)",
     "claude": "JSONL dir",
@@ -47,18 +50,30 @@ STORE_KINDS: dict[str, str] = {
     "qoderwork": "JSONL dir",
     "qoderwork-cn": "JSONL dir",
     "qodercn-ide": "JSONL dir",
+    "qoder-ide": "JSONL dir + SQLite overlays",
     "qwenwork": "JSONL dir",
+    "workbuddy": "JSONL dir + SQLite overlays",
     "dsh": "zstd JSONL dir",
     "kimi": "state.json + wire.jsonl",
     "codex": "JSONL rollouts",
+    "opencode": "SQLite",
+    "qoderwake": "SQLite + shared JSONL",
+    "qoderwake-cn": "SQLite + shared JSONL",
+    "qoderwork-app": "SQLite (app data)",
+    "qoderwork-cn-app": "SQLite (app data)",
+    "qwenwork-app": "SQLite (app data)",
+    "cherrystudio": "SQLite (app data)",
 }
 
 # Parsers whose format handling is knowingly incomplete upstream of us.
 EXPERIMENTAL: set[str] = {"kimi"}
 
+# Readers that do not exist yet. A cli listed here *and* registered would be
+# silently dropped from the table (the registration can only be measured, and it
+# wins), which is how this dict came to claim "no reader" for `opencode` and
+# `qoder-ide` long after both shipped readers. `test_matrix.py` now refuses that
+# combination instead of letting it vanish.
 ROADMAP: dict[str, str] = {
-    "qoder-ide": "Electron leveldb — no session files on disk",
-    "opencode": "storage layout undocumented",
     "trae": "IDE SQLite; read-only only, never written",
 }
 
@@ -72,6 +87,10 @@ STORE_ZH = {
     "zstd JSONL dir": "zstd 压缩 JSONL 目录",
     "state.json + wire.jsonl": "state.json + wire.jsonl",
     "JSONL rollouts": "JSONL rollout 存档",
+    "JSONL dir + SQLite overlays": "JSONL 目录 + SQLite 覆盖层",
+    "SQLite": "SQLite",
+    "SQLite + shared JSONL": "SQLite + 共享 JSONL",
+    "SQLite (app data)": "SQLite（应用数据）",
     "Electron leveldb — no session files on disk": "Electron leveldb——磁盘无会话文件",
     "storage layout undocumented": "存储布局无文档",
     "IDE SQLite; read-only only, never written": "IDE SQLite；只读，绝不写入",
