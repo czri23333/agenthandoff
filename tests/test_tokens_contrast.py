@@ -79,6 +79,17 @@ def test_cli_identity_chips_are_readable(theme: str) -> None:
 
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
+def test_tonal_containers_carry_text_at_aa(theme: str) -> None:
+    """M3E tonal containers are backgrounds for real text — bubbles, chips,
+    banners — and nothing checked them: the gate only knew about surface0/1/2.
+    A container that drifts too close to the text colour is unreadable text."""
+    p = TOKENS["themes"][theme]
+    for key in ("accentContainer", "okContainer", "warnContainer", "errContainer"):
+        r = ratio(p["text1"], p[key])
+        assert r >= TEXT_PAIR_MIN, f"{theme}: text1 on {key} is {r:.2f}:1"
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
 def test_every_supported_cli_has_an_identity(theme: str) -> None:
     """Add a parser without adding a colour, and this test tells you."""
     declared = set(TOKENS["themes"][theme]["cli"])

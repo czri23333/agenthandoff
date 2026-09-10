@@ -57,10 +57,24 @@ export interface ShapeScale {
   pill: number;
 }
 
+/**
+ * M3E motion contract, from tokens.json. Durations and the standard/emphasized
+ * easings are Google's (material-web v0.192); `expressive-*` are ours. Nothing
+ * in the app writes a duration or a curve by hand: components read these as
+ * `--ah-motion-*` custom properties, which is what makes a motion change a
+ * token change (and therefore reviewable and gate-checked) instead of a
+ * scattering of magic `150ms ease` values.
+ */
+export interface MotionTokens {
+  duration: Record<string, string>;
+  easing: Record<string, string>;
+}
+
 const TOKENS = tokensJson as unknown as {
   themes: Record<Effective, Palette>;
   cli: string[];
   shape: ShapeScale;
+  motion: MotionTokens;
 };
 const KEY = "ah-theme";
 const STYLE_ID = "ah-tokens";
@@ -69,6 +83,15 @@ const listeners = new Set<() => void>();
 export const palettes = TOKENS.themes;
 export const cliIds = TOKENS.cli;
 export const shape = TOKENS.shape;
+export const motion = TOKENS.motion;
+/** Named duration, e.g. `dur("short3")` → `150ms` (falls back loudly in dev). */
+export function dur(name: keyof MotionTokens["duration"]): string {
+  return motion.duration[name] ?? "";
+}
+/** Named curve, e.g. `curve("emphasized")`. */
+export function curve(name: keyof MotionTokens["easing"]): string {
+  return motion.easing[name] ?? "";
+}
 
 /* -- css injection ---------------------------------------------------------- */
 
@@ -98,6 +121,8 @@ function cssVars(p: Palette): string {
     `--ah-shape-lg:${shape.lg}px;`,
     `--ah-shape-xl:${shape.xl}px;`,
     `--ah-shape-pill:${shape.pill}px;`,
+    ...Object.entries(motion.duration).map(([k, v]) => `--ah-motion-duration-${k}:${v};`),
+    ...Object.entries(motion.easing).map(([k, v]) => `--ah-motion-easing-${k}:${v};`),
   ].join("");
 }
 
@@ -221,6 +246,13 @@ export function antdConfig(effective: Effective): NonNullable<ConfigProviderProp
       colorBorder: p.line,
       colorBorderSecondary: p.line,
       fontSize: 14,
+      // antd's own widgets move on the same curves as ours, so a chip and a
+      // Select popup never disagree about what "300ms emphasized" means.
+      motionDurationFast: dur("short4"),
+      motionDurationMid: dur("medium2"),
+      motionDurationSlow: dur("medium4"),
+      motionEaseInOut: curve("emphasized"),
+      motionEaseOut: curve("emphasized-decelerate"),
     },
     components: {
       Layout: {

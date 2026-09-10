@@ -22,18 +22,60 @@ the token table.
 | text tier (`text1/2/3`) on any surface | ≥ 4.5:1 (WCAG AA, normal text) |
 | semantic colour (`accent/ok/warn/err/placeholder`) on `surface1` | ≥ 4.5:1 |
 | CLI identity ink on its own chip background | ≥ 4.5:1, in **both** themes |
+| `text1` on a tonal container | ≥ 4.5:1 (bubbles, chips and banners carry text) |
 | chip border / divider vs surface | ≥ 1.15:1 (visible, not loud) |
 | any rendered text size | ≥ 12px (CJK stops being legible below that) |
+| any animated property | names a `--ah-motion-*` token, never a literal duration |
+| reduced motion | `prefers-reduced-motion: reduce` collapses every duration |
 
-Regenerate the palette (lightness is solved for, not eyeballed):
+`tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
 
 ```bash
-python scripts/gen_tokens.py     # refuses to write if any pair fails the gate
-cd web && npm ci && npm run build   # emits into src/agent_handoff/server/static
+python scripts/gen_tokens.py          # rewrites web/src/tokens.json
+python scripts/gen_tokens.py --check  # fails if the committed file drifted
+cd web && npm ci && npm run build     # emits into src/agent_handoff/server/static
 ```
 
-Both steps are CI-checked, so a hand-edited token table that drops below AA
-cannot merge.
+`--check` exists because this file used to be half-generated: `shape` and the
+four tonal containers lived only in the committed JSON, so following these
+instructions deleted the M3E radius scale (silently — `theme.ts` falls back to
+hardcoded values) and nine CLI identity colours (loudly — a test caught those).
+The identity list now comes from the parser registry, so a new CLI cannot be
+added without an identity, and `tests/test_tokens_generated.py` fails if the
+committed file and a fresh run disagree. Nine identities and the four containers
+are **pinned** rather than hue-derived: they predate the script and no single
+hue reproduces them exactly, so they are kept verbatim (still AA-gated) instead
+of being quietly re-branded. Fold them into `CLI_HUES` the next time those
+identities are re-designed on purpose.
+
+## Motion (M3E)
+
+The cockpit follows Material 3 Expressive, whose motion is a *contract*, not
+styling. Durations and the standard/emphasized curves are Google's, copied from
+material-web's generated token file (`tokens/versions/v0_192/_md-sys-motion.scss`);
+`expressive-over` / `expressive-out` are ours — M3E's spring feel needs a slight
+overshoot that the official curves do not have — and are labelled as additions
+in `tokens.json` so nobody reads them as Google values.
+
+`theme.ts` injects them as custom properties (`--ah-motion-duration-short3`,
+`--ah-motion-easing-emphasized`, …) for both themes, and hands the same values to
+antd, so an antd popup and a hand-written row never disagree about what "300ms
+emphasized" means.
+
+How they are spent — the rule `index.css` follows, so a reviewer can check it:
+
+| Surface | Token | Curve |
+|---|---|---|
+| press / hover feedback | `short2`–`short3` (100–150 ms) | `standard`, `expressive-out` |
+| a row or chip *appearing* | `short4` (200 ms) | `standard-decelerate` |
+| a view or panel changing | `medium2` (300 ms) | `emphasized-decelerate` |
+| a surface resizing | `medium1`–`medium2` | `emphasized` |
+
+Adding or changing motion is a token change first: edit `gen_tokens.py`, rerun
+it, rebuild, and the new timing reaches CSS, antd and the tests together. Motion
+is deliberately absent where it would lie: chips answer no press (they are
+labels, not controls), and the freshness dot does not pulse (a permanently
+moving element reads as an alarm and breaks screenshot automation).
 
 ## Why the CLI chips are ours and not antd's
 

@@ -20,6 +20,28 @@
   --ah-shape-lg: 16px;
   --ah-shape-xl: 28px;
   --ah-shape-pill: 999px;
+  /* M3E motion tokens (theme.ts injects the full table from tokens.json; these
+     fallbacks cover the subset this sheet uses, so CSS is valid before JS runs).
+     Durations and standard/emphasized curves are Google's (material-web v0.192);
+     expressive-* are ours, for the spring overshoot M3E calls for.
+
+     How they are spent — the rule this sheet follows, so a reviewer can check it:
+       press / hover feedback .... short2-short3  (100-150ms), standard or expressive-*
+       a row or chip appearing ... short4          (200ms), standard-decelerate
+       a view or panel ... ........ medium2        (300ms), emphasized-decelerate
+       a large surface resizing ... medium1-medium2, emphasized                      */
+  --ah-motion-duration-short1: 50ms;
+  --ah-motion-duration-short2: 100ms;
+  --ah-motion-duration-short3: 150ms;
+  --ah-motion-duration-short4: 200ms;
+  --ah-motion-duration-medium1: 250ms;
+  --ah-motion-duration-medium2: 300ms;
+  --ah-motion-duration-extra-long4: 1000ms;
+  --ah-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ah-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ah-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ah-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ah-motion-easing-expressive-out: cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 html,
@@ -46,6 +68,13 @@ body {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
   border-radius: var(--ah-shape-lg);
+  /* A card is a surface, not a control: it does not move, its outline firms up.
+     medium + emphasized is the M3 pairing for a surface this size. */
+  transition: border-color var(--ah-motion-duration-medium1) var(--ah-motion-easing-emphasized);
+}
+
+.ah-card:hover {
+  border-color: var(--ah-line-strong);
 }
 
 .ah-inset {
@@ -106,7 +135,7 @@ body {
 }
 .ah-time-tip {
   opacity: 0;
-  transition: opacity 150ms ease;
+  transition: opacity var(--ah-motion-duration-short2) var(--ah-motion-easing-standard);
   font-size: 12px;
   color: var(--ah-text-3);
 }
@@ -239,6 +268,8 @@ body {
   font-size: 12px;
   line-height: 18px;
   white-space: nowrap;
+  /* No press/hover motion here on purpose: a chip is a label, not a control.
+     Answering a press it does not act on would be the interface lying. */
 }
 
 .ah-chip-dim {
@@ -263,16 +294,23 @@ body {
   padding: 0 1px;
 }
 
-/* Rows: M3E medium cards with tonal hover -------------------------------- */
+/* Rows: M3E medium cards with a tonal state layer -------------------------- */
 .ah-row {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
   border-radius: var(--ah-shape-md);
+  /* The state layer used to snap on instantly; M3E eases it, and lifts the row
+     a hair so the pointer's target reads as a physical thing. */
+  transition:
+    background-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
+    border-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
+    transform var(--ah-motion-duration-short2) var(--ah-motion-easing-expressive-out);
 }
 
 .ah-row:hover {
   background: var(--ah-accent-container);
   border-color: var(--ah-line-strong);
+  transform: translateY(-1px);
 }
 
 .ah-skeleton {
@@ -287,12 +325,12 @@ button,
 select,
 input[type="range"] {
   transition:
-    transform 120ms ease,
-    filter 120ms ease,
-    background-color 150ms ease,
-    color 150ms ease,
-    border-color 150ms ease,
-    box-shadow 150ms ease;
+    transform var(--ah-motion-duration-short2) var(--ah-motion-easing-expressive-out),
+    filter var(--ah-motion-duration-short2) var(--ah-motion-easing-standard),
+    background-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
+    color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
+    border-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
+    box-shadow var(--ah-motion-duration-short3) var(--ah-motion-easing-standard);
 }
 
 button:active:not(:disabled),
@@ -325,8 +363,12 @@ button:disabled {
   }
 }
 
+/* A view change is a "fade through": the new surface rises the M3 emphasized
+   way while the old one is gone. medium2 + emphasized-decelerate is the M3
+   pairing for a surface of this size — short durations are for chips. */
 .view-enter {
-  animation: view-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: view-in var(--ah-motion-duration-medium2)
+    var(--ah-motion-easing-emphasized-decelerate) both;
 }
 
 /* User-authored text (memory-export entries, completeness notes).
@@ -354,9 +396,20 @@ button:disabled {
   }
 }
 
+/* A list reads as a list when its rows arrive in order. The stagger is capped
+   at the eighth row: past that a delay stops being a flourish and becomes a
+   wait. Pure CSS (nth-child), so no component has to know about it. */
 .row-enter {
-  animation: row-in 160ms ease-out both;
+  animation: row-in var(--ah-motion-duration-short4) var(--ah-motion-easing-standard-decelerate)
+    both;
 }
+.row-enter:nth-child(2) { animation-delay: 12ms; }
+.row-enter:nth-child(3) { animation-delay: 24ms; }
+.row-enter:nth-child(4) { animation-delay: 36ms; }
+.row-enter:nth-child(5) { animation-delay: 48ms; }
+.row-enter:nth-child(6) { animation-delay: 60ms; }
+.row-enter:nth-child(7) { animation-delay: 72ms; }
+.row-enter:nth-child(8) { animation-delay: 84ms; }
 
 @keyframes shimmer {
   0% {
@@ -371,7 +424,7 @@ button:disabled {
 }
 
 .ah-skeleton {
-  animation: shimmer 1.1s ease-in-out infinite;
+  animation: shimmer var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-standard) infinite;
 }
 
 /* Live freshness dot: deliberately NOT animated. A permanently moving element
@@ -385,14 +438,18 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Reduced motion: respect the OS setting, no exceptions. */
+/* Reduced motion: respect the OS setting, no exceptions. Durations collapse
+   *and* the list stagger is zeroed — a delay is a wait even when the animation
+   is instant. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
 }
@@ -409,7 +466,8 @@ html {
   display: block;
   height: 100%;
   background: var(--ah-accent);
-  transition: width 250ms ease;
+  /* A width change is a surface resizing: medium, emphasized — not a chip tick. */
+  transition: width var(--ah-motion-duration-medium1) var(--ah-motion-easing-emphasized);
 }
 
 /* ── Responsive rules ───────────────────────────────────────────────────────
