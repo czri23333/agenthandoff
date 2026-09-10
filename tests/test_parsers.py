@@ -13,8 +13,99 @@ from agent_handoff.parsers.jsonl_family import (
     QoderworkCnParser,
     QoderworkParser,
     QwenworkParser,
+    WorkbuddyParser,
 )
 from agent_handoff.parsers.zcode import ZcodeParser
+
+
+def _write_rows(root: Path, name: str, rows: list[dict]) -> None:
+    import json
+
+    root.mkdir(parents=True, exist_ok=True)
+    with open(root / f"{name}.jsonl", "w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+
+def _workbuddy_row(role: str, text: str, stamp: str) -> dict:
+    return {
+        "type": role,
+        "timestamp": stamp,
+        "message": {"role": role, "content": [{"type": "text", "text": text}]},
+    }
+
+
+ENVELOPE = (
+    '<system-reminder data-role="user-context">\n<user_info>\nOS Version: win32\n'
+    "Shell: bash\n</user_info>\n</system-reminder>"
+)
+
+
+def test_a_reminder_envelope_is_never_a_session_title(tmp_path):
+    """A title must read as prose — the transcript rule does not apply to it.
+
+    Measured on the live store before this fix: 124 of 156 workbuddy sessions were
+    titled with the raw `<system-reminder data-role="user-context">…` envelope.
+    `is_noise` keeps those turns on purpose (they are real turns in the body), so
+    the title path cannot reuse it. A sample of 30 such sessions showed 5 with a
+    later usable user turn and 25 with only an assistant turn — hence the ladder:
+    official ai-title > first usable user text > first assistant line.
+    """
+    root = tmp_path / ".workbuddy" / "projects" / "C--x"
+    _write_rows(
+        root,
+        "s1",
+        [
+            {"type": "runtime-config", "sessionId": "s1", "timestamp": 1},
+            _workbuddy_row("user", ENVELOPE, "2026-09-01T10:00:00Z"),
+            _workbuddy_row("assistant", "429 额度已用尽，请购买加量包", "2026-09-01T10:00:05Z"),
+        ],
+    )
+    parser = WorkbuddyParser(tmp_path / ".workbuddy")
+
+    meta = next(m for m in parser.list_sessions() if m.session_id == "s1")
+    assert "<" not in meta.title, meta.title
+    assert not meta.title.startswith("OS Version"), meta.title
+    assert meta.title.startswith("429"), meta.title
+
+    # The envelope is still a turn: the fix is about the title, not about what the
+    # transcript keeps.
+    raw = parser.load("s1")
+    assert raw is not None
+    assert any("<system-reminder" in (m.raw_text or m.text or "") for m in raw.messages)
+
+
+def test_envelope_then_a_real_question_titles_from_the_question(tmp_path):
+    """Both in one row: the envelope is stripped from the front, the question stays."""
+    root = tmp_path / ".workbuddy" / "projects" / "C--x"
+    _write_rows(
+        root,
+        "s2",
+        [
+            {"type": "runtime-config", "sessionId": "s2", "timestamp": 1},
+            _workbuddy_row(
+                "user", f"{ENVELOPE}\n\n为什么交接包缺少工具调用？", "2026-09-01T11:00:00Z"
+            ),
+        ],
+    )
+    parser = WorkbuddyParser(tmp_path / ".workbuddy")
+    meta = next(m for m in parser.list_sessions() if m.session_id == "s2")
+    assert meta.title == "为什么交接包缺少工具调用？", meta.title
+
+
+def test_a_session_with_only_an_envelope_keeps_the_placeholder(tmp_path):
+    """Nothing usable anywhere: the existing honest placeholder still applies."""
+    root = tmp_path / ".workbuddy" / "projects" / "C--x"
+    _write_rows(
+        root,
+        "s3",
+        [
+            {"type": "runtime-config", "sessionId": "s3", "timestamp": 1},
+            _workbuddy_row("user", ENVELOPE, "2026-09-01T12:00:00Z"),
+        ],
+    )
+    parser = WorkbuddyParser(tmp_path / ".workbuddy")
+    assert all(m.title != ENVELOPE[:80] for m in parser.list_sessions())
 
 
 def test_zcode_happy(zcode_store):

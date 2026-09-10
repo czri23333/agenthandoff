@@ -45,6 +45,22 @@ _NOISE_MARKERS = (
     "[Request interrupted",
 )
 
+# The synthetic prefixes this cockpit puts in front of a non-prose turn. They are
+# display scaffolding, so a title must not inherit them.
+_TITLE_PREFIXES = ("[思考]", "[工具", "[子代理]")
+
+# Tags anywhere in a candidate title. A title is prose: no markup survives.
+_ANY_TAG = re.compile(r"<[^>]*>")
+
+# A *leading* environment/identity envelope, paired and possibly repeated. Stripped
+# before a row is considered as a title, so a row that is envelope + real question
+# still yields the question — while an envelope-only row yields nothing.
+_LEADING_ENVELOPE = re.compile(
+    r"^(?:\s*<(system-reminder|user_info|identity_context|environment_context)\b[^>]*>"
+    r".*?</\1>)+\s*",
+    re.S | re.I,
+)
+
 
 def file_entry(path: Path, raw: bytes, rel: str) -> dict:
     """One verbatim file as a raw-archive entry (see Parser.raw_archive)."""
@@ -201,12 +217,45 @@ class Parser(ABC):
 
     @staticmethod
     def clean_text(text: str) -> str:
-        """Strip common XML wrapper noise from a turn."""
+        """Strip common XML wrapper noise from a turn.
+
+        Note the bare `<system-reminder>` pattern: it deliberately does *not* match
+        the attributed `data-role="user-context"` form, because those turns are
+        kept verbatim in the transcript by design (see `is_noise`). Titles use
+        `title_candidate` instead — that is where an envelope must not survive.
+        """
         text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.S)
         text = re.sub(r"<local-command[^>]*>.*?</local-command[^>]*>", "", text, flags=re.S)
         for tag in _ENV_WRAPPERS:
             text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", text, flags=re.S)
         return text.strip()
+
+    @staticmethod
+    def title_candidate(text: str) -> str:
+        """The part of a turn that may serve as a session title, or "" if none.
+
+        Deliberately *not* `is_noise`. That predicate answers a transcript
+        question — a `data-role="user-context"` reminder is a real turn and must
+        stay in the body — but a title is a piece of prose, and reusing the
+        transcript rule here is how 124 of 156 workbuddy sessions ended up titled
+        `<system-reminder data-role="user-context">…`. So:
+
+        * a leading environment/identity envelope is removed first, so an envelope
+          followed by a real question still yields the question;
+        * what remains is stripped of the remainder of its markup and of the
+          synthetic `[思考]`/`[工具]`/`[子代理]` prefixes;
+        * and it must then actually read as text — non-empty, no leading `<`, at
+          least one alphanumeric character. CJK counts.
+        """
+        text = _LEADING_ENVELOPE.sub("", text or "")
+        text = _ANY_TAG.sub(" ", text)
+        text = " ".join(text.split())
+        for prefix in _TITLE_PREFIXES:
+            if text.startswith(prefix):
+                text = text[len(prefix) :].strip()
+        if text.startswith("<") or not any(ch.isalnum() for ch in text):
+            return ""
+        return text
 
     def msg(self, role: str, raw: str, **kw) -> Message:
         """Build a turn keeping the verbatim source beside the cleaned text.

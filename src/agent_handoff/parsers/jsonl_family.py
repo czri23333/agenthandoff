@@ -239,6 +239,7 @@ class JsonlSessionParser(Parser):
         session_id = path.stem
         title = ""
         ai_title = ""
+        assistant_title = ""
         started = updated = None
         for r in rows:
             cwd = cwd or (r.get("cwd") or "")
@@ -258,9 +259,20 @@ class JsonlSessionParser(Parser):
                     if text.startswith("<conversation_history_summary"):
                         title = _summary_title(text)
                     else:
-                        title = text[:80]
+                        # `title_candidate`, not the raw text: an environment or
+                        # identity preamble is a real turn (see is_noise) but it is
+                        # not a title, and using the raw text here is how 124 of 156
+                        # workbuddy sessions came to be titled `<system-reminder …>`.
+                        title = self.title_candidate(text)[:80]
                 if ai_title:
                     break
+            # Fallback tier, mirroring the product's own ladder
+            # (custom > ai/provisional/fallback > legacy): when no user text can
+            # serve, the first assistant line does. 25 of 30 sessions with a
+            # markup title had no usable user text — without this they would fall
+            # to the placeholder and vanish from the list.
+            if not assistant_title and role == "assistant" and text:
+                assistant_title = self.title_candidate(text)[:80]
         tail = _tail_rows(path)
         # The official ai-title row is appended asynchronously near the END of
         # the roll, after the conversation; a head-only scan misses it. It is
@@ -269,7 +281,7 @@ class JsonlSessionParser(Parser):
             if r.get("type") == "ai-title" and r.get("aiTitle"):
                 ai_title = str(r["aiTitle"])[:80]
                 break
-        title = ai_title or title
+        title = ai_title or title or assistant_title
         updated = _record_stamp(rows) or _record_stamp(tail)
         if updated is None:
             # Only a store that records no timestamps at all may be dated by its
@@ -1195,6 +1207,7 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         cwd = ""
         title = ""
         ai_title = ""
+        assistant_title = ""
         started = updated = None
         stamp_files: list[Path] = []
         for path in scan_files or agent_files:
@@ -1211,14 +1224,20 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                         if text.startswith("<conversation_history_summary"):
                             title = _summary_title(text)
                         else:
-                            title = text[:80]
+                            title = self.title_candidate(text)[:80]
                     started = started or _iso(r.get("timestamp"))
+                # Fallback tier: an environment/identity preamble is a real turn but
+                # not a title, and 25 of 30 sessions that hit this had no usable user
+                # text at all — without this, they would fall through to the
+                # placeholder and disappear from the list entirely.
+                if not assistant_title and role == "assistant" and text:
+                    assistant_title = self.title_candidate(text)[:80]
                 stamp = _iso(r.get("timestamp"))
                 if stamp and (updated is None or stamp > updated):
                     updated = stamp
             if title and cwd:
                 break
-        title = ai_title or title
+        title = ai_title or title or assistant_title
         if updated is None:
             try:
                 mt = max(p.stat().st_mtime for p in (stamp_files or agent_files))
