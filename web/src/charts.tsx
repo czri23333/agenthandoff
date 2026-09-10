@@ -231,7 +231,7 @@ export function BudgetGauge({
         className="relative h-[14px] w-full overflow-hidden rounded-[3px]"
         style={{ background: "var(--ah-surface-2)", border: "1px solid var(--ah-line)" }}
       >
-        <div style={{ width: `${pct}%`, height: "100%", background: color }} />
+        <div className="ah-gauge-fill" style={{ width: `${pct}%`, height: "100%", background: color }} />
         {[20, 45, 70, 90].map((rung) => (
           <div
             key={rung}

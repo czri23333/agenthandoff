@@ -97,26 +97,12 @@ CLI_PINNED: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 
-# M3E tonal containers: the semantic colour mixed into surface1 at low strength.
-# These four pairs also predate the script (each reproduces at a slightly
-# different strength: 0.178-0.1785 dark, 0.157-0.16 light, so no single value
-# regenerates them exactly). Pinned verbatim, and *gated*: text1 must stay AA
-# against each container, which nothing checked before — they are message-bubble
-# and chip backgrounds, so they carry text.
-TONAL_PINNED: dict[str, dict[str, str]] = {
-    "dark": {
-        "accentContainer": "#283249",
-        "okContainer": "#293e39",
-        "warnContainer": "#403b2d",
-        "errContainer": "#402f36",
-    },
-    "light": {
-        "accentContainer": "#dee5f7",
-        "okContainer": "#daebe1",
-        "warnContainer": "#ece6d6",
-        "errContainer": "#f3dcde",
-    },
-}
+# M3E tonal containers: the semantic colour mixed into surface1. One strength per
+# theme reproduces every shipped container byte-exactly (dark 0.179, light 0.16 —
+# measured by inverting tint(), not eyeballed), so they are derived rather than
+# pinned: a palette edit re-tints the bubbles/chips and the AA gate below
+# re-checks the text that sits on them.
+CONTAINER_STRENGTH: dict[str, float] = {"dark": 0.179, "light": 0.16}
 
 # M3 Expressive shape scale (px). Cards take lg, controls md, chips pill; the
 # message roles reuse the same scale so bubbles and cards share one geometry.
@@ -149,6 +135,7 @@ MOTION_DURATIONS: dict[str, str] = {
 
 MOTION_EASINGS: dict[str, str] = {
     # Google's (material-web v0.192)
+    "linear": "cubic-bezier(0, 0, 1, 1)",
     "standard": "cubic-bezier(0.2, 0, 0, 1)",
     "standard-accelerate": "cubic-bezier(0.3, 0, 1, 1)",
     "standard-decelerate": "cubic-bezier(0, 0, 0, 1)",
@@ -159,6 +146,28 @@ MOTION_EASINGS: dict[str, str] = {
     "expressive-over": "cubic-bezier(0.34, 1.4, 0.64, 1)",
     "expressive-out": "cubic-bezier(0.22, 1.2, 0.36, 1)",
 }
+
+# Both shapes below are what the browser actually accepts: a CSS cubic-bezier
+# takes exactly four numbers, and its two x control points must lie in [0, 1]
+# (y may exceed 1 — that overshoot is the point of `expressive-*`). A gate that
+# only checked the prefix would happily ship `cubic-bezier(0.2, 0, 0)`, which
+# the browser drops on the floor.
+_EASING_RE = re.compile(
+    r"cubic-bezier\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)"
+)
+_DURATION_RE = re.compile(r"(\d+)ms")
+
+
+def easing_problem(value: str) -> str | None:
+    """Why this value is not a usable cubic-bezier, or None when it is."""
+    match = _EASING_RE.fullmatch(value)
+    if not match:
+        return "not cubic-bezier(a, b, c, d) with four numbers"
+    for group in (1, 3):  # the x control points
+        x = float(match.group(group))
+        if not 0.0 <= x <= 1.0:
+            return f"control-point x {x} is outside [0, 1]"
+    return None
 
 BASE: dict[str, dict[str, str]] = {
     "dark": {
@@ -280,6 +289,29 @@ def cli_ids() -> list[str]:
     return [parser.cli for parser in all_parsers()] + ["default"]
 
 
+CONTAINER_SOURCES: dict[str, str] = {
+    "accentContainer": "accent",
+    "okContainer": "ok",
+    "warnContainer": "warn",
+    "errContainer": "err",
+}
+
+
+def containers(theme: dict, strength: float) -> dict[str, str]:
+    """The four M3E tonal surfaces: a semantic colour mixed into surface1.
+
+    Derived rather than pinned: one strength per theme reproduces all four
+    shipped containers byte-exactly (dark 0.179, light 0.16 — measured by
+    solving ``tint()`` for its pre-image, not by eye). Deriving means a palette
+    edit re-tints the chips and the user bubble together, and the AA gate below
+    re-checks the text that sits on them.
+    """
+    return {
+        container: tint(theme["surface1"], theme[source], strength)
+        for container, source in CONTAINER_SOURCES.items()
+    }
+
+
 def build() -> tuple[dict, list[str]]:
     problems: list[str] = []
     ids = cli_ids()
@@ -299,7 +331,7 @@ def build() -> tuple[dict, list[str]]:
                 theme[key] = solve(theme[key], theme["surface1"], TEXT_PAIR_MIN)
         theme["placeholder"] = theme["text3"]
         theme["onSurface0"] = theme["text1"]
-        theme.update(TONAL_PINNED[name])
+        theme.update(containers(theme, CONTAINER_STRENGTH[name]))
         theme["cli"] = {
             cli: (
                 dict(CLI_PINNED[cli][name])
@@ -340,24 +372,35 @@ def build() -> tuple[dict, list[str]]:
     if SHAPE.get("pill", 0) < 100:
         problems.append("shape pill must be large enough to read as a pill")
 
-    if not all(re.fullmatch(r"\d+ms", v) for v in MOTION_DURATIONS.values()):
-        problems.append(f"motion durations must be plain ms values: {MOTION_DURATIONS}")
-    ordered = [int(v[:-2]) for v in MOTION_DURATIONS.values()]
+    # Report the offending *value*, never raise on it: `int(v[:-2])` used to
+    # blow up with a ValueError traceback on `"1.1s"` — the exact style the
+    # sheet shipped before this change — instead of naming the bad token.
+    ordered: list[int] = []
+    for name, value in MOTION_DURATIONS.items():
+        if not _DURATION_RE.fullmatch(value):
+            problems.append(f"motion duration {name} must be a plain ms value, got {value!r}")
+            continue
+        ordered.append(int(value[:-2]))
     if ordered != sorted(ordered):
         problems.append("motion durations must be non-decreasing in declared order")
-    if not all(v.startswith("cubic-bezier(") for v in MOTION_EASINGS.values()):
-        problems.append(f"motion easings must be cubic-bezier(): {MOTION_EASINGS}")
+
+    for name, value in MOTION_EASINGS.items():
+        problem = easing_problem(value)
+        if problem:
+            problems.append(f"motion easing {name}: {problem} ({value})")
 
     tokens = {
         "_readme": (
             "Cockpit design tokens — the single source of truth for both themes. theme.ts "
-            "turns this file into CSS custom properties plus antd ConfigProvider tokens, so "
-            "no component hardcodes a colour, a radius or a duration. Generated: run "
+            "turns this file into CSS custom properties plus antd ConfigProvider tokens: "
+            "every colour, and every animated duration and curve, comes from here (the few "
+            "hairline radii that are not M3E surfaces — code blocks, inline marks, focus "
+            "rings — stay literal, and the AA gate does not cover them). Generated: run "
             "`python scripts/gen_tokens.py` to rewrite it, `--check` to prove it is fresh. "
-            "All text/surface and CLI-chip pairs are WCAG AA (>= 4.5:1) verified by "
-            "tests/test_tokens_contrast.py. `shape` and `motion` live here so the M3E "
-            "geometry and the motion contract regenerate with the palette instead of "
-            "drifting beside it."
+            "All text/surface, text-on-tonal-container and CLI-chip pairs are WCAG AA "
+            "(>= 4.5:1) verified by tests/test_tokens_contrast.py. `shape` and `motion` live "
+            "here so the M3E geometry and the motion contract regenerate with the palette "
+            "instead of drifting beside it."
         ),
         "shape": SHAPE,
         "motion": {
@@ -377,11 +420,20 @@ def build() -> tuple[dict, list[str]]:
 
 
 def render(tokens: dict) -> str:
-    return json.dumps(tokens, indent=2) + "\n"
+    # ensure_ascii=False so the em dash in _readme stays a dash: the file is
+    # UTF-8 and its whole point is being reviewable in a diff.
+    return json.dumps(tokens, indent=2, ensure_ascii=False) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    # Unknown flags refuse to run rather than fall through to a write: a typo
+    # like `--checks` used to silently rewrite the file, which is the one way
+    # this script could still damage tokens.json.
+    unknown = [a for a in argv if a != "--check"]
+    if unknown:
+        print(f"unknown argument(s): {' '.join(unknown)}; usage: gen_tokens.py [--check]")
+        return 2
     check = "--check" in argv
     tokens, problems = build()
     if problems:

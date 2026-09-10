@@ -80,5 +80,36 @@ def test_motion_tokens_are_well_formed():
     assert motion["duration"]["extra-long4"] == "1000ms"
     assert motion["easing"]["standard"] == "cubic-bezier(0.2, 0, 0, 1)"
     assert motion["easing"]["emphasized-accelerate"] == "cubic-bezier(0.3, 0, 0.8, 0.15)"
-    assert all(v.endswith("ms") for v in motion["duration"].values())
-    assert all(v.startswith("cubic-bezier(") for v in motion["easing"].values())
+    assert gen.easing_problem("cubic-bezier(0.34, 1.4, 0.64, 1)") is None
+    for name, value in motion["easing"].items():
+        assert gen.easing_problem(value) is None, f"{name}: {value}"
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "cubic-bezier(0.2, 0, 0)",  # three control points: the browser drops it
+        "cubic-bezier(1.5, 0, -2, 1)",  # x outside [0, 1]: also invalid
+        "cubic-bezier(a, b, c, d)",  # not numbers
+        "cubic-bezier(0.2 0 0 1)",  # missing commas
+        "ease-in-out",  # not a cubic-bezier at all
+    ],
+)
+def test_the_easing_gate_rejects_values_the_browser_would_drop(broken: str):
+    """A prefix check passed all of these while both the docstring and T2 called
+    the assertion "well-formed" — a gate that validates `startswith` teaches a
+    reviewer to trust it for something it never checked."""
+    assert gen.easing_problem(broken) is not None
+
+
+def test_the_duration_gate_names_a_bad_value_instead_of_raising():
+    """`int(v[:-2])` crashed on `"1.1s"` — the style the sheet shipped before this
+    change — so the gate reported a traceback instead of the offending token."""
+    problems: list[str] = []
+    saved = gen.MOTION_DURATIONS["medium1"]
+    try:
+        gen.MOTION_DURATIONS["medium1"] = "1.1s"
+        _, problems = gen.build()
+    finally:
+        gen.MOTION_DURATIONS["medium1"] = saved
+    assert any("medium1" in p and "1.1s" in p for p in problems), problems

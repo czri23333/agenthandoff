@@ -22,26 +22,39 @@
   --ah-shape-pill: 999px;
   /* M3E motion tokens (theme.ts injects the full table from tokens.json; these
      fallbacks cover the subset this sheet uses, so CSS is valid before JS runs).
-     Durations and standard/emphasized curves are Google's (material-web v0.192);
-     expressive-* are ours, for the spring overshoot M3E calls for.
+     Durations and the standard/emphasized/linear curves are Google's
+     (material-web v0.192); expressive-* and the stagger step are ours, for the
+     spring overshoot and the list rhythm M3E calls for.
 
-     How they are spent — the rule this sheet follows, so a reviewer can check it:
-       press / hover feedback .... short2-short3  (100-150ms), standard or expressive-*
-       a row or chip appearing ... short4          (200ms), standard-decelerate
-       a view or panel ... ........ medium2        (300ms), emphasized-decelerate
-       a large surface resizing ... medium1-medium2, emphasized                      */
-  --ah-motion-duration-short1: 50ms;
+     How they are spent — the rule this sheet follows, so a reviewer can check an
+     animation against a rule instead of a vibe:
+       press / hover feedback ..... short2-short3  (100-150ms), standard or expressive-*
+       a row or chip appearing .... short4          (200ms), standard-decelerate
+       a view or panel ............ medium2        (300ms), emphasized-decelerate
+       a hover on a surface ....... medium1        (250ms), emphasized — the outline
+                                                   firms up; a surface is not a control
+       a large surface resizing ... medium1-medium2, emphasized
+       an endless loop ............ extra-long4, linear                        */
+  --ah-motion-stagger: 12ms;
   --ah-motion-duration-short2: 100ms;
   --ah-motion-duration-short3: 150ms;
   --ah-motion-duration-short4: 200ms;
   --ah-motion-duration-medium1: 250ms;
   --ah-motion-duration-medium2: 300ms;
   --ah-motion-duration-extra-long4: 1000ms;
+  --ah-motion-easing-linear: cubic-bezier(0, 0, 1, 1);
   --ah-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
   --ah-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
   --ah-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --ah-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ah-motion-easing-expressive-over: cubic-bezier(0.34, 1.4, 0.64, 1);
   --ah-motion-easing-expressive-out: cubic-bezier(0.22, 1.2, 0.36, 1);
+  /* Tailwind's bare `.transition-*` utilities (one is used in Markdown.tsx)
+     default to 150ms/ease. The import at the top of this file lands in a cascade
+     layer, so these unlayered declarations win: no utility animates on a curve
+     that is not in the contract. */
+  --default-transition-duration: var(--ah-motion-duration-short3);
+  --default-transition-timing-function: var(--ah-motion-easing-standard);
 }
 
 html,
@@ -300,11 +313,17 @@ body {
   border: 1px solid var(--ah-line);
   border-radius: var(--ah-shape-md);
   /* The state layer used to snap on instantly; M3E eases it, and lifts the row
-     a hair so the pointer's target reads as a physical thing. */
+     a hair so the pointer's target reads as a physical thing. `filter`, `color`
+     and `box-shadow` are here too because many rows *are* <button>s: a class
+     shorthand (0,1,0) outranks the element-level pressable rule below (0,0,1),
+     so leaving them out makes `:active`'s brightness snap while the scale eases. */
   transition:
     background-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
     border-color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
-    transform var(--ah-motion-duration-short2) var(--ah-motion-easing-expressive-out);
+    transform var(--ah-motion-duration-short2) var(--ah-motion-easing-expressive-out),
+    filter var(--ah-motion-duration-short2) var(--ah-motion-easing-standard),
+    color var(--ah-motion-duration-short3) var(--ah-motion-easing-standard),
+    box-shadow var(--ah-motion-duration-short3) var(--ah-motion-easing-standard);
 }
 
 .ah-row:hover {
@@ -396,20 +415,22 @@ button:disabled {
   }
 }
 
-/* A list reads as a list when its rows arrive in order. The stagger is capped
-   at the eighth row: past that a delay stops being a flourish and becomes a
-   wait. Pure CSS (nth-child), so no component has to know about it. */
+/* A list reads as a list when its rows arrive in order. The step is ours (M3
+   publishes no stagger token) and it is capped at the eighth row of a list:
+   past that a delay stops being a flourish and becomes a wait. Pure CSS
+   (nth-child), so no component has to know about it. The counter is per <ul>,
+   so a domain-grouped view restarts the rhythm at each group. */
 .row-enter {
   animation: row-in var(--ah-motion-duration-short4) var(--ah-motion-easing-standard-decelerate)
     both;
 }
-.row-enter:nth-child(2) { animation-delay: 12ms; }
-.row-enter:nth-child(3) { animation-delay: 24ms; }
-.row-enter:nth-child(4) { animation-delay: 36ms; }
-.row-enter:nth-child(5) { animation-delay: 48ms; }
-.row-enter:nth-child(6) { animation-delay: 60ms; }
-.row-enter:nth-child(7) { animation-delay: 72ms; }
-.row-enter:nth-child(8) { animation-delay: 84ms; }
+.row-enter:nth-child(2) { animation-delay: calc(var(--ah-motion-stagger) * 1); }
+.row-enter:nth-child(3) { animation-delay: calc(var(--ah-motion-stagger) * 2); }
+.row-enter:nth-child(4) { animation-delay: calc(var(--ah-motion-stagger) * 3); }
+.row-enter:nth-child(5) { animation-delay: calc(var(--ah-motion-stagger) * 4); }
+.row-enter:nth-child(6) { animation-delay: calc(var(--ah-motion-stagger) * 5); }
+.row-enter:nth-child(7) { animation-delay: calc(var(--ah-motion-stagger) * 6); }
+.row-enter:nth-child(8) { animation-delay: calc(var(--ah-motion-stagger) * 7); }
 
 @keyframes shimmer {
   0% {
@@ -424,7 +445,25 @@ button:disabled {
 }
 
 .ah-skeleton {
-  animation: shimmer var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-standard) infinite;
+  animation: shimmer var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-linear) infinite;
+}
+
+/* Sub-sessions unfolding under a row. The region is conditionally mounted (there
+   is no collapsed height to interpolate), so the arriving container animates on
+   our overshoot curve instead of a grid-template-rows transition. */
+@keyframes expand-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ah-expand {
+  animation: expand-in var(--ah-motion-duration-short4) var(--ah-motion-easing-expressive-over) both;
 }
 
 /* Live freshness dot: deliberately NOT animated. A permanently moving element
@@ -467,6 +506,13 @@ html {
   height: 100%;
   background: var(--ah-accent);
   /* A width change is a surface resizing: medium, emphasized — not a chip tick. */
+  transition: width var(--ah-motion-duration-medium1) var(--ah-motion-easing-emphasized);
+}
+
+/* The budget gauge is the same "surface resizing" case as the progress bar: the
+   fill is sized inline by React, so easing the width is what makes a sampling
+   update read as the gauge moving rather than jumping between two numbers. */
+.ah-gauge-fill {
   transition: width var(--ah-motion-duration-medium1) var(--ah-motion-easing-emphasized);
 }
 

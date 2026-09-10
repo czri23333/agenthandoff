@@ -70,6 +70,13 @@ export interface MotionTokens {
   easing: Record<string, string>;
 }
 
+/* The token *names* are a closed set, so a typo must not compile. Typing these
+   from the imported JSON rather than as `string` is the difference between
+   `dur("short-4")` being an error and it silently shipping an empty duration to
+   antd and `transition: … var(--ah-motion-duration-short-4, )` to CSS. */
+type DurationName = keyof (typeof tokensJson)["motion"]["duration"];
+type EasingName = keyof (typeof tokensJson)["motion"]["easing"];
+
 const TOKENS = tokensJson as unknown as {
   themes: Record<Effective, Palette>;
   cli: string[];
@@ -84,13 +91,13 @@ export const palettes = TOKENS.themes;
 export const cliIds = TOKENS.cli;
 export const shape = TOKENS.shape;
 export const motion = TOKENS.motion;
-/** Named duration, e.g. `dur("short3")` → `150ms` (falls back loudly in dev). */
-export function dur(name: keyof MotionTokens["duration"]): string {
-  return motion.duration[name] ?? "";
+/** Named duration, e.g. `dur("short3")` → `150ms`. Unknown names do not compile. */
+export function dur(name: DurationName): string {
+  return motion.duration[name];
 }
 /** Named curve, e.g. `curve("emphasized")`. */
-export function curve(name: keyof MotionTokens["easing"]): string {
-  return motion.easing[name] ?? "";
+export function curve(name: EasingName): string {
+  return motion.easing[name];
 }
 
 /* -- css injection ---------------------------------------------------------- */

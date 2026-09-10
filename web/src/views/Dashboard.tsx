@@ -713,7 +713,7 @@ function SessionRow({
         </button>
       </div>
       {open && kids.length > 0 && (
-        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
+        <ul className="ah-expand m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
           {kids.map((k) => (
             <SessionRow key={`${k.cli}:${k.session_id}`} s={k} onOpen={onOpen} depth={depth + 1} />
           ))}

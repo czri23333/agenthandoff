@@ -25,8 +25,8 @@ the token table.
 | `text1` on a tonal container | ≥ 4.5:1 (bubbles, chips and banners carry text) |
 | chip border / divider vs surface | ≥ 1.15:1 (visible, not loud) |
 | any rendered text size | ≥ 12px (CJK stops being legible below that) |
-| any animated property | names a `--ah-motion-*` token, never a literal duration |
-| reduced motion | `prefers-reduced-motion: reduce` collapses every duration |
+| any animated property | names a `--ah-motion-*` token, never a literal duration (the `prefers-reduced-motion` block is the one exception: it exists to *zero* durations) |
+| reduced motion | `prefers-reduced-motion: reduce` collapses every duration and delay |
 
 `tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
 
@@ -42,11 +42,22 @@ instructions deleted the M3E radius scale (silently — `theme.ts` falls back to
 hardcoded values) and nine CLI identity colours (loudly — a test caught those).
 The identity list now comes from the parser registry, so a new CLI cannot be
 added without an identity, and `tests/test_tokens_generated.py` fails if the
-committed file and a fresh run disagree. Nine identities and the four containers
-are **pinned** rather than hue-derived: they predate the script and no single
-hue reproduces them exactly, so they are kept verbatim (still AA-gated) instead
-of being quietly re-branded. Fold them into `CLI_HUES` the next time those
-identities are re-designed on purpose.
+committed file and a fresh run disagree.
+
+Nine **CLI identities** are pinned rather than hue-derived. They predate the
+script, and solving `badge()` for its pre-image returns nothing for any hue
+(`opencode`, `qoder-ide`, `cherrystudio`, `qoderwork-app`, `qwenwork-app` are
+out of gamut; for the other four the rounded hue reproduces `bg` but never
+`fg`/`border`), so they are kept verbatim — still AA-gated — instead of being
+quietly re-branded. Fold them into `CLI_HUES` the next time those identities are
+re-designed on purpose.
+
+The four **tonal containers** are the opposite case and are now *derived*: one
+strength per theme reproduces all four byte-exactly (dark `0.179`, light `0.16`,
+measured by solving `tint()` for its pre-image rather than by eye), so a palette
+edit re-tints the chips and the user bubble together and the AA gate re-checks
+the text that sits on them. Use inversion as the test before pinning anything:
+an exact pre-image means derive, no pre-image means pin.
 
 ## Motion (M3E)
 
@@ -69,7 +80,16 @@ How they are spent — the rule `index.css` follows, so a reviewer can check it:
 | press / hover feedback | `short2`–`short3` (100–150 ms) | `standard`, `expressive-out` |
 | a row or chip *appearing* | `short4` (200 ms) | `standard-decelerate` |
 | a view or panel changing | `medium2` (300 ms) | `emphasized-decelerate` |
-| a surface resizing | `medium1`–`medium2` | `emphasized` |
+| hovering a *surface* (outline firms up; no state layer) | `medium1` (250 ms) | `emphasized` |
+| a surface resizing (progress, gauge) | `medium1`–`medium2` | `emphasized` |
+| an endless loop (skeleton shimmer) | `extra-long4` (1000 ms) | `linear` |
+
+Two tokens are ours, not Google's, and both are labelled as such in
+`tokens.json`: `expressive-over`/`expressive-out` (the M3E spring overshoot) and
+the `--ah-motion-stagger` step (12 ms, the list rhythm — M3 publishes no stagger
+token). The stagger is capped at the eighth row *of a list*: past that a delay
+stops being a flourish and becomes a wait. It is pure CSS `nth-child`, so the
+counter is per `<ul>` and a domain-grouped view restarts the rhythm per group.
 
 Adding or changing motion is a token change first: edit `gen_tokens.py`, rerun
 it, rebuild, and the new timing reaches CSS, antd and the tests together. Motion
