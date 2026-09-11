@@ -120,4 +120,17 @@ python -m agent_handoff.evidence --check      # README/JSON vs the fixtures
 python -m agent_handoff.conformance --check   # format fingerprints vs the baseline
 ```
 
+Two checks need more than a checkout, and are therefore commands a maintainer
+runs rather than tests CI runs:
+
+```bash
+python scripts/sanitize_fixtures.py --cli <id>   # needs that CLI's live store
+python scripts/audit_component_rules.py          # needs playwright + `npm ci`
+```
+
+The second one asks the browser whether each Material rule in `web/src/m3.css`
+reaches an element at all. Its absence is what let five families of dead CSS ship
+— including a white snackbar on the dark theme — while every static gate was
+green, because a rule can read every token it names and still apply to nothing.
+
 If you close a gap here, delete its entry. This file is done when it is empty.

@@ -377,6 +377,20 @@ fix: **152 of 222** rules match in the gallery, and the 70 that do not are state
 `-zoom-leave`) or a component the gallery does not mount (`-btn-link`,
 `-divider-vertical`). A class name antd does not emit is not on that list.
 
+That probe is now a repo tool rather than a scratch script:
+
+```bash
+python scripts/audit_component_rules.py     # needs playwright and `npm ci` in web/
+```
+
+It writes the gallery to a temp directory (junctions to `web/node_modules` and
+`web/src`, so there is nothing to keep in sync), builds it, opens it in two page
+states — a dialog traps the pointer, and a dropdown only exists while it is open
+— and merges the results. Its classifier is exercised by a pytest, so the part
+that decides *dead* from *unverified* runs in CI even where no browser does.
+Measured on the shipped sheet: **222 of 271** rules reach an element, **0**
+defects, 3 unverified with a written reason each.
+
 Two more gates: the values themselves are an independent hand transcription of
 Google's files (so a generator typo fails instead of regenerating a wrong file
 that then passes `--check` because both sides moved together), and `m3.css` may

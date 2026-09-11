@@ -33,12 +33,14 @@ Sources, fetched first-hand (2026-09-10):
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
 
 import pytest
 
+REPO = Path(__file__).resolve().parent.parent
 WEB = Path(__file__).resolve().parent.parent / "web" / "src"
 TOKENS = json.loads((WEB / "tokens.json").read_text(encoding="utf-8"))
 C = TOKENS["component"]
@@ -579,6 +581,47 @@ def test_no_rule_multiplies_a_derived_percentage_by_another():
         "a percentage token is being multiplied by a percentage again:\n  "
         + "\n  ".join(offenders[:5])
     )
+
+
+def test_the_rule_audit_classifier_separates_dead_from_unverified():
+    """`scripts/audit_component_rules.py` decides what counts as a dead rule.
+
+    The audit itself needs a browser, so it is a maintainer tool; this exercises
+    the part that decides, which is where a wrong answer would quietly re-open
+    the gap that shipped five dead families (a rule reading every token it names
+    and applying to nothing).
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    def rows(*specs):
+        return [{"rule": rule, "matched": count} for rule, count in specs]
+
+    # Reaching an element is fine; a state is fine; a transient popup is fine.
+    defects, unverified, _ = audit.reachable(
+        rows((".ah-btn", 3), (":root .ant-btn:hover", 0), (":root .ant-switch-disabled", 0))
+    )
+    assert defects == [] and unverified == []
+
+    # A rule naming something antd does not render is a defect...
+    defects, _, _ = audit.reachable(rows((":root .ant-tooltip-inner", 0)))
+    assert defects == [":root .ant-tooltip-inner"]
+
+    # ...unless the gallery knowingly does not mount it, which is *unverified*
+    # and says so rather than passing silently.
+    defects, unverified, _ = audit.reachable(rows((":root .ant-btn-link", 0)))
+    assert defects == []
+    assert unverified and "the cockpit renders no Button" in unverified[0]
+
+    # And a rule that matches in one page state and not another is fine.
+    defects, _, _ = audit.reachable(
+        rows((":root .ant-modal-container", 0), (":root .ant-modal-container", 1))
+    )
+    assert defects == []
 
 
 def test_the_percentage_gate_can_fail():
