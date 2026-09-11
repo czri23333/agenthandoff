@@ -130,6 +130,21 @@ sampled away.
     motion allowed) rather than across the sweep, which does not run in a
     reduced-motion context.
 
+16. **The thread view reads a bounded slice of the store, and says so.** Clustering
+    needs each session's touched files, and the only API that answers that is
+    `Parser.load()`, which parses the whole record: measured here at **189ms per
+    session over 802 sessions, ~150s**, with the largest single record at 4.6s.
+    The pass therefore runs under a 15s budget, newest first, caches what it read
+    (per session, keyed by `updated_at`), and reports
+    `文件重叠信号覆盖 N/802 个会话（本次 Xs，已达时间预算）` with a *load more*
+    action that continues from the cache — 72 sessions in the first pass, 85 after
+    one refresh, and the rest cluster on lineage and title tokens alone. The
+    honest gaps: the cache is in-memory, so a server restart re-pays; covering all
+    802 sessions takes ~10 minutes of repeated passes; and no parser exposes a
+    cheaper "which files" probe, so this is a limit of the parser API rather than
+    of the view. A disk-backed cache keyed by `(cli, session_id, updated_at)`
+    would make the second run free, and that is the follow-up.
+
 ## How to check any of this yourself
 
 ```bash

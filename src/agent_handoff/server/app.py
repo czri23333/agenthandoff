@@ -640,24 +640,76 @@ def session_raw(cli: str, sid: str):
 # result and let "recluster" bust it explicitly.
 _threads_cache: dict[tuple, tuple[float, list]] = {}
 _THREADS_TTL = 600.0
+# The file sets behind this view cost one full `load()` per session: measured on
+# this machine at **189ms each over 802 sessions, ~150s**, and the view sat on
+# "聚类中…（大库首次约 15 秒）" for two minutes because of it. Two changes make the
+# answer arrive: the sets are cached per session (keyed by `updated_at`, so an
+# edited session re-reads), and one pass runs under a time budget, newest first,
+# so a slow store produces a *smaller answer with a number attached* instead of
+# no answer at all.
+_files_cache: dict[tuple[str, str, str], frozenset[str]] = {}
+_THREADS_BUDGET = 15.0
+
+
+def _session_files(p, meta, deadline: float) -> frozenset[str] | None:
+    """The files a session touched, cached; `None` when the budget is spent."""
+    key = (meta.cli, meta.session_id, meta.updated_at or "")
+    hit = _files_cache.get(key)
+    if hit is not None:
+        return hit
+    if time.monotonic() > deadline:
+        return None
+    raw = p.load(meta.session_id)
+    files = frozenset(normalize_path(f) for f in raw.files_touched) if raw else frozenset()
+    _files_cache[key] = files
+    return files
 
 
 @app.get("/api/threads")
 def threads(cwd: str | None = None, min_overlap: float = 0.15, window_days: int = 21):
+    return _threads_payload(cwd, min_overlap, window_days, refresh=False)
+
+
+@app.get("/api/threads/refresh")
+def threads_refresh(cwd: str | None = None, min_overlap: float = 0.15, window_days: int = 21):
+    """One more budget's worth of file sets, on top of what is already cached.
+
+    The first call answers with whatever it could read in `_THREADS_BUDGET`
+    seconds; this is how the caller asks for the next batch without paying for
+    the previous one again.
+    """
+    return _threads_payload(cwd, min_overlap, window_days, refresh=True)
+
+
+def _threads_payload(
+    cwd: str | None, min_overlap: float, window_days: int, refresh: bool
+) -> dict:
+    started = time.monotonic()
     key = (cwd, min_overlap, window_days)
-    now = time.monotonic()
     hit = _threads_cache.get(key)
-    if hit and now - hit[0] < _THREADS_TTL:
+    if hit and not refresh and started - hit[0] < _THREADS_TTL:
         return hit[1]
 
-    nodes: list[SessionNode] = []
+    pairs: list[tuple] = []
     for p in all_parsers():
         for m in p.list_sessions():
             if cwd and cwd.lower() not in m.cwd.lower():
                 continue
-            raw = p.load(m.session_id)
-            files = {normalize_path(f) for f in raw.files_touched} if raw else set()
-            nodes.append(SessionNode(meta=m, files=files, tokens=title_tokens(m.title)))
+            pairs.append((p, m))
+    # Newest first: when the budget runs out, the sessions a reader is most
+    # likely to be looking at are the ones already covered.
+    pairs.sort(key=lambda pair: pair[1].updated_at or "", reverse=True)
+
+    deadline = started + _THREADS_BUDGET
+    nodes: list[SessionNode] = []
+    with_files = 0
+    for p, m in pairs:
+        files = _session_files(p, m, deadline)
+        if files is None:
+            files = frozenset()
+        else:
+            with_files += 1
+        nodes.append(SessionNode(meta=m, files=set(files), tokens=title_tokens(m.title)))
     result = []
     for t in sorted(
         build_threads(nodes, min_jaccard=min_overlap, window_days=window_days),
@@ -672,8 +724,18 @@ def threads(cwd: str | None = None, min_overlap: float = 0.15, window_days: int 
                 "last_active": t.last_active,
             }
         )
-    _threads_cache[key] = (now, result)
-    return result
+    payload = {
+        "threads": result,
+        "coverage": {
+            "sessions": len(nodes),
+            "with_files": with_files,
+            "seconds": round(time.monotonic() - started, 1),
+            "budget_s": _THREADS_BUDGET,
+            "budget_hit": with_files < len(nodes),
+        },
+    }
+    _threads_cache[key] = (started, payload)
+    return payload
 
 
 @app.get("/api/inbox")

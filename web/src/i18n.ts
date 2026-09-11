@@ -122,6 +122,9 @@ const dict = {
     interrupted: "会话曾中断",
     pendingDirective: "未执行的指令",
     engineDetail: "引擎原文",
+    threadsCoverage:
+      "文件重叠信号覆盖 {with_files}/{sessions} 个会话（本次 {seconds}s，已达时间预算）",
+    threadsLoadMore: "继续加载",
     usage: "用量与速度",
     budget: "上下文预算",
     timeline: "时间分布",
@@ -348,6 +351,9 @@ const dict = {
     interrupted: "Interrupted session",
     pendingDirective: "directive never executed",
     engineDetail: "from the engine",
+    threadsCoverage:
+      "the file-overlap signal covered {with_files}/{sessions} sessions ({seconds}s this pass, budget reached)",
+    threadsLoadMore: "load more",
     usage: "usage & speed",
     budget: "context budget",
     timeline: "when it happened",

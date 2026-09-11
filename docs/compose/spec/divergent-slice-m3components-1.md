@@ -26,7 +26,7 @@ declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **395 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+tests/` → **397 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
 --check` → 21 rows, README and `support-matrix.json` match the fixtures ·
 `conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
 `npm run build` → clean, dist rebuilt and committed.
@@ -38,11 +38,12 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | token consumption, at runtime | injected `446` = referenced `446`, **0** read-but-never-injected, **0** injected-but-never-read |
 | rule reachability, at runtime | of 302 rules that read a component token, **235 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
-| keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 439–756 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, ring-delegated where the focusable node is not the visible box, and box-less nodes judged by the keyboard pass. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
+| keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
 | hover, with a real pointer | 5 routes × 2 themes, every button, link, row, tab, chip and select-chip: **0** elements change `background-color` on hover — the 8% layer is the only hover mechanism — and the published press morphs still run (an icon button sampled mid-flight at `47.96px` between its full corner and its pressed corner) |
-| control overlap, swept | `--overlap` compares every rendered interactive pair on every route, in both themes, **and on a session-detail route** (the one surface the focus sweep never visited, discovered from `/api/sessions`): **670 controls, 0 pairs overlap**. It exists because a `.zip` button was painting over the 摘要/全文 switch (x 1081–1187 against 1109–1213) and every other gate passed that page. Mutation proof: a negative margin on the second body button made it report `74x40px` of overlap in both themes, and removing it went green again |
+| control overlap, swept | `--overlap` compares every rendered interactive pair on every route, in both themes, **and on a session-detail route** (the one surface the focus sweep never visited, discovered from `/api/sessions`): **718 controls, 0 pairs overlap**. It exists because a `.zip` button was painting over the 摘要/全文 switch (x 1081–1187 against 1109–1213) and every other gate passed that page. Mutation proof: a negative margin on the second body button made it report `74x40px` of overlap in both themes, and removing it went green again |
 | the cockpit's own loading state | the dashboard now paints **187 rows in 2.4s**; before this round it never left its skeleton, and the server behind it was measured burning **115% of one core** with `/api/stores` at 8.7s and `/api/sessions` timing out at 150s |
+| the thread view's loading state | it answered in **15.4s** with `{sessions: 802, with_files: 72, budget_hit: true}`, 0.0s from cache, and 15.7s for a *load more* that continued to 85 without re-reading the first 72. Before: still `聚类中…` after **121s**, because the pass called `Parser.load()` for all 802 sessions — measured at 189ms each, ~150s |
 | the rendered product, swept | across five routes: **2 font weights, 4 sizes, 7 radii, 15 colours** distinct, **none of them off-token**, and every weight is 400 or 500 |
 | the dialog scrim | `rgba(0,0,0,0)` before (a `calc(percent * percent)`, invalid at computed-value time, discarding every candidate); the token alone after |
 | top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
@@ -173,6 +174,18 @@ by a look:
    of rendered controls and reported the `.zip` button painted over the
    摘要/全文 switch in the session rail (670 controls examined, 0 pairs after the
    fix, `74x40px` under a deliberate mutation).
+9. **Two more views answered a spinner instead of a number.** The dashboard was
+   not the only one: the thread view sat on `聚类中…` for **121 measured seconds**
+   because it calls `Parser.load()` for every session to learn which files it
+   touched — measured at 189ms each over 802 sessions, ~150s, and the largest
+   single record at 4.6s. The pass now runs under a 15s budget, newest first,
+   caches each session's file set (keyed by `updated_at`), and reports what it
+   covered: `文件重叠信号覆盖 72/802 个会话（本次 15.4s，已达时间预算）`, with a
+   *load more* action that continues from the cache (85 after one refresh, no
+   re-reads). The rest clusters on lineage and title tokens. The in-memory cache
+   and the ~10 minutes of repeated passes needed to cover a 802-session store are
+   in `docs/limitations.md` item 16, with the disk-backed cache named as the
+   follow-up.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.

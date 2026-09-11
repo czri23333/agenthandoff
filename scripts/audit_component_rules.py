@@ -849,7 +849,11 @@ FOCUS_JS = r"""
   const els = [...document.querySelectorAll(sel)]
     .filter(e => {
       const cs = getComputedStyle(e);
-      return cs.display !== 'none' && cs.visibility !== 'hidden';
+      // `disabled` is not decoration: the pager's inner `<button>` on page 1 is
+      // disabled, `focus()` on it is a no-op, and judging the nothing that
+      // happens reports "focused without the focus-ring choreography" for a
+      // control no keyboard can reach.
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && !e.disabled;
     })
     .slice(0, limit);
   const root = getComputedStyle(document.documentElement);
@@ -902,6 +906,7 @@ FOCUS_JS = r"""
     const before = getComputedStyle(el);
     const radiusBefore = before.borderTopLeftRadius;
     el.focus();
+    if (document.activeElement !== el) continue;  // not focusable in practice
     const anims = el.getAnimations().filter(a => (a.animationName || '').startsWith('ah-focus'));
     const timings = anims.map(a => {
       const t = a.effect.getComputedTiming();
