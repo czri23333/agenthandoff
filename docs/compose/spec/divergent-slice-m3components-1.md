@@ -33,8 +33,9 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 
 | Claim | Measured |
 |---|---|
-| token consumption, at runtime | injected `375` = referenced `375`, **0** read-but-never-injected, **0** injected-but-never-read |
-| rule reachability, at runtime | of 223 rules that read a component token, **153 match an element** in a gallery mounting every antd family and every `.ah-*` class; the 70 that do not are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or unmounted. Before the review's finding: 34 matched |
+| token consumption, at runtime | injected `440` = referenced `440`, **0** read-but-never-injected, **0** injected-but-never-read |
+| rule reachability, at runtime | of 281 rules that read a component token, **227 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
+| the rendered product, swept | across five routes: **2 font weights, 4 sizes, 7 radii, 15 colours** distinct, **none of them off-token**, and every weight is 400 or 500 |
 | the dialog scrim | `rgba(0,0,0,0)` before (a `calc(percent * percent)`, invalid at computed-value time, discarding every candidate); the token alone after |
 | top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
 | filled button | `40px`, radius `9999px`, `min-width 64px`, padding `16px`, `14px/20px/500`, `rgb(208,188,255)` on `rgb(56,30,114)`, no shadow; transitions `0.16s, 0.24s, …` from the springs |
@@ -93,6 +94,37 @@ compositor's base colour. The DOM read that reported dark values happened one
 round-trip after the capture. Background propagation, `color-scheme`, stylesheet
 order, a stale frame and "an element painted over the DOM" were each falsified by
 measurement. The fix is two generated declarations; after it, **0/8** white.
+
+**The rounds after the review, and why they were needed.** The first delivery
+tokenised every control and the verdict came back "not Google's level". That was
+right, and it produced six more rounds, each driven by a measurement rather than
+by a look:
+
+1. **The page, not just its controls.** Four surfaces had no M3 structure at all:
+   navigation was a full-width antd `Segmented` (now `PrimaryNavigationTabTokens`),
+   search was `Input.Search` (now `SearchBarTokens`, 56dp corner-full), 118 rows
+   were bordered cards (now `ListTokens` items with no border), and the filter
+   controls were two `Select`s and a `Button` (now `FilterChipTokens` over a
+   `MenuTokens` dropdown, on a `DockedToolbarTokens` strip).
+2. **A computed-value sweep**, which found what no source scan can: `th` at
+   `font-weight: 600` (M3 publishes no 600 — antd's rule, antd's stylesheet), a
+   status tag at **3.37:1** in the light theme while the same tag passed dark, and
+   a spinner drawn in `rgb(180,163,220)`, a colour in no token anywhere. All
+   three fixed; the sweep is now part of the audit tool.
+3. **Four identical pills became one icon button and a menu.** Theme and language
+   are settings, not filters.
+4. **The loading indicator was a static dot.** It rotated a circle, which is a
+   no-op; it now morphs its corner four times per revolution — measured, 28
+   distinct radii in 1.2s.
+5. **The empty state was the vendor's.** A 184×152 SVG at a fixed 140px with a
+   `<title>` in the library's words, announcing the state a second time to a
+   screen reader. Ours is a 48dp mark; replacing it exposed a *second* empty
+   state underneath, which `List` had been drawing all along.
+6. **The tab indicator now travels** rather than popping, on the spatial spring,
+   with 7 measured intermediate positions between the first tab and the last.
+
+Each round is in `docs/theming.md` with its evidence, and the ones that cost
+something are in the deviation register rather than in a commit message.
 
 **Disclosures.** No screenshot of a real dialogue exists in this slice's
 evidence: the stores on this machine carry sessions but no transcripts, so the
