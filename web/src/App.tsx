@@ -227,7 +227,7 @@ export default function App() {
               fallback={
                 <div className="space-y-2 px-5 py-3">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="ah-skeleton h-11" />
+                    <div key={i} className="ah-skeleton" />
                   ))}
                 </div>
               }

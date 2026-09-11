@@ -440,7 +440,13 @@ body {
 .ah-skeleton {
   background: var(--ah-surface-2);
   border: 1px solid var(--ah-line);
-  border-radius: var(--ah-radius);
+  /* A skeleton stands in for a row, so it takes the row's geometry rather than
+     its own: the list item's rest corner (4px) and one-line height (56px).
+     Measured before: 44px at a 12px corner, standing in for a 56px row at 4 —
+     so the page jumped when the content arrived, which is the one thing a
+     skeleton exists to prevent. The call sites no longer set a height. */
+  border-radius: var(--ah-c-list-item-shape-rest);
+  min-height: var(--ah-c-list-item-height-one-line);
 }
 
 /* Tactile interaction spec: every pressable answers within ~100ms.

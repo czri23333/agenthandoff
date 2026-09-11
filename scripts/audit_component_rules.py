@@ -432,6 +432,7 @@ function Gallery() {
       <span className="ah-tag ah-tag--accent" id="g-ah-tag-accent">accent</span>
       <span className="ah-tag ah-tag--warn" id="g-ah-tag-warn">warn</span>
       <span className="ah-tag ah-tag--err" id="g-ah-tag-err">err</span>
+      <div className="ah-skeleton" id="g-ah-skeleton" />
       <Empty
         className="ah-empty"
         image={<span className="ah-empty__mark" id="g-ah-empty-mark">◇</span>}

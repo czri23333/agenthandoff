@@ -97,7 +97,7 @@ export default function Inbox() {
         {items === null && (
           <div className="space-y-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="ah-skeleton h-14" />
+              <div key={i} className="ah-skeleton" />
             ))}
           </div>
         )}

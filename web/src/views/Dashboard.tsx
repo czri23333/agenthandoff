@@ -882,7 +882,7 @@ function SkeletonRows({ n }: { n: number }) {
   return (
     <div className="space-y-2">
       {Array.from({ length: n }).map((_, i) => (
-        <div key={i} className="ah-skeleton h-11" />
+        <div key={i} className="ah-skeleton" />
       ))}
     </div>
   );
