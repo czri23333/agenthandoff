@@ -26,7 +26,7 @@ declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **398 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+tests/` → **399 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
 --check` → 21 rows, README and `support-matrix.json` match the fixtures ·
 `conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
 `npm run build` → clean, dist rebuilt and committed.
@@ -36,7 +36,8 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | Claim | Measured |
 |---|---|
 | token consumption, at runtime | injected `446` = referenced `446`, **0** read-but-never-injected, **0** injected-but-never-read |
-| rule reachability, at runtime | of 301 rules that read a component token, **235 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
+| rule reachability, at runtime | of 302 rules that read a component token, **247 match an element** in a gallery mounting every antd family and every `.ah-*` class, **0 unverified** — the dot Badge, vertical Divider and `type="link"` Button that used to sit in the "knowingly not mounted" list are mounted now, and so is a disabled variant of every family with disabled tokens. The rest are `:hover`/`:active`/`:disabled`/`:focus-*` or animation-only. Before the review's finding: 34 matched |
+| disabled states, gated | `--disabled` checks 18 gallery variants: none fades itself, none takes focus, none answers the pointer. The expected opacity comes from `tokens.json` (`checkbox`/`radio` publish `disabled.opacity: 0.38`; switch, field, segmented and slider publish per-part opacities and must stay at 1). It found a disabled FAB and a disabled filter chip falling through to `button:disabled { opacity: 0.38 }`, which fades container, content and the FAB's elevation together. Mutation proof: renaming both new rules made it report `opacity 0.38, want 1.00` for each |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
@@ -201,6 +202,24 @@ by a look:
     was renamed afterwards to watch the gate fail with
     `hover layer is 0.000, want 0.08` in both themes. The sweep's sample size and
     its remaining blind spots are in `docs/limitations.md` item 17.
+11. **Disabled states, and three families nobody had mounted.** The last
+    interaction state without a gate was disabled, and it lived in a place the
+    audit could not see: the gallery had no disabled variants and the whole
+    running product has two disabled controls. Eighteen variants later (one per
+    family the token file describes) the check found a disabled **FAB** and a
+    disabled **filter chip** falling through to the global
+    `button:disabled { opacity: 0.38 }` — a blanket fade that takes the container,
+    the content and the FAB's elevation shadow together, where the tokens publish
+    a 0.12 container and a 0.38 content. The expectation is read from
+    `tokens.json` rather than asserted in the tool, because checkbox and radio
+    publish a whole-element `disabled.opacity` and the other families publish
+    parts. Mounting the disabled variants also forced the three remaining
+    unmounted families into the gallery — a dot Badge, a vertical Divider and a
+    link Button — so the reachability audit now reports **247/302 rules matched
+    and 0 unverified**, against 235/301 and 3 before. Two probe bugs surfaced with
+    them: a baseline read before the entry animation settled, and a `.ah-select-chip`
+    click that landed on a newly-mounted *disabled* select and turned a live rule
+    into a phantom dead one.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -524,3 +543,9 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       layer, its 8%/12% opacity, token-colouredness and the absence of colour
       swaps or filters; found and fixed a missing icon-button hover layer and a
       hovered segment painted with the selection container (covers: S2; depends: T1)
+- [x] T17: Disabled states and the last unmounted families — the gallery mounts a
+      disabled variant per family plus a dot Badge, a vertical Divider and a link
+      Button; `--disabled` compares each against the opacity its own token
+      publishes and found the FAB and filter chip fading themselves; the
+      reachability audit drops to 0 unverified (covers: S2; depends: T1)
+

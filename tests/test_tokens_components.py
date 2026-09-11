@@ -859,6 +859,63 @@ def test_the_percentage_gate_can_fail():
     assert not offending("padding-inline-end: calc(var(--ah-c-a) + var(--ah-c-b));")
 
 
+def test_the_disabled_gate_reads_its_expectation_from_the_token_file():
+    """Two families publish a whole-element disabled opacity; the rest do not.
+
+    Checkbox and radio say `disabled.opacity: 0.38` — the published treatment for
+    those two is the control at 38%. Switch, field, segmented and slider publish
+    per-part opacities instead, so their element has to stay at 1 and let the
+    parts carry the disabled look. A gate that demanded `opacity: 1` everywhere
+    would call antd's correct checkbox a defect; a gate that accepted 0.38
+    everywhere would pass a faded FAB, which is exactly what was live.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_8", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    # The expectation comes from `tokens.json`, not from a constant in the tool.
+    published = audit.load_disabled_opacities()
+    assert published[".ant-checkbox"] == pytest.approx(0.38)
+    assert published[".ant-radio"] == pytest.approx(0.38)
+
+    def row(**kw):
+        base = {
+            "label": "BUTTON.ah-fab",
+            "tag": "BUTTON",
+            "opacity": "1",
+            "focusable": False,
+            "rest": {"bg": "transparent", "bd": "transparent", "sh": "none"},
+        }
+        base.update(kw)
+        base["hover"] = kw.get("hover", base["rest"])
+        base["press"] = kw.get("press", base["rest"])
+        return base
+
+    assert audit.disabled_defects([row()], published) == []
+
+    # A blanket fade on a family that publishes part opacities.
+    defects = audit.disabled_defects([row(opacity="0.38")], published)
+    assert len(defects) == 1 and "opacity 0.38, want 1.00" in defects[0]
+
+    # A checkbox at 0.38 is what the token says; its hidden proxy input is skipped.
+    checkbox = row(label="SPAN.ant-checkbox", tag="SPAN", opacity="0.38")
+    assert audit.disabled_defects([checkbox], published) == []
+    proxy = row(label="INPUT.ant-checkbox-input", tag="INPUT", opacity="0")
+    assert audit.disabled_defects([proxy], published) == []
+
+    # Focusable-while-disabled and pointer feedback are failures on their own.
+    assert "can still take focus" in audit.disabled_defects(
+        [row(focusable=True)], published
+    )[0]
+    hovered = row(hover={"bg": "rgb(1, 2, 3)", "bd": "transparent", "sh": "none"})
+    assert "answers the pointer while disabled" in audit.disabled_defects(
+        [hovered], published
+    )[0]
+
+
 def test_the_state_gate_finds_a_control_with_no_hover_feedback():
     """The gate that found every icon button answering the pointer with nothing.
 

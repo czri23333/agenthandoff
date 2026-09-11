@@ -322,6 +322,19 @@
   box-shadow: var(--ah-c-fab-elevation-hover);
 }
 
+/* FabTokens publishes no disabled pair, so a disabled FAB takes the published
+   generic one (container 0.12, content 0.38 — `md-sys-state`'s own numbers are
+   the opacities, `tokens.json`'s `state.disabled` labels which is which). Before
+   this rule the element fell through to `button:disabled { opacity: 0.38 }`,
+   which fades the *whole* control — its elevation shadow included — instead of
+   composing a disabled container and content. */
+.ah-fab:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-state-disabled-container), transparent);
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-state-disabled-content), transparent);
+  box-shadow: none;
+}
+
 .ah-fab--small {
   width: var(--ah-c-fab-sizes-small-size);
   height: var(--ah-c-fab-sizes-small-size);
@@ -2126,6 +2139,18 @@
   background: var(--ah-c-chip-selected-container);
   color: var(--ah-c-chip-selected-content);
   --ah-state-layer-color: var(--ah-c-chip-selected-content);
+}
+
+/* The same fall-through the FAB had: this family had no disabled rule, so
+   `button:disabled { opacity: 0.38 }` faded the whole control — container and
+   content together — where the chip family publishes a 0.12 container and a
+   0.38 content. Measured on the gallery's disabled variant before the fix:
+   `fades itself with opacity 0.38`. */
+.ah-filterchip:disabled {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-chip-disabled-container), transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-chip-disabled-content), transparent);
 }
 
 .ah-filterchip > .anticon,

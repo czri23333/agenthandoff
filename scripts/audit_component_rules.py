@@ -483,6 +483,28 @@ function Gallery() {
         <Radio defaultChecked id="g-radio">radio</Radio>
         <Tooltip title="gallery tooltip"><span id="g-tooltip">hover me</span></Tooltip>
         <Badge count={5} id="g-badge"><span>badge</span></Badge>
+        {/* The three families the audit used to list as *unverified* because the
+            gallery did not mount them: a dot Badge (the cockpit shows counts,
+            never dots), a vertical Divider and a link Button. Mounting them is
+            what turns "no rule reads this" into a measurement. */}
+        <Badge dot id="g-badge-dot"><span>dot</span></Badge>
+        <Button type="link" id="g-btn-link">link</Button>
+        <span>a<Divider type="vertical" id="g-divider-v" />b</span>
+        {/* Disabled variants: the live product has exactly two (the pager's
+            previous button on page one), so disabled geometry has to be measured
+            where it exists — here. */}
+        <button className="ah-iconbtn" disabled id="g-ah-iconbtn-disabled"><span className="anticon">+</span></button>
+        <button className="ah-fab" disabled id="g-ah-fab-disabled"><span className="anticon">+</span></button>
+        <button className="ah-mchip ah-mchip--filter" disabled id="g-ah-chip-disabled">chip</button>
+        <button className="ah-filterchip" disabled id="g-ah-filterchip-disabled">filter</button>
+        <Button type="primary" disabled id="g-btn-disabled-primary">primary</Button>
+        <Button disabled id="g-btn-disabled-default">default</Button>
+        <Switch disabled id="g-switch-disabled" />
+        <Checkbox disabled id="g-checkbox-disabled">off</Checkbox>
+        <Radio disabled id="g-radio-disabled">off</Radio>
+        <Segmented disabled options={["a", "b"]} id="g-segmented-disabled" />
+        <Select disabled className="ah-select-chip" placeholder="off" options={[{ value: "a", label: "a" }]} id="g-select-chip-disabled" />
+        <Input disabled placeholder="off" id="g-input-disabled" />
         <Input placeholder="input" id="g-input" />
         <Select className="ah-select-chip" defaultValue="a"
                 options={[{ value: "a", label: "a" }]} id="g-select-chip" />
@@ -949,6 +971,168 @@ def state_defects(rows: list[dict]) -> list[str]:
             ):
                 out.append(f"{where}: hover swaps {key} to {colour}, which is in no token")
     return out
+
+
+# ── Disabled controls ───────────────────────────────────────────────────────
+# M3 publishes a disabled *content* opacity (0.38) and a disabled *container*
+# opacity (0.12), and it publishes no state layer for a control that cannot be
+# used. Three things are therefore checkable, and each of them has been wrong in
+# some codebase's lifetime: the control does not fade itself with `opacity` (a
+# blanket fade takes the focus ring and every child with it), it cannot take
+# focus, and it does not light up under the pointer. The live product has two
+# disabled controls on the entire build — the pager's previous button and its
+# inner `<button>` — so this runs against the gallery, where every family has a
+# disabled variant.
+DISABLED_SELECTOR = (
+    'button:disabled, input:disabled, select:disabled, textarea:disabled, '
+    '[aria-disabled="true"], .ant-switch-disabled, .ant-select-disabled, '
+    ".ant-btn-disabled, .ant-checkbox-disabled, .ant-radio-disabled, "
+    ".ant-segmented-disabled"
+)
+DISABLED_LIMIT = 40
+DISABLED_JS = r"""
+(sel) => {
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    if (r.width < 6 || r.height < 6) continue;
+    out.push({
+      cls: String(el.className).slice(0, 46),
+      tag: el.tagName,
+      opacity: cs.opacity,
+      bg: cs.backgroundColor,
+      bd: cs.borderTopColor,
+      sh: cs.boxShadow.slice(0, 90),
+      focusable: el.tabIndex >= 0 && !el.disabled,
+    });
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+"""
+
+
+# Which families publish a *whole-element* disabled opacity, and where that value
+# lives in the token file. Checkbox and radio do (`disabled.opacity: 0.38`: the
+# published treatment for those two is the control at 38%); switch, field,
+# segmented and slider publish per-part opacities instead, so their element must
+# stay at 1 and let the parts carry it. Reading the expectation from the token
+# file is what makes this a comparison rather than an opinion.
+DISABLED_ELEMENT_OPACITY_KEYS = {
+    ".ant-checkbox": ("checkbox", "disabled", "opacity"),
+    ".ant-radio": ("radio", "disabled", "opacity"),
+}
+DISABLED_OPACITY_TOLERANCE = 0.02
+
+
+def load_disabled_opacities() -> dict[str, float]:
+    """`class substring -> the element opacity the token file publishes`."""
+    tokens = json.loads((WEB / "src" / "tokens.json").read_text(encoding="utf-8"))
+    out: dict[str, float] = {}
+    for marker, path in DISABLED_ELEMENT_OPACITY_KEYS.items():
+        node: object = tokens["component"]
+        for part in path:
+            node = node[part]  # type: ignore[index]
+        out[marker] = float(node)
+    return out
+
+
+def disabled_defects(rows: list[dict], element_opacity: dict[str, float]) -> list[str]:
+    """What a disabled control must not do, as failure lines.
+
+    `opacity: 0` is skipped rather than judged: antd's checkbox and radio keep a
+    real `<input>` at opacity 0 as the focus proxy and draw the control on a
+    sibling, so the element is invisible by design and the visible sibling is
+    measured on its own line.
+    """
+    out: list[str] = []
+    for row in rows:
+        where = row["label"]
+        measured = float(row.get("opacity") or "1")
+        if measured == 0 and row.get("tag") == "INPUT":
+            continue
+        expected = 1.0
+        for marker, value in element_opacity.items():
+            if marker in row["label"]:
+                expected = value
+                break
+        if abs(measured - expected) > DISABLED_OPACITY_TOLERANCE:
+            out.append(
+                f"{where}: opacity {measured:.2f}, want {expected:.2f} — a blanket "
+                "fade takes the focus ring and every child with it"
+            )
+        if row.get("focusable"):
+            out.append(f"{where}: is disabled and can still take focus")
+        hover, press, rest = row.get("hover"), row.get("press"), row.get("rest")
+        if not (hover and press and rest):
+            continue
+        for state, snap in (("hover", hover), ("press", press)):
+            for key in ("bg", "bd", "sh"):
+                if snap[key] != rest[key]:
+                    out.append(
+                        f"{where}: answers the pointer while disabled "
+                        f"({state} changes {key})"
+                    )
+                    break
+    return out
+
+
+def run_disabled_sweep(page, url: str) -> dict:
+    """Every disabled control on the gallery page, with and without a pointer."""
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_timeout(1500)
+    found = page.evaluate(DISABLED_JS, DISABLED_SELECTOR)
+    rows: list[dict] = []
+    for index, row in enumerate(found[:DISABLED_LIMIT]):
+        handle = page.locator(DISABLED_SELECTOR).nth(index)
+        rest = {"bg": row["bg"], "bd": row["bd"], "sh": row["sh"]}
+        hover = press = None
+        try:
+            box = handle.bounding_box()
+            if box and box["width"] >= 6 and box["height"] >= 6:
+                element = handle.element_handle()
+                if element is not None:
+                    page.evaluate("(el) => { window.__stateEl = el; }", element)
+                    page.mouse.move(5, 5)
+                    page.wait_for_timeout(30)
+                    # Settle before the baseline: the gallery animates its cards in,
+                    # and a mid-transition `box-shadow` reads as "the pointer
+                    # changed something" on a control that ignores the pointer.
+                    settled = page.evaluate(STATE_SNAP_JS)
+                    if settled:
+                        rest = {
+                            "bg": settled["bg"],
+                            "bd": settled["bd"],
+                            "sh": settled["sh"],
+                        }
+                    page.mouse.move(
+                        box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                    )
+                    page.wait_for_timeout(120)
+                    hover = page.evaluate(STATE_SNAP_JS)
+                    page.mouse.down()
+                    page.wait_for_timeout(120)
+                    press = page.evaluate(STATE_SNAP_JS)
+                    page.mouse.up()
+        except Exception:  # noqa: BLE001 - a control that moves is not a finding
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                page.mouse.move(5, 5)
+        rows.append(
+            {
+                "label": f'{row["tag"]}.{row["cls"][:34]}',
+                "tag": row["tag"],
+                "opacity": row["opacity"],
+                "focusable": row["focusable"],
+                "rest": rest,
+                "hover": {**rest, **(hover or {})} if hover else None,
+                "press": {**rest, **(press or {})} if press else None,
+            }
+        )
+    return {"rows": rows, "examined": len(rows)}
 
 
 def run_state_sweep(page, url: str, routes: list[str]) -> dict:
@@ -1512,6 +1696,14 @@ def main() -> int:
             "in both themes, and check the state layer, its opacity and its colour"
         ),
     )
+    parser.add_argument(
+        "--disabled",
+        action="store_true",
+        help=(
+            "also check the gallery's disabled variants: no self-fade, no focus, "
+            "and no answer to the pointer"
+        ),
+    )
     args = parser.parse_args()
 
     if not (WEB / "node_modules").is_dir():
@@ -1574,7 +1766,14 @@ def main() -> int:
                 page.wait_for_timeout(1400)
                 if scope == "interactive":
                     # Open the two surfaces that only exist while open.
-                    for selector in (".ah-select-chip", "#g-tooltip"):
+                    # `:not(.ant-select-disabled)` because the gallery now mounts a
+                    # disabled variant *before* the live ones, and clicking a
+                    # disabled select opens nothing — which silently turned
+                    # `:root .ant-select-item` into a "dead rule" the first time.
+                    for selector in (
+                        ".ah-select-chip:not(.ant-select-disabled)",
+                        "#g-tooltip",
+                    ):
                         element = page.query_selector(selector)
                         if element is None:
                             continue
@@ -1590,6 +1789,13 @@ def main() -> int:
                 for bucket, entries in found.items():
                     for key, count in entries.items():
                         sweep[bucket][key] = sweep[bucket].get(key, 0) + count
+
+            # Disabled variants live in the gallery: the whole running product
+            # has two such controls, so measuring them on the gallery is the only
+            # way to cover the families.
+            disabled: dict = {"rows": [], "examined": 0}
+            if args.disabled:
+                disabled = run_disabled_sweep(page, base)
 
             # The running cockpit, if one was named. `domcontentloaded` rather
             # than `networkidle`: the app polls, so the network never goes idle.
@@ -1674,6 +1880,16 @@ def main() -> int:
         )
     overlap_failures = overlaps if args.overlap else []
     state_failures = state_defects(states["rows"]) if args.states else []
+    disabled_failures = (
+        disabled_defects(disabled["rows"], load_disabled_opacities())
+        if args.disabled
+        else []
+    )
+    if args.disabled and disabled["examined"] < 6:
+        disabled_failures.append(
+            f"the disabled sweep examined only {disabled['examined']} controls; "
+            "an empty sweep is not a pass"
+        )
     # The sample is per *family*, so the floor is per family too: a route in this
     # cockpit shows at least two distinct control families (a tab and a button on
     # an empty page), in two themes. An absolute floor of 20 called a legitimate
@@ -1706,6 +1922,15 @@ def main() -> int:
                     "enabled": args.states,
                     "controls_examined": states["examined"],
                     "defects": state_failures,
+                },
+                "disabled_sweep": {
+                    "enabled": args.disabled,
+                    "controls_examined": disabled["examined"],
+                    "controls": [
+                        {"cls": r["label"], "opacity": r["opacity"]}
+                        for r in disabled["rows"]
+                    ],
+                    "defects": disabled_failures,
                 },
                 "focus_sweep": {
                     "enabled": args.focus,
@@ -1745,6 +1970,7 @@ def main() -> int:
         "focus": focus_failures,
         "overlapping controls": overlap_failures,
         "hover and press": state_failures,
+        "disabled controls": disabled_failures,
     }
     if any(failures.values()):
         for label, items in failures.items():
@@ -1772,6 +1998,11 @@ def main() -> int:
         print(
             f"States: {states['examined']} controls hovered and pressed with a real "
             "pointer; every one shows a token-coloured layer at 8%/12%."
+        )
+    if args.disabled:
+        print(
+            f"Disabled: {disabled['examined']} gallery variants checked; none fades "
+            "itself, none takes focus, none answers the pointer."
         )
     return 0
 

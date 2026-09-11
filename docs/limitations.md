@@ -156,6 +156,16 @@ sampled away.
     against a composited screenshot, so a layer that is present but painted over
     by something else would pass. Focus, by contrast, *is* a census.
 
+18. **The disabled-state check measures the gallery, not the product.** The whole
+    running cockpit has two disabled controls (the pager's previous button on page
+    one and the `<button>` inside it), so `--disabled` runs against the gallery's
+    disabled variants — 18 of them, one per family the token file describes. That
+    means it proves the *rules* compose the published opacities (and that nothing
+    takes focus or answers the pointer), not that every call site in the product
+    looks right: a page could disable a control in a way the gallery does not
+    model. The two live ones are covered incidentally by the focus and overlap
+    sweeps, which walk the session-detail route.
+
 ## How to check any of this yourself
 
 ```bash

@@ -159,6 +159,40 @@ The sweep samples by **family** rather than by document order (a route with 187
 rows would otherwise spend every slot on rows), and it is honest about the
 denominator: `States: 44 controls hovered and pressed with a real pointer`.
 
+The **disabled** state is the fifth thing that is checkable, and it is checked
+where it exists: the whole running product has two disabled controls (the pager's
+previous button on page one and the `<button>` inside it), so the gallery mounts a
+disabled variant of every family the tokens describe — buttons, icon button, FAB,
+chips, switch, checkbox, radio, segmented, select chip, input — and `--disabled`
+asks three questions of each: it must not fade *itself* (a blanket `opacity` takes
+the focus ring and every child with it), it must not take focus, and it must not
+answer the pointer.
+
+The expectation for that first question is read out of `tokens.json` rather than
+written into the tool, because the file publishes two different shapes:
+`checkbox.disabled.opacity` and `radio.disabled.opacity` are `0.38` — for those
+two the published treatment *is* the control at 38% — while switch, field,
+segmented and slider publish per-part opacities, so their element must stay at
+`1`. A gate that demanded `1` everywhere would call antd's correct checkbox a
+defect; one that accepted `0.38` everywhere would pass the two real defects it
+found:
+
+* **a disabled FAB and a disabled filter chip were faded, not composed.** Neither
+  family had a disabled rule, so both fell through to `button:disabled { opacity:
+  0.38 }` — which fades the container, the content *and* the FAB's elevation
+  shadow by the same amount. Both now compose the published opacities (the FAB
+  takes the generic `state.disabled` pair, the chip its own 0.12/0.38) and keep
+  `opacity: 1`.
+* the *probe* was wrong twice: it read the baseline before the entry animation
+  settled (so a mid-transition `box-shadow` looked like "the pointer changed
+  something" on a control that ignores the pointer), and it clicked the first
+  `.ah-select-chip` after a disabled one had been mounted before it, which opened
+  nothing and turned `:root .ant-select-item` into a phantom dead rule.
+
+Mounting the disabled variants also closed the last three **unverified** families:
+the gallery now renders a dot Badge, a vertical Divider and a `type="link"`
+Button, and the audit reports `0 unverified` for the first time.
+
 ## Keyboard focus (M3)
 
 M3 publishes the focus indicator as a component of its own — material-web ships
