@@ -1,0 +1,70 @@
+{
+  "cli": "qoderwake-cn",
+  "with_root": "qoderwake-cn/root/data/store",
+  "mirrors": "~/.qoderwake-cn/data/store + ~/.qoder-cn/projects",
+  "absent_trees": [],
+  "sessions": [
+    "lubewabog5aa9b6ea0ec",
+    "giqdbac7db7e1c",
+    "306c94d6-f76d-0ae6-69eb-6b04e3c0442f"
+  ],
+  "files": [
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\df9fb53d-d497-3976-059f-de9b4f323ab5.jsonl",
+      "bytes": 3585,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\bc6c09a3-ee88-1282-48fc-aee38e409321.jsonl",
+      "bytes": 3417,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\248c1f16-4168-d7e1-e387-905ca059399b.jsonl",
+      "bytes": 3334,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\0d69fa5b-367a-a386-3fe7-649cfc6b720b.jsonl",
+      "bytes": 3561,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\b38e30cb-6051-74f5-25e5-03c77b1cb036.jsonl",
+      "bytes": 3432,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\4f5cc085-20cc-fd23-bdf1-bbfbda959ca1.jsonl",
+      "bytes": 3502,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\08d421f2-cf1f-5c65-e9c3-09114812499f.jsonl",
+      "bytes": 3508,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\6de54870-50c5-4da7-9886-d48aa905db31\\compression-v2\\state.json",
+      "bytes": 335,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\306c94d6-f76d-0ae6-69eb-6b04e3c0442f\\state.json",
+      "bytes": 679,
+      "sampled": false
+    },
+    {
+      "rel": ".qoder-cn\\projects\\qoderwake-scope-c1dacd7343\\306c94d6-f76d-0ae6-69eb-6b04e3c0442f.jsonl",
+      "bytes": 7053,
+      "sampled": false
+    }
+  ],
+  "redacted_keys": [],
+  "scrubbed_hits": 44,
+  "sampled_records": false,
+  "source_messages": 42,
+  "max_records": 200,
+  "candidate_pool": 60,
+  "seed": 20260831
+}

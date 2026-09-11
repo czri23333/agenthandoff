@@ -57,18 +57,15 @@ sampled away.
 4. **Single-binary cockpit is unverified.** `docs/portable-single-exe.md` is a
    build recipe that has never been executed (`dist/` does not exist, PyInstaller
    is not installed here). Treat it as a proposal.
-5. **Two readers list sessions their fixture cannot be built from.** QoderWake
-   keeps team-group chats in SQLite under `~/.qoderwake` and the worker
-   *transcripts* in the shared qoder store (`~/.qoder/projects`, `~/.qoder-cn/…`)
-   — two stores, one reader. `handoff doctor` reports both halves and the parser
-   reads both, but `scripts/sanitize_fixtures.py` mirrors one tree rooted at the
-   parser's `root`, so it finds no files for the transcripts and skips the CLI as
-   "nothing selectable". On the machine this was written on `qoderwake-cn` lists
-   11 sessions from 132 shared transcript files and **has no fixture**, which is
-   why it is still `unverified` rather than proven. Fixing it means teaching the
-   fixture writer to mirror two stores with the right relative shape — and a
-   fixture the parser cannot load would be worse than none, because it would look
-   proven while testing nothing.
+5. **The international QoderWake has no store to sample here.** QoderWake reads
+   two stores — team-group chats in SQLite under `~/.qoderwake*`, worker
+   transcripts in the shared qoder store (`~/.qoder/projects`, `~/.qoder-cn/…`).
+   The fixture writer mirrors both now, keeping the relative shape the parser
+   derives them from, and `qoderwake-cn` is fixture-proven. `qoderwake` is not:
+   this machine has no `~/.qoderwake/data/store` and no `~/.qoder/projects`, so
+   there is nothing to sample. Its reader is the CN reader with a different store
+   name, which is evidence, but "the same code with a different constant" is not
+   a fixture.
 6. **`claude` parser has never parsed Claude Code data.** Written against
    documented JSONL shapes; the family parser is shared by five CLIs that *are*
    proven, so it probably works — "probably" is what this list exists to expose.

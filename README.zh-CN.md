@@ -23,7 +23,7 @@
 ## 支持的 CLI
 
 <!-- MATRIX BEGIN: generated, do not edit -->
-下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 12 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
+下表由 `tests/fixtures/sanitized/` 里的脱敏真实格式夹具推导生成，不是手写（推导日期见 `config/support-matrix.json`）。其中 13 项有夹具证据：克隆后运行 `pip install -e . && python -m agent_handoff.evidence --check` 即可复现；其余状态标注的是证据缺口，不是功能承诺。
 
 | CLI | 存储形态 | 读取 | 脱敏夹具 | 夹具读出 | 格式指纹 | 状态 |
 |---|---|---|---|---|---|---|
@@ -42,7 +42,7 @@
 | `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 439 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `opencode` | SQLite（只读 URI 打开） | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake` | SQLite daemon store + shared JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
-| `qoderwake-cn` | SQLite daemon store + shared JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
+| `qoderwake-cn` | SQLite daemon store + shared JSONL | ✓ | 11 | 8 ses / 21 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwork-app` | SQLite（只读 URI 打开） | ✓ | 2 | 1 ses / 2 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qoderwork-cn-app` | SQLite（只读 URI 打开） | ✓ | 2 | 2 ses / 32 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `qwenwork-app` | SQLite（只读 URI 打开） | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |

@@ -49,6 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from agent_handoff.locations import home  # noqa: E402
 from agent_handoff.parsers import all_parsers  # noqa: E402
 
 try:  # optional codec, exactly as in the library
@@ -67,6 +68,30 @@ SESSIONS_PER_CLI = 3
 # that forced it: 3 of its sessions carry 198 files and 5,366 source messages,
 # and the sample came to 4.35 MB against a 4 MB budget.
 SESSIONS_PER_CLI_OVERRIDE: dict[str, int] = {"workbuddy": 2}
+# A reader whose sessions live in more than one tree. QoderWake is the case: the
+# daemon keeps team-group chats in SQLite under `~/.qoderwake*`, while the worker
+# transcripts it lists live in the *shared* qoder store the IDE reads.
+# `select_files` mirrors one tree rooted at the parser's `root`, so the second
+# tree was invisible to it and the CLI was skipped as "nothing selectable" while
+# `handoff doctor` listed eleven sessions from it — the two commands disagreeing
+# about the same store.
+#
+# Each entry is `(path under $HOME, path inside the fixture dir)`. The fixture
+# has to keep the trees in the *relative shape the parser derives*, not just
+# copy them: `QoderwakeParser._shared_parser()` computes the shared store as
+# `root.parent.parent.parent / shared_store / "projects"`, so aiming the parser
+# at `<fixture>/root/data/store` makes it look in `<fixture>/.qoder-cn/projects`.
+# `with_root` is the first entry's destination, which is what makes that hold.
+MULTI_TREE: dict[str, tuple[tuple[str, str], ...]] = {
+    "qoderwake": (
+        (".qoderwake/data/store", "root/data/store"),
+        (".qoder/projects", ".qoder/projects"),
+    ),
+    "qoderwake-cn": (
+        (".qoderwake-cn/data/store", "root/data/store"),
+        (".qoder-cn/projects", ".qoder-cn/projects"),
+    ),
+}
 MAX_RECORDS = 200  # a fixture is a SAMPLE of a session, and says so
 CANDIDATE_POOL = 60  # ranking 451 sessions means 451 full parses
 HEAD_RECORDS = 60  # opening metadata, then a stride, then the newest record
@@ -187,6 +212,13 @@ STATIC_NAMES = {
 
 # Prefixes parsers glob on; the identity after them may still be hashed.
 _SEGMENT_PREFIXES = ("wd_", "session_", "rollout-", "agent-", "project_")
+# Substrings that must survive a rename because a *parser* classifies by them.
+# `_family_of_path` in jsonl_family.py decides whether a transcript in the shared
+# qoder store belongs to the wake family by looking for `qoderwake`/`qoderwork`
+# in the workspace directory name, so hashing that name away made the fixture
+# parse to zero sessions while every file was present and correct. A product
+# name is schema, not identity — the same reason `wd_` survives for Kimi.
+_SEGMENT_MARKERS = ("qoderwake", "qoderwork")
 
 _HEXISH_RE = re.compile(r"^[0-9a-fA-F][0-9a-fA-F_-]{5,63}(\.[a-z0-9]{1,6})?$")
 
@@ -494,10 +526,11 @@ class Sanitizer:
             # globs `wd_*/session_*/state.json` and a renamed directory makes the
             # fixture unparseable.
             prefix = next((p for p in _SEGMENT_PREFIXES if value.startswith(p)), "")
+            marker = next((m for m in _SEGMENT_MARKERS if m in value), "")
             stem, dot, ext = value.rpartition(".")
             token = "scope-" + hashlib.sha1(value.encode()).hexdigest()[:10]
             tail = f"{token}.{ext}" if dot and 1 <= len(ext) <= 6 else token
-            out = prefix + tail
+            out = f"{prefix}{marker}-{tail}" if marker else prefix + tail
         return self._clean(out)
 
 
@@ -826,7 +859,140 @@ def select_files(base: Path, root: Path, sessions: list[str]) -> list[Path]:
     return [p for p in wanted if not (p in seen or seen.add(p))][:24]
 
 
+def write_multi_tree_fixture(
+    cli: str,
+    parser,
+    sessions: list[str],
+    source_messages: int,
+    trees: tuple[tuple[str, str], ...],
+) -> dict:
+    """Mirror two source trees into one fixture, keeping their relative shape.
+
+    See `MULTI_TREE`: a reader can list sessions from a store other than its own
+    `root`, and the parser derives that other store's path from `root`, so the
+    fixture has to preserve the relationship rather than flatten both trees into
+    one directory.
+    """
+    out_dir = OUT_ROOT / cli
+    if out_dir.exists():
+        for stale in sorted(out_dir.rglob("*"), reverse=True):
+            if stale.is_file():
+                stale.unlink()
+    san = Sanitizer(cli)
+    written: list[dict] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mirrored: list[str] = []
+    missing: list[str] = []
+    for home_rel, dest_rel in trees:
+        # Create the destination even when the tree contributes no files: the
+        # parser is *aimed* at the first one, and `fixture_root_for` resolves
+        # `with_root` to that path, so a directory that never gets created reads
+        # as "fixture missing" rather than "this half is empty".
+        (out_dir / dest_rel).mkdir(parents=True, exist_ok=True)
+        tree = home() / home_rel
+        if not tree.is_dir():
+            # Absent is not a failure: the daemon half legitimately has no db on
+            # a machine that only ever ran the IDE, and the reader still works.
+            missing.append(home_rel)
+            continue
+        mirrored.append(_portable(tree))
+        _emit_tree(
+            out_dir,
+            tree,
+            dest_rel,
+            select_files(tree, tree, sessions),
+            san,
+            sessions,
+            written,
+        )
+    # The parser is aimed at the first tree's destination, which is what makes
+    # `root.parent.parent.parent / shared` resolve to the second tree inside the
+    # fixture.
+    with_root = f"{cli}/{trees[0][1]}"
+    (out_dir / ".fixture.json").write_text(
+        json.dumps(
+            {
+                "cli": cli,
+                "with_root": with_root,
+                "mirrors": " + ".join(mirrored) or " + ".join(m for m, _ in trees),
+                "absent_trees": missing,
+                "sessions": [san.fake_id(s) if len(s) > 8 else s for s in sessions],
+                "files": written,
+                "redacted_keys": sorted(set(san.redacted)),
+                "scrubbed_hits": san.scrubbed,
+                "sampled_records": any(w["sampled"] for w in written),
+                "source_messages": source_messages,
+                "max_records": MAX_RECORDS,
+                "candidate_pool": CANDIDATE_POOL,
+                "seed": SEED,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return {
+        "root": with_root,
+        "base": ";".join(d for _, d in trees),
+        "sessions": sessions,
+        "files": written,
+        "redacted": sorted(set(san.redacted)),
+        "scrubbed": san.scrubbed,
+    }
+
+
+def _emit_tree(
+    out_dir: Path,
+    base: Path,
+    dest_prefix: str,
+    files: list[Path],
+    san: Sanitizer,
+    sessions: list[str],
+    written: list[dict],
+) -> None:
+    """Transform one source tree's files into `out_dir / dest_prefix`."""
+    for src in files:
+        data = src.read_bytes()
+        name = src.name.lower()
+        sampled = False
+        # Two passes on purpose: transform FIRST (which is where session ids get
+        # mapped), then derive the sanitized filename from the finished map.
+        # Naming the file before transforming left real ids in filenames whose
+        # records had already been remapped, so nothing could load.
+        if name.endswith((".zstd", ".zst")):
+            if zstandard is None:
+                continue
+            body, sampled = transform_jsonl(_zstd_decompress(data), san)
+            payload = zstandard.ZstdCompressor().compress(body)
+        elif name.endswith((".sqlite", ".db")):
+            payload = None  # handled by the sqlite rebuilder below
+        elif name.endswith(".jsonl"):
+            payload, sampled = transform_jsonl(data, san)
+        elif name.endswith(".json"):
+            payload = transform_json(data, san)
+        else:
+            payload, sampled = transform_jsonl(data, san)
+
+        parts = [Path(src.name)] if base.is_file() else src.relative_to(base).parts
+        rel = Path(dest_prefix) / Path(*[san.name(part) for part in parts])
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        extra: dict = {}
+        if payload is None:
+            extra = {"sqlite": transform_sqlite(src, dst, san, sessions)}
+        else:
+            dst.write_bytes(payload)
+        written.append(
+            {"rel": str(rel), "bytes": dst.stat().st_size, "sampled": sampled, **extra}
+        )
+
+
 def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -> dict:
+    trees = MULTI_TREE.get(cli)
+    if trees:
+        return write_multi_tree_fixture(cli, parser, sessions, source_messages, trees)
     root = Path(getattr(parser, "root", None) or parser.db_path)
     base = root.parent if cli in MIRROR_FROM_PARENT else root
     out_dir = OUT_ROOT / cli
