@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Dropdown, Layout, Tooltip, Typography } from "antd";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
 import { setThemeMode, useTheme, type ThemeMode } from "./theme";
@@ -54,6 +54,34 @@ export default function App() {
   const [view, setView] = useState<View>(parseHash);
   const [lang, setLangState] = useState<Lang>(getLang);
   const navDepth = useRef(0);
+  /* The tab indicator is one element that *travels*, which is what Material's
+     own implementation does and what a per-tab pseudo-element cannot: a rule
+     can fade its own indicator in, but only a shared element can move between
+     two tabs. `theme.ts` cannot measure anything, so this is the one piece of
+     geometry the app owns — and it reads its size and colour from tokens. */
+  const navRef = useRef<HTMLElement | null>(null);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
+  const activeTabId = view.name === "detail" ? "dashboard" : view.name;
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const tab = tabRefs.current[activeTabId];
+      const nav = navRef.current;
+      if (!tab || !nav) return;
+      // `offsetLeft` is relative to the nav's padding box and does not change
+      // when the strip is scrolled, so the indicator scrolls with its tab.
+      setIndicator({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (observer && navRef.current) observer.observe(navRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeTabId]);
 
   const setLang = (l: Lang) => {
     setLangState(l);
@@ -152,15 +180,26 @@ export default function App() {
             overlapped by the theme switcher, which made the wrong control win the
             hit test on a phone. */}
         <nav
+          ref={navRef}
           className="ah-tabs min-w-0 flex-1 overflow-x-auto max-md:order-last max-md:basis-full"
           aria-label={t("sessions")}
         >
+          {indicator && (
+            <span
+              className="ah-tabs__indicator"
+              aria-hidden="true"
+              style={{ translate: `${indicator.left}px`, width: indicator.width }}
+            />
+          )}
           {TABS.map((tb) => {
-            const active = (view.name === "detail" ? "dashboard" : view.name) === tb.id;
+            const active = activeTabId === tb.id;
             return (
               <button
                 key={tb.id}
                 type="button"
+                ref={(el) => {
+                  tabRefs.current[tb.id] = el;
+                }}
                 className={`ah-tab ${active ? "ah-tab--active" : "ah-tab--inactive"}`}
                 aria-current={active ? "page" : undefined}
                 onClick={() => goTo(tb.id)}

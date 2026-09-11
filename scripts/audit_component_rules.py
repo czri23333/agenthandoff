@@ -408,6 +408,8 @@ function Gallery() {
         <span className="ah-searchbar__avatar" id="g-ah-searchbar-avatar">A</span>
       </div>
       <nav className="ah-tabs" id="g-ah-tabs">
+        <span className="ah-tabs__indicator" id="g-ah-tabs-indicator"
+              style={{ translate: "0px", width: "80px" }} />
         <button className="ah-tab ah-tab--active" id="g-ah-tab-active">
           <svg />one<span className="ah-tab__key">1</span>
         </button>

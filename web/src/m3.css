@@ -1065,6 +1065,9 @@
   min-height: var(--ah-c-primary-tab-height);
   background: var(--ah-c-primary-tab-container);
   box-shadow: var(--ah-c-primary-tab-elevation);
+  /* The indicator is positioned against this box, and it scrolls with the
+     strip rather than staying pinned to the viewport edge. */
+  position: relative;
 }
 
 .ah-tab {
@@ -1127,34 +1130,23 @@
 }
 
 /* The indicator is a 3dp primary bar with a 3dp corner, not a filled pill: it
-   is the one part of the tab that is always on. */
-.ah-tab--active::after {
-  content: "";
+   is the one part of the tab that is always on. It is **one element that
+   travels** between tabs — Material's own implementation allocates a single
+   indicator and animates its offset — rather than a pseudo-element per tab that
+   can only fade itself in. `App.tsx` measures the active tab and writes
+   `translate` and `width`; the geometry it writes (`height`, `border-radius`,
+   `background`) is still tokens. */
+.ah-tabs__indicator {
   position: absolute;
-  inset-inline: var(--ah-c-spacing-steps-lg);
   inset-block-end: 0;
-  height: var(--ah-c-primary-tab-indicator-height);
+  inset-inline-start: 0;
+  block-size: var(--ah-c-primary-tab-indicator-height);
   border-radius: var(--ah-c-primary-tab-indicator-shape);
   background: var(--ah-c-primary-tab-indicator-color);
-  /* M3E is a motion system, and a tab indicator that pops into place is the one
-     place the app still moved like a web page rather than like Material. It now
-     grows out of its own centre on a spatial spring. A true travelling indicator
-     needs one shared element positioned across tabs (Material's own
-     implementation allocates a single indicator and animates its offset), which
-     is a component, not a rule — this is the approximation, and `prefers-
-     reduced-motion` zeroes it like everything else. */
-  animation: ah-tab-indicator var(--ah-dur-default-spatial) var(--ah-ease-default-spatial) both;
-}
-
-@keyframes ah-tab-indicator {
-  from {
-    opacity: 0;
-    transform: scaleX(0.25);
-  }
-  to {
-    opacity: 1;
-    transform: scaleX(1);
-  }
+  pointer-events: none;
+  transition:
+    translate var(--ah-dur-default-spatial) var(--ah-ease-default-spatial),
+    width var(--ah-dur-default-spatial) var(--ah-ease-default-spatial);
 }
 
 .ah-tab > .anticon,
