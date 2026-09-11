@@ -252,6 +252,7 @@ structure at all:
 | two antd `Select`s and a `Button` | `FilterChipTokens` chips — 32dp, corner-medium at rest and **corner-full once a value is chosen** — over a `MenuTokens` dropdown (`surface-container`, corner-extra-small, elevation 2) |
 | a `.ah-bar` toolbar (a 1px rule) | a `DockedToolbarTokens` strip: 64dp of `surface-container`, 16dp leading and trailing, spacing from the published 4–32dp band |
 | an antd `Spin` | `LoadingIndicatorTokens`: a 48dp corner-full `primary-container` container with a 38dp `on-primary-container` active shape |
+| a section card whose *header* was a full-width `--ah-*-container` strip | the card's own surface with a **4px tone rule** at the header's leading edge | M3 publishes no card header, but it does publish what a header is *for*: a `title-small` label on the card's surface, and status as ink on a container rather than as a filled band. A 30px `ok` strip reads as a solid green bar and was the loudest thing on the transcript screen |
 
 The nav is why tokens alone could not get there: a segmented button is the right
 control for "which filter" and the wrong one for "which of five screens am I on".

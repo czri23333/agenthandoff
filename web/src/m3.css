@@ -1909,3 +1909,51 @@
 .ah-filterchip[aria-pressed="true"] > svg {
   color: var(--ah-c-chip-selected-icon-color);
 }
+/* ── Card anatomy ───────────────────────────────────────────────────────────
+   M3 publishes no "card header", but it does publish the shape of the two
+   things a header is for: a `title-small` label on the card's own surface, and
+   status expressed as ink on a container rather than as a filled band. The
+   cockpit's section cards used to paint a full-width `--ah-*-container` strip
+   behind the title, which at 30px tall reads as a solid green/purple/red bar —
+   the loudest element on the transcript screen, and not a Material one. */
+
+.ah-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ah-c-spacing-steps-sm);
+  padding: var(--ah-c-spacing-steps-md) var(--ah-c-spacing-steps-lg) 0;
+  background: transparent;
+}
+
+.ah-card__body {
+  padding: var(--ah-c-spacing-steps-sm) var(--ah-c-spacing-steps-lg) var(--ah-c-spacing-steps-lg);
+}
+
+/* The tone, as a 4px rule at the leading edge of the header. */
+.ah-card__rule {
+  position: relative;
+  padding-inline-start: var(--ah-c-spacing-steps-lg);
+}
+
+.ah-card__rule::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block: var(--ah-c-spacing-steps-md) 0;
+  inline-size: var(--ah-c-spacing-steps-xs);
+  border-start-end-radius: var(--ah-shape-xs);
+  border-end-end-radius: var(--ah-shape-xs);
+}
+
+.ah-card__rule--ok::before {
+  background: var(--ah-ok);
+}
+
+.ah-card__rule--accent::before {
+  background: var(--ah-accent);
+}
+
+.ah-card__rule--err::before {
+  background: var(--ah-err);
+}

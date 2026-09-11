@@ -107,15 +107,26 @@ export function SectionCard({
 }) {
   // M3E: tonal header strip + large radius card. The tone tints only the
   // header (status at a glance); the body stays on the surface.
-  const tonal =
-    tone === "ok" ? "ah-tonal-ok" : tone === "accent" ? "ah-tonal-accent" : tone === "err" ? "ah-tonal-err" : "";
+  // A status tone is carried by the *header's* ink and a 4px leading rule, not
+  // by a saturated band across it. Measured before: a full-width
+  // `--ah-ok-container` strip 30px tall reads as a solid green bar, which is the
+  // loudest thing on the transcript screen and has no Material counterpart —
+  // M3 tints a *container*, not a heading.
+  const rule =
+    tone === "ok"
+      ? "ah-card__rule ah-card__rule--ok"
+      : tone === "accent"
+        ? "ah-card__rule ah-card__rule--accent"
+        : tone === "err"
+          ? "ah-card__rule ah-card__rule--err"
+          : "";
   return (
     <div className="ah-card overflow-hidden">
-      <div className={`flex items-center justify-between gap-2 px-3 py-2 ${tonal}`}>
+      <div className={`ah-card__head ${rule}`}>
         <span className={`ah-label ${tone ? `ah-${tone}` : ""}`}>{title}</span>
         {extra}
       </div>
-      <div className="px-3 py-2.5">{children}</div>
+      <div className="ah-card__body">{children}</div>
     </div>
   );
 }
