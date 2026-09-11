@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Segmented, Select, Tooltip, Typography } from "antd";
+import { Button, Segmented, Select, Tooltip, Typography } from "antd";
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   api,
@@ -10,7 +10,7 @@ import {
   type SessionMeta,
   type StoreInfo,
 } from "../api";
-import { CliBadge, CopyButton, Highlight, StatusTag } from "../components";
+import { CliBadge, CopyButton, EmptyState, Highlight, StatusTag } from "../components";
 import { ActivityGrid } from "../charts";
 import { useFmt, useT, type TKey } from "../i18n";
 
@@ -514,9 +514,9 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
         ) : sessions === null ? (
           <SkeletonRows n={10} />
         ) : visible.length === 0 ? (
-          <Empty description={t("noSessions")}>
+          <EmptyState text={t("noSessions")}>
             <FirstRun />
-          </Empty>
+          </EmptyState>
         ) : (
           groupMode === "flat" ? (
             <ul className="m-0 list-none space-y-1.5 p-0">
@@ -791,7 +791,7 @@ function HitList({
         )}
       </div>
       {hits.length === 0 && !building && (
-        <Empty description={<span className="ah-meta">{t("noFullHits")}</span>} />
+        <EmptyState text={t("noFullHits")} />
       )}
       <ul className="m-0 list-none space-y-1.5 p-0">
         {hits.map((h) => (

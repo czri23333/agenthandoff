@@ -1,4 +1,4 @@
-import { Alert, App, Button, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Empty, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import type { Interruption } from "./api";
 import { formatNum, useT } from "./i18n";
@@ -204,4 +204,33 @@ export function StatusChip({
   children: React.ReactNode;
 }) {
   return <span className={`ah-tag ah-tag--${tone}`}>{children}</span>;
+}
+/**
+ * An empty state: our mark in a container, not the component library's artwork.
+ *
+ * `Empty` on its own renders a 184×152 SVG supplied by antd, at a fixed 140px
+ * height that is on no scale, carrying a `<title>` in antd's words — a second
+ * announcement for a screen reader that already gets the description, and an
+ * asset from a different design system inside a Material app. M3 publishes no
+ * empty-state component, so this one is ours and is labelled as ours.
+ */
+export function EmptyState({
+  text,
+  icon,
+  children,
+}: {
+  text: React.ReactNode;
+  icon?: React.ReactNode;
+  /** Rendered below the description — antd's `Empty` uses it as a footer slot. */
+  children?: React.ReactNode;
+}) {
+  return (
+    <Empty
+      className="ah-empty"
+      image={<span className="ah-empty__mark" aria-hidden="true">{icon ?? "◇"}</span>}
+      description={<span className="ah-meta">{text}</span>}
+    >
+      {children}
+    </Empty>
+  );
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Alert, Button, Empty, List, Switch, Tooltip, Typography } from "antd";
+import { Alert, Button, List, Switch, Tooltip, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { api, relTime, type InboxItem } from "../api";
-import { CliBadge, CopyButton } from "../components";
+import { CliBadge, CopyButton, EmptyState } from "../components";
 import { useT } from "../i18n";
 
 /**
@@ -101,18 +101,28 @@ export default function Inbox() {
             ))}
           </div>
         )}
+        {/* One empty state, not two. `List` renders its own `locale.emptyText`
+            when the data source is empty, so this page was drawing ours *and*
+            antd's underneath — which only became obvious when ours stopped being
+            antd's illustration too. */}
         {items?.length === 0 && (
-          <Empty
-            description={
-              <span className="ah-meta">
+          <EmptyState
+            text={
+              <>
                 {t("inboxEmpty")} <code>handoff publish &lt;bundle&gt;</code>
-              </span>
+              </>
             }
           />
         )}
-        <List
-          dataSource={items ?? []}
-          renderItem={(it) => (
+        {/* The list is mounted only when it has rows. `List` paints its own
+            `locale.emptyText` for an empty source and its `locale` prop does not
+            accept `null`, so the page drew our empty state *and* the library's
+            underneath — invisible while both were the library's illustration,
+            obvious the moment one of them stopped being. */}
+        {(items?.length ?? 0) > 0 && (
+          <List
+            dataSource={items ?? []}
+            renderItem={(it) => (
             <List.Item
               /* `px-3!` used to be here, and an `!important` utility beats the
                  unlayered `.ah-row` rule — so this one row kept 12px leading
@@ -131,8 +141,9 @@ export default function Inbox() {
                 }
               />
             </List.Item>
-          )}
-        />
+            )}
+          />
+        )}
       </div>
     </div>
   );

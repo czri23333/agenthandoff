@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Button, Empty, Slider, Typography } from "antd";
+import { Button, Slider, Typography } from "antd";
 import { api, type ThreadGroup } from "../api";
+import { EmptyState } from "../components";
 import { useT } from "../i18n";
 
 /**
@@ -58,7 +59,7 @@ export default function Threads() {
             <span className="ah-meta">{t("clustering")}</span>
           </div>
         )}
-        {multi?.length === 0 && <Empty description={<span className="ah-meta">{t("noThreads")}</span>} />}
+        {multi?.length === 0 && <EmptyState text={t("noThreads")} />}
         {singleCount > 0 && (
           <Typography.Text className="ah-faint mb-3 block">
             {singleCount} {t("standaloneHidden")}

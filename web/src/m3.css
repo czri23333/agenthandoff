@@ -1898,6 +1898,32 @@
   font-weight: var(--ah-c-badge-type-role-weight);
 }
 
+/* ── Empty state ────────────────────────────────────────────────────────────
+   M3 publishes no empty state, so this is our composition — but the vendor's
+   own illustration was rendering here until it was measured: a 184×152 SVG at
+   140px with a `<title>` in the vendor's words, which is both an asset from a
+   different design system and a second, redundant announcement for a screen
+   reader that already gets the description. This is a mark in a container, the
+   same way M3 expresses a state everywhere else. */
+.ah-empty__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--ah-c-empty-state-mark-size);
+  block-size: var(--ah-c-empty-state-mark-size);
+  border-radius: var(--ah-c-empty-state-shape);
+  background: var(--ah-c-empty-state-container);
+  color: var(--ah-c-empty-state-icon-color);
+  font-size: var(--ah-c-empty-state-icon-size);
+}
+
+/* antd wraps a custom image in `.ant-empty-image`, which is 140px tall for its
+   own artwork; ours is the mark's own size. */
+:root .ant-empty .ant-empty-image {
+  height: auto;
+  margin-block-end: var(--ah-c-spacing-steps-md);
+}
+
 /* The spacing scale's remaining steps, spent on surfaces this slice introduces
    rather than on existing ones: padding a class that already carries Tailwind's
    `p-3` would silently win (an unlayered rule beats a layered utility) and move

@@ -253,7 +253,7 @@ GALLERY_TSX = """
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Alert, App as AntApp, Badge, Button, Card, Checkbox, ConfigProvider, Divider,
+  Alert, App as AntApp, Badge, Button, Card, Checkbox, ConfigProvider, Divider, Empty,
   Input, Modal, Progress, Radio, Segmented, Select, Slider, Space, Switch,
   Table, Tooltip, Typography, message,
 } from "antd";
@@ -432,6 +432,11 @@ function Gallery() {
       <span className="ah-tag ah-tag--accent" id="g-ah-tag-accent">accent</span>
       <span className="ah-tag ah-tag--warn" id="g-ah-tag-warn">warn</span>
       <span className="ah-tag ah-tag--err" id="g-ah-tag-err">err</span>
+      <Empty
+        className="ah-empty"
+        image={<span className="ah-empty__mark" id="g-ah-empty-mark">◇</span>}
+        description={<span className="ah-meta">nothing here</span>}
+      />
       <button className="ah-row" id="g-ah-row">row</button>
       <button className="ah-row" id="g-ah-row-sel" aria-selected="true">row sel</button>
       <span className="ah-loading" id="g-ah-loading" />
