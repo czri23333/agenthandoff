@@ -805,6 +805,94 @@ COMPONENTS: dict[str, dict] = {
         },
         "disabled": {"activeTrack": 0.38, "inactiveTrack": 0.12, "handle": 0.38},
     },
+    "searchBar": {
+        "_source": (
+            "androidx tokens: SearchBarTokens.kt — the docked search bar: a 56dp "
+            "corner-full container on surface-container-high at elevation 3, a "
+            "body-large input, an on-surface leading icon, an on-surface-variant "
+            "trailing icon and a 30dp corner-full avatar slot."
+        ),
+        "height": 56,
+        "shape": "@shape:full",
+        "container": "@role:surface-container-high",
+        "elevation": "@elev:level3",
+        "leadingIconColor": "@role:on-surface",
+        "trailingIconColor": "@role:on-surface-variant",
+        "inputColor": "@role:on-surface",
+        # SearchBarTokens publishes no placeholder ink; its *supporting text* is
+        # on-surface-variant, which is the same tier, so the placeholder borrows
+        # that role rather than inventing a colour.
+        "supportingColor": "@role:on-surface-variant",
+        "avatarSize": 30,
+        "avatarShape": "@shape:full",
+        "typeRole": "@type:body-large",
+    },
+    "primaryTab": {
+        "_source": (
+            "androidx tokens: PrimaryNavigationTabTokens.kt — a 48dp tab (64dp with "
+            "an icon and a label) on surface at elevation 0, a 3dp primary active "
+            "indicator with its own 3dp corner, title-small labels, primary for the "
+            "active icon and label and on-surface-variant for the inactive ones."
+        ),
+        "height": 48,
+        "iconHeight": 64,
+        "indicator": {"height": 3, "shape": "@shape:xs", "color": "@role:primary"},
+        "container": "@role:surface",
+        "elevation": "@elev:level0",
+        "icon": 24,
+        "typeRole": "@type:title-small",
+        "active": {"icon": "@role:primary", "label": "@role:primary"},
+        "inactive": {"icon": "@role:on-surface-variant", "label": "@role:on-surface-variant"},
+        "stateLayer": {"shape": "@shape:full", "size": 40},
+    },
+    "dockedToolbar": {
+        "_source": (
+            "androidx tokens: DockedToolbarTokens.kt — a 64dp surface-container strip "
+            "with a corner-none container, 16dp leading and trailing space and a "
+            "4–32dp spacing range between its controls."
+        ),
+        "height": 64,
+        "container": "@role:surface-container",
+        "shape": 0,
+        "leadingSpace": 16,
+        "trailingSpace": 16,
+        "minSpacing": 4,
+        "maxSpacing": 32,
+    },
+    "loadingIndicator": {
+        "_source": (
+            "androidx tokens: LoadingIndicatorTokens.kt — the M3E indicator: a 48dp "
+            "corner-full container in primary-container with a 38dp active shape in "
+            "on-primary-container; the uncontained variant is that active shape in "
+            "primary at 38dp."
+        ),
+        "container": {
+            "width": 48,
+            "height": 48,
+            "shape": "@shape:full",
+            "color": "@role:primary-container",
+        },
+        "active": {"size": 38, "color": "@role:on-primary-container", "shape": "@shape:full"},
+        "uncontained": {"size": 38, "color": "@role:primary"},
+    },
+    "menu": {
+        "_source": (
+            "androidx tokens: MenuTokens.kt — the container a dropdown or select "
+            "opens into: surface-container, corner-extra-small, elevation 2, a "
+            "selected item in secondary-container with on-secondary-container ink "
+            "and an on-secondary-container leading icon. The item's own height and "
+            "type come from the list item above, which is where M3 puts them."
+        ),
+        "container": "@role:surface-container",
+        "shape": "@shape:xs",
+        "elevation": "@elev:level2",
+        "itemShape": "@shape:xs",
+        "typeRole": "@type:label-large",
+        "content": "@role:on-surface",
+        "selectedContainer": "@role:secondary-container",
+        "selectedContent": "@role:on-secondary-container",
+        "leadingIconColor": "@role:on-secondary-container",
+    },
     "spacing": {
         "_source": (
             "Ours. M3 publishes no spacing scale; this is the 4dp grid its component "

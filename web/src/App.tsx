@@ -143,18 +143,34 @@ export default function App() {
             cockpit
           </span>
         </h1>
-        {/* A Segmented control instead of antd's horizontal Menu: the Menu's
-            selected item paints its own container colour and measured 3.66:1 on
-            our header surface, while Segmented inherits the token palette. */}
-        {/* Below md the nav drops to a row of its own: it needs ~276px and was
-            being overlapped by the theme switcher, which made the wrong control
-            win the hit test on a phone. */}
-        <Segmented
-          className="min-w-0 flex-1 max-md:order-last max-md:basis-full"
-          value={view.name === "detail" ? "dashboard" : view.name}
-          onChange={(v) => goTo(String(v))}
-          options={TABS.map((tb) => ({ label: `${t(tb.labelKey)} ${tb.key}`, value: tb.id }))}
-        />
+        {/* PrimaryNavigationTabTokens: the official control for "which of these
+            destinations am I on" — a 48dp tab whose 3dp primary indicator sits
+            under the active one. This replaces an antd Segmented, which is a
+            *segmented button*: the right control for a filter, the wrong one for
+            navigation, and at full width it read as a search box.
+            Below md the row drops to its own line: it needs ~300px and was being
+            overlapped by the theme switcher, which made the wrong control win the
+            hit test on a phone. */}
+        <nav
+          className="ah-tabs min-w-0 flex-1 overflow-x-auto max-md:order-last max-md:basis-full"
+          aria-label={t("sessions")}
+        >
+          {TABS.map((tb) => {
+            const active = (view.name === "detail" ? "dashboard" : view.name) === tb.id;
+            return (
+              <button
+                key={tb.id}
+                type="button"
+                className={`ah-tab ${active ? "ah-tab--active" : "ah-tab--inactive"}`}
+                aria-current={active ? "page" : undefined}
+                onClick={() => goTo(tb.id)}
+              >
+                {t(tb.labelKey)}
+                <span className="ah-tab__key">{tb.key}</span>
+              </button>
+            );
+          })}
+        </nav>
         <Tooltip title={t("themeToggleHint")}>
           <Segmented
             size="small"

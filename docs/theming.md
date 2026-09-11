@@ -57,6 +57,10 @@ re-derive every judgement.
 | `.ah-chip` is a chip | it is a CLI identity *label*: no press state, no morph, deliberately | it answers no interaction because it has none. M3's interactive families are `.ah-mchip` (`--assist` / `--filter` / `--input`) and are separate components with separate tokens |
 | `FabMediumTokens.ContainerShape` | **ours**: `corner-large` (16px) | Google's file has that line commented out (`// TODO: uncomment when ShapeKeyTokens.CornerLargeIncreased is available`) and no published token set gives `corner-large-increased` a dp value. M3E's intent is 20dp; 16 is our inference, marked `shapeOurs` in `tokens.json` rather than presented as Google's |
 | one number, one operator | the opacity token *is* the percentage, and no rule multiplies it again | `color-mix(… var(--ah-c-dialog-scrim-opacity) …)`. The first draft wrote `calc(var(… ) * 100%)`, i.e. percentage × percentage, which is not a valid calc type: the declaration was invalid at computed-value time and the dialog painted **no scrim at all**. A fallback would not have rescued it — an invalid substituted value discards every candidate for that property |
+| list rows sit on `surface` (`ListTokens.ItemContainerColor`) | `surface-container-low`, no border | a screen of 118 rows needs a resting fill to scan; the *border* is gone, which is what M3 actually forbids, and the fill is one step |
+| M3E's loading indicator morphs between shapes | it rotates | the morph is a Compose path animation; CSS has no equivalent, and a loader that lies about its progress is worse than one that spins |
+| `SearchBarTokens` publishes no placeholder ink | the placeholder borrows the supporting-text role, `on-surface-variant` | same tier, same published role, rather than a new colour |
+| M3 primary navigation tabs are a top-level destination control | the cockpit's shortcut keys (`1`–`5`) render inside each tab as a small hint | the shortcuts are a real feature of this product and cannot live in a tooltip; the label itself is no longer `会话 1`, which is what made the tabs read as names |
 
 `tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
 
@@ -232,6 +236,42 @@ labels, not controls), and the freshness dot does not pulse (a permanently
 moving element reads as an alarm and breaks screenshot automation).
 
 ## Components (M3)
+
+### Round 2: the shape of the page, not just of its controls
+
+Round 1 tokenised every control and the verdict was still "not Google's level",
+because what reads as Material is not the button radius — it is what the page is
+*made of*. Measured against Google's component set, four surfaces had no M3
+structure at all:
+
+| Was | Is | Official source |
+|---|---|---|
+| a full-width antd `Segmented` for navigation | a `PrimaryNavigationTabTokens` tab row: 48dp tabs on `surface`, a **3dp primary indicator** under the active one, `title-small` labels, primary / on-surface-variant ink |
+| an antd `Input.Search` — a 32px rectangle with a square button bolted to its edge | a `SearchBarTokens` docked search bar: **56dp, corner-full**, `surface-container-high` at elevation 3, a body-large input, an on-surface leading icon and a 30dp avatar slot |
+| 118 bordered cards | `ListTokens` list items: **no border**, 16dp leading space, a state layer, and the `4 → 12 → 16` corner morph |
+| two antd `Select`s and a `Button` | `FilterChipTokens` chips — 32dp, corner-medium at rest and **corner-full once a value is chosen** — over a `MenuTokens` dropdown (`surface-container`, corner-extra-small, elevation 2) |
+| a `.ah-bar` toolbar (a 1px rule) | a `DockedToolbarTokens` strip: 64dp of `surface-container`, 16dp leading and trailing, spacing from the published 4–32dp band |
+| an antd `Spin` | `LoadingIndicatorTokens`: a 48dp corner-full `primary-container` container with a 38dp `on-primary-container` active shape |
+
+The nav is why tokens alone could not get there: a segmented button is the right
+control for "which filter" and the wrong one for "which of five screens am I on".
+Corner-radius tuning does not fix a control that is the wrong component.
+
+**What this round cost, in honesty:** the list row keeps a `surface-container-low`
+fill where `ListTokens.ItemContainerColor` says `surface` (a 118-row screen needs
+a resting fill to scan); the loading indicator rotates instead of morphing
+between M3E's shapes, because that morph is a Compose path animation CSS cannot
+express; and the search bar's placeholder borrows the supporting-text role,
+because SearchBarTokens publishes no placeholder ink. All three are in the
+deviation register below.
+
+Measured on the built bundle: the search bar computes `56px` / `9999px` /
+`rgb(33,31,38)` with the level-3 recipe; a tab's active indicator is a 3px
+primary bar; a filter chip is `32px` at `12px`, opening to `9999px` on
+`secondary-container` once chosen; the docked toolbar is `64px` on
+`surface-container`; a `Select` wearing `.ah-select-chip` is `32px` at `12px`
+with a 1px `outline-variant` border, and its dropdown is `4px` on
+`surface-container` with the level-2 recipe.
 
 Tokens describe a *surface*. A control is made of anatomy — height, padding, icon
 size, corner, the corner it morphs to while held — and until the m3components

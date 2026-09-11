@@ -977,6 +977,287 @@
   min-height: var(--ah-c-app-bar-small-height);
 }
 
+/* ── Search bar (docked) ─────────────────────────────────────────────────────
+   SearchBarTokens: a 56dp corner-full container on surface-container-high at
+   elevation 3, a body-large input, an on-surface leading icon, an
+   on-surface-variant trailing icon and a 30dp corner-full avatar slot.
+
+   This is the component that reads as "Material 3" at a glance, and the app had
+   been showing an antd `Input.Search` — a 32px rounded rectangle with a square
+   button bolted to its right edge. */
+
+.ah-searchbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ah-c-spacing-steps-sm);
+  height: var(--ah-c-search-bar-height);
+  padding-inline: var(--ah-c-spacing-steps-lg);
+  border: 0;
+  border-radius: var(--ah-c-search-bar-shape);
+  background: var(--ah-c-search-bar-container);
+  box-shadow: var(--ah-c-search-bar-elevation);
+  color: var(--ah-c-search-bar-input-color);
+  transition:
+    box-shadow var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-searchbar:focus-within {
+  /* A search bar is a surface that floats, so focus firms the elevation rather
+     than drawing a ring over a pill this large. */
+  box-shadow: var(--ah-c-search-bar-elevation), inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-c-search-bar-input-color) var(--ah-state-focus), transparent);
+}
+
+.ah-searchbar__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--ah-c-button-sizes-small-icon);
+  color: var(--ah-c-search-bar-leading-icon-color);
+}
+
+.ah-searchbar__icon--trailing {
+  color: var(--ah-c-search-bar-trailing-icon-color);
+}
+
+.ah-searchbar__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ah-c-search-bar-input-color);
+  font-size: var(--ah-c-search-bar-type-role-size);
+  line-height: var(--ah-c-search-bar-type-role-line);
+  letter-spacing: var(--ah-c-search-bar-type-role-tracking);
+  font-weight: var(--ah-c-search-bar-type-role-weight);
+  outline: none;
+}
+
+.ah-searchbar__input::placeholder {
+  color: var(--ah-c-search-bar-supporting-color);
+}
+
+.ah-searchbar__avatar {
+  flex: none;
+  width: var(--ah-c-search-bar-avatar-size);
+  height: var(--ah-c-search-bar-avatar-size);
+  border-radius: var(--ah-c-search-bar-avatar-shape);
+  background: var(--ah-primary-container);
+  color: var(--ah-on-primary-container);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Primary navigation tabs ─────────────────────────────────────────────────
+   PrimaryNavigationTabTokens: a 48dp tab (64 with an icon and a label) on
+   surface at elevation 0, a 3dp primary indicator with its own 3dp corner, a
+   title-small label, primary for the active pair and on-surface-variant for the
+   inactive ones. The cockpit had a full-width antd Segmented here, which is a
+   segmented *button* — the right control for a filter, the wrong one for
+   "which of these five screens am I on". */
+
+.ah-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: var(--ah-c-primary-tab-height);
+  background: var(--ah-c-primary-tab-container);
+  box-shadow: var(--ah-c-primary-tab-elevation);
+}
+
+.ah-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ah-c-spacing-steps-xs);
+  min-height: var(--ah-c-primary-tab-height);
+  padding-inline: var(--ah-c-spacing-steps-lg);
+  border: 0;
+  background: transparent;
+  color: var(--ah-c-primary-tab-inactive-label);
+  font-size: var(--ah-c-primary-tab-type-role-size);
+  line-height: var(--ah-c-primary-tab-type-role-line);
+  letter-spacing: var(--ah-c-primary-tab-type-role-tracking);
+  font-weight: var(--ah-c-primary-tab-type-role-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  --ah-state-layer-color: currentColor;
+}
+
+/* The 40dp corner-full layer a tab carries inside its own box. A pseudo-element
+   rather than an inset shadow, because the indicator is also an overlay and the
+   two have to be able to coexist. */
+.ah-tab::before {
+  content: "";
+  position: absolute;
+  inline-size: var(--ah-c-primary-tab-state-layer-size);
+  block-size: var(--ah-c-primary-tab-state-layer-size);
+  border-radius: var(--ah-c-primary-tab-state-layer-shape);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-tab:hover::before,
+.ah-tab:focus-visible::before {
+  background: color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-hover), transparent);
+}
+
+/* A tab with a label *and* an icon grows to 64dp and stacks (IconAndLabel...). */
+.ah-tab--with-icon {
+  flex-direction: column;
+  min-height: var(--ah-c-primary-tab-icon-height);
+}
+
+.ah-tab--active {
+  color: var(--ah-c-primary-tab-active-label);
+}
+
+.ah-tab--active > .anticon,
+.ah-tab--active > svg {
+  color: var(--ah-c-primary-tab-active-icon);
+}
+
+.ah-tab--inactive > .anticon,
+.ah-tab--inactive > svg {
+  color: var(--ah-c-primary-tab-inactive-icon);
+}
+
+/* The indicator is a 3dp primary bar with a 3dp corner, not a filled pill: it
+   is the one part of the tab that is always on. */
+.ah-tab--active::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--ah-c-spacing-steps-lg);
+  inset-block-end: 0;
+  height: var(--ah-c-primary-tab-indicator-height);
+  border-radius: var(--ah-c-primary-tab-indicator-shape);
+  background: var(--ah-c-primary-tab-indicator-color);
+}
+
+.ah-tab > .anticon,
+.ah-tab > svg {
+  font-size: var(--ah-c-primary-tab-icon);
+}
+
+/* The keyboard shortcut, kept as a hint rather than the label: M3 tabs are
+   words, and "会话 1" read as a name with a number in it. */
+.ah-tab__key {
+  margin-inline-start: var(--ah-c-spacing-steps-xs);
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
+  color: var(--ah-c-primary-tab-inactive-label);
+}
+
+/* ── Docked toolbar ──────────────────────────────────────────────────────────
+   DockedToolbarTokens: a 64dp surface-container strip, corner-none, with 16dp
+   leading and trailing space and a 4–32dp range between its controls. */
+
+.ah-docked-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* DockedToolbarTokens publishes a *range* — 4dp minimum, 32dp maximum — rather
+     than one gap, so the strip uses the bottom of the band where space is tight
+     and the top of it where there is room. Two published values and a
+     breakpoint, rather than a `clamp()` whose middle term is an invented
+     viewport fraction: the literal gate rejected that, and it was right to. */
+  column-gap: var(--ah-c-docked-toolbar-min-spacing);
+  row-gap: var(--ah-c-docked-toolbar-min-spacing);
+  min-height: var(--ah-c-docked-toolbar-height);
+  padding-inline: var(--ah-c-docked-toolbar-leading-space) var(--ah-c-docked-toolbar-trailing-space);
+  padding-block: var(--ah-c-spacing-steps-sm);
+  border-radius: var(--ah-c-docked-toolbar-shape);
+  background: var(--ah-c-docked-toolbar-container);
+}
+
+@media (min-width: 1200px) {
+  .ah-docked-toolbar {
+    column-gap: var(--ah-c-docked-toolbar-max-spacing);
+  }
+}
+
+/* ── Menu (a Select's dropdown) ─────────────────────────────────────────────
+   MenuTokens: surface-container at corner-extra-small and elevation 2, with a
+   selected item in secondary-container. */
+
+:root .ant-select-dropdown,
+:root .ant-dropdown-menu {
+  border-radius: var(--ah-c-menu-shape);
+  background: var(--ah-c-menu-container);
+  box-shadow: var(--ah-c-menu-elevation);
+}
+
+:root .ant-select-item {
+  border-radius: var(--ah-c-menu-item-shape);
+  color: var(--ah-c-menu-content);
+  font-size: var(--ah-c-menu-type-role-size);
+  line-height: var(--ah-c-menu-type-role-line);
+  letter-spacing: var(--ah-c-menu-type-role-tracking);
+  font-weight: var(--ah-c-menu-type-role-weight);
+}
+
+/* Hovering a menu item is the official state layer, not antd's derived tint:
+   M3 composites the item's own content colour at 8% over the menu surface. */
+:root .ant-select-item-option-active:not(.ant-select-item-option-selected),
+:root .ant-select-item-option:hover:not(.ant-select-item-option-selected) {
+  background: color-mix(
+    in srgb,
+    var(--ah-c-menu-content) var(--ah-state-hover),
+    transparent
+  );
+}
+
+:root .ant-select-item-option-selected {
+  background: var(--ah-c-menu-selected-container);
+  color: var(--ah-c-menu-selected-content);
+}
+
+:root .ant-select-item-option-selected .ant-select-item-option-state {
+  color: var(--ah-c-menu-leading-icon-color);
+}
+
+/* ── Loading indicator (M3E) ────────────────────────────────────────────────
+   LoadingIndicatorTokens: a 48dp corner-full container in primary-container with
+   a 38dp active shape in on-primary-container. antd's `Spin` is a 20px antd dot
+   in `colorPrimary`; this is the M3E shape-morphing loader's container. Its
+   animation is a rotation, because the shape morph between the M3E shapes is a
+   Compose path animation CSS cannot express — recorded as a deviation. */
+
+.ah-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ah-c-loading-indicator-container-width);
+  height: var(--ah-c-loading-indicator-container-height);
+  border-radius: var(--ah-c-loading-indicator-container-shape);
+  background: var(--ah-c-loading-indicator-container-color);
+  animation: ah-spin var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-linear) infinite;
+}
+
+.ah-loading::after {
+  content: "";
+  width: var(--ah-c-loading-indicator-active-size);
+  height: var(--ah-c-loading-indicator-active-size);
+  border-radius: var(--ah-c-loading-indicator-active-shape);
+  background: var(--ah-c-loading-indicator-active-color);
+}
+
+.ah-loading--uncontained {
+  width: var(--ah-c-loading-indicator-uncontained-size);
+  height: var(--ah-c-loading-indicator-uncontained-size);
+  background: transparent;
+}
+
+.ah-loading--uncontained::after {
+  width: var(--ah-c-loading-indicator-uncontained-size);
+  height: var(--ah-c-loading-indicator-uncontained-size);
+  background: var(--ah-c-loading-indicator-uncontained-color);
+}
+
 /* Two classes on purpose: the brand is an antd `Typography.Title level={5}`,
    whose own `h5.ant-typography` rule is (0,1,1) — a single-class override would
    lose and the app bar would keep antd's 16px heading. */
@@ -1543,4 +1824,88 @@
 
 .ah-navrail__header {
   padding-block: var(--ah-c-spacing-steps-xs);
+}
+/* A `Select` wearing a filter chip. M3 has no select *control*; the thing that
+   filters a list is a chip, so the toolbar's two dropdowns take
+   ChipsTokens/FilterChipTokens geometry — 32dp, corner-medium at rest and
+   corner-full once a value is chosen, on the official selected container — and
+   keep antd's dropdown, which becomes an M3 menu below.
+
+   antd v6's Select is `div.ant-select > div.ant-select-content + div.ant-select-suffix`;
+   `.ant-select-selector`, `-selection-placeholder` and `-arrow` are the v5
+   names and match nothing. The rule-reachability probe in the gallery is what
+   established the real markup. */
+:root .ant-select.ah-select-chip .ant-select-content {
+  height: var(--ah-c-chip-height);
+  padding-inline: var(--ah-c-spacing-steps-md);
+  border: var(--ah-c-chip-unselected-outline-width) solid var(--ah-c-chip-variant-filter-outline);
+  border-radius: var(--ah-c-chip-variant-filter-shape);
+  background: transparent;
+  color: var(--ah-c-chip-variant-filter-content);
+  font-size: var(--ah-c-chip-type-role-size);
+  line-height: var(--ah-c-chip-type-role-line);
+  letter-spacing: var(--ah-c-chip-type-role-tracking);
+  font-weight: var(--ah-c-chip-type-role-weight);
+  transition:
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+:root .ant-select.ah-select-chip .ant-select-placeholder {
+  color: var(--ah-c-chip-variant-filter-content);
+}
+
+/* Populated or focused: the chip is "on", so it rounds off and takes
+   secondary-container — the same state the filter chips use. */
+:root .ant-select.ah-select-chip.ant-select-focused .ant-select-content,
+:root .ant-select.ah-select-chip:has(.ant-select-selection-item) .ant-select-content {
+  border-color: transparent;
+  border-radius: var(--ah-c-chip-selected-shape);
+  background: var(--ah-c-chip-selected-container);
+  color: var(--ah-c-chip-selected-content);
+}
+
+:root .ant-select.ah-select-chip .ant-select-suffix {
+  color: var(--ah-c-chip-variant-filter-content);
+}
+
+/* The toggle in the toolbar is a filter chip, not a button: `⚠ needs reply 8`
+   is a yes/no filter over the list, which is what FilterChipTokens is for. */
+.ah-filterchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ah-c-chip-icon);
+  height: var(--ah-c-chip-height);
+  padding-inline: var(--ah-c-spacing-steps-md);
+  border: var(--ah-c-chip-unselected-outline-width) solid var(--ah-c-chip-variant-filter-outline);
+  border-radius: var(--ah-c-chip-variant-filter-shape);
+  background: transparent;
+  color: var(--ah-c-chip-variant-filter-content);
+  font-size: var(--ah-c-chip-type-role-size);
+  line-height: var(--ah-c-chip-type-role-line);
+  letter-spacing: var(--ah-c-chip-type-role-tracking);
+  font-weight: var(--ah-c-chip-type-role-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  --ah-state-layer-color: var(--ah-c-chip-variant-filter-content);
+  transition: border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial);
+}
+
+.ah-filterchip[aria-pressed="true"] {
+  border-color: transparent;
+  border-radius: var(--ah-c-chip-selected-shape);
+  background: var(--ah-c-chip-selected-container);
+  color: var(--ah-c-chip-selected-content);
+  --ah-state-layer-color: var(--ah-c-chip-selected-content);
+}
+
+.ah-filterchip > .anticon,
+.ah-filterchip > svg {
+  font-size: var(--ah-c-chip-icon);
+  color: var(--ah-c-chip-variant-assist-icon-color);
+}
+
+.ah-filterchip[aria-pressed="true"] > .anticon,
+.ah-filterchip[aria-pressed="true"] > svg {
+  color: var(--ah-c-chip-selected-icon-color);
 }

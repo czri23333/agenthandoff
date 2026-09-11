@@ -370,10 +370,18 @@ body {
   padding: 0 1px;
 }
 
-/* Rows: M3E medium cards with the official state layer --------------------- */
+/* Rows: M3 list items with the official state layer and shape morph -------- */
 .ah-row {
+  /* ListTokens.ItemContainerColor is `surface` and a list item carries **no
+     border**: M3 separates rows with space, a state layer and the shape morph,
+     not with a 1px outline and a white fill. The outline is what made 118 rows
+     read as a stack of antd cards rather than as one Material list, and it is
+     the single change that most moved the page away from "themed dashboard".
+     The container still sits one step above the page (`surface-container-low`
+     on `surface`) because a dense list of 118 sessions needs a resting fill to
+     scan; that step is recorded in the deviation register. */
   background: var(--ah-surface-1);
-  border: 1px solid var(--ah-line);
+  border: 0;
   /* ListTokens.ItemContainerShape at rest, and the M3E morph: the row widens to
      corner-medium on hover and corner-large once it is pressed or selected.
 
@@ -412,7 +420,6 @@ body {
    is the only level it ever reaches. What M3E actually does to a hovered list
    item is widen its corner (extra-small → medium), which is what happens here. */
 .ah-row:hover {
-  border-color: var(--ah-line-strong);
   border-radius: var(--ah-c-list-item-shape-hover);
   box-shadow: inset 0 0 0 9999px
     color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-hover), transparent);
