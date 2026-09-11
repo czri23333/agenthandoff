@@ -111,6 +111,8 @@ export interface TypescaleTokens {
  *   elev:<level>  → var(--ah-elevation-<level>)             (a shadow recipe)
  *   corner:<name> → var(--ah-corner-<name>)                 (a composed corner)
  *   spring:<name> → var(--ah-spring-<name>-{duration,easing})
+ *   dur:<name>    → var(--ah-motion-duration-<name>)        (a published duration)
+ *   ease:<name>   → var(--ah-motion-easing-<name>)          (a published curve)
  *
  * A plain integer is px; a plain fraction in (0, 1) is an opacity and is emitted
  * as a percentage, because the only thing that spends one is `color-mix`. The
@@ -301,6 +303,12 @@ function componentVars(): string {
           `${name}-duration:var(--ah-spring-${target}-duration);`,
           `${name}-easing:var(--ah-spring-${target}-easing);`,
         );
+        break;
+      case "dur":
+        out.push(`${name}:var(--ah-motion-duration-${target});`);
+        break;
+      case "ease":
+        out.push(`${name}:var(--ah-motion-easing-${target});`);
         break;
       default:
         // Throwing here is deliberate: the only way to reach it is a token the

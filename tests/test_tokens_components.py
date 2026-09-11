@@ -45,6 +45,12 @@ WEB = Path(__file__).resolve().parent.parent / "web" / "src"
 TOKENS = json.loads((WEB / "tokens.json").read_text(encoding="utf-8"))
 C = TOKENS["component"]
 STYLE = (WEB / "m3.css").read_text(encoding="utf-8")
+# The second stylesheet that spends component tokens. The focus ring is a
+# *global* treatment — it lands on every focusable element, not on one family —
+# so it lives in `index.css`, and a consumption gate that only read `m3.css`
+# would call its six tokens unspent. Both files are the stylesheet for this gate.
+SHELL_STYLE = (WEB / "index.css").read_text(encoding="utf-8")
+STYLES = (STYLE, SHELL_STYLE)
 
 # ── 1. Google's numbers, transcribed by hand ────────────────────────────────
 
@@ -288,6 +294,8 @@ def test_every_family_names_its_source():
         ("elev", TOKENS["elevation"]["levels"]),
         ("corner", TOKENS["shapeComposed"]["corners"]),
         ("spring", TOKENS["motion"]["spring"]),
+        ("dur", TOKENS["motion"]["duration"]),
+        ("ease", TOKENS["motion"]["easing"]),
     ],
 )
 def test_every_reference_resolves(kind: str, table: dict):
@@ -363,13 +371,17 @@ def _injected_of(component: dict) -> set[str]:
 
 
 def _referenced() -> set[str]:
-    return set(re.findall(r"var\((--ah-c-[A-Za-z0-9-]+)", STYLE))
+    return {
+        name
+        for style in STYLES
+        for name in re.findall(r"var\((--ah-c-[A-Za-z0-9-]+)", style)
+    }
 
 
 def test_stylesheet_reads_exactly_the_published_component_tokens():
     injected, referenced = _injected(), _referenced()
     assert referenced - injected == set(), (
-        "m3.css reads component tokens theme.ts never injects: "
+        "m3.css/index.css read component tokens theme.ts never injects: "
         f"{sorted(referenced - injected)}"
     )
     assert injected - referenced == set(), (
@@ -699,6 +711,73 @@ def test_the_app_sweep_reports_what_it_looked_at():
     # A sweep that examined nothing says so.
     colors, radii = audit.off_token({"buckets": {}, "tokens": [], "checked": {}})
     assert colors == [] and radii == []
+
+
+def test_the_focus_gate_separates_a_ring_from_a_derived_colour():
+    """`--focus` reads what a keyboard user sees, and this decides pass or fail.
+
+    The three failures below were all live: antd painted its own
+    `--ant-color-primary-border` ring in both themes (a colour no token equals),
+    a global `border-radius: 4px` on `:focus-visible` squared the slider handle,
+    and a Select's ring is delegated to the chip around its input — which is
+    correct and must not be reported as a missing ring.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_4", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    def row(**kw):
+        base = {
+            "tag": "BUTTON", "cls": "ah-btn", "theme": "light", "route": "#/",
+            "radiusBefore": "9999px", "radiusAfter": "9999px",
+            "width": "3px", "colour": "rgb(98, 91, 113)", "offset": "2px",
+            "delegated": False,
+            "animations": [{"name": "ah-focus-grow", "duration": 150, "delay": 0}],
+        }
+        base.update(kw)
+        return base
+
+    # The measured, correct ring passes.
+    assert audit.focus_defects([row()], "#625b71") == []
+
+    # antd's derived grey, a squared radius, and a ring with no choreography.
+    defects = audit.focus_defects(
+        [
+            row(colour="rgb(194, 189, 201)"),
+            row(radiusAfter="4px"),
+            row(animations=[]),
+        ],
+        "#625b71",
+    )
+    assert len(defects) == 3, defects
+    assert "want 3px rgb(98, 91, 113) at 2px" in defects[0]
+    assert "border-radius changed on focus (9999px -> 4px)" in defects[1]
+    assert "without the focus-ring choreography" in defects[2]
+
+    # A delegated ring is the correct answer for a Select, and the theme check
+    # fails loudly rather than reporting the light palette twice.
+    assert (
+        audit.focus_defects(
+            [row(cls="ant-select-input", delegated=True, animations=[])], "#625b71"
+        )
+        == []
+    )
+    theme_defect = audit.focus_defects(
+        [
+            row(
+                tag="THEME",
+                cls="requested dark, app applied light",
+                width="", colour="", offset="",
+            )
+        ],
+        "#ccc2dc",
+    )
+    assert theme_defect == [
+        "requested dark, app applied light: the requested theme was not applied"
+    ]
 
 
 def test_the_percentage_gate_can_fail():

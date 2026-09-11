@@ -1960,39 +1960,89 @@
    antd v6's Select is `div.ant-select > div.ant-select-content + div.ant-select-suffix`;
    `.ant-select-selector`, `-selection-placeholder` and `-arrow` are the v5
    names and match nothing. The rule-reachability probe in the gallery is what
-   established the real markup. */
-:root .ant-select.ah-select-chip .ant-select-content {
+   established the real markup.
+
+   The chip box is the *outer* element, and that is a correction. antd's
+   `-outlined` variant paints a box of its own — surface-container-low, a 1px
+   outline-variant border, a 12px corner, 8px of padding — and the previous
+   version drew a second box inside it: measured 176x50 at radius 12 around a
+   32dp inner box. Removing that left the inner box as a 158x32 *pill* of
+   `secondary-container` floating inside a 176x32 chip of radius 12, so the fill,
+   the outline and the focus ring were three different shapes at once. One
+   control is one box: the outer element carries the geometry and the fill, the
+   content fills it, and the chevron sits inside the same box. */
+:root .ant-select.ah-select-chip {
   height: var(--ah-c-chip-height);
   padding-inline: var(--ah-c-spacing-steps-md);
   border: var(--ah-c-chip-unselected-outline-width) solid var(--ah-c-chip-variant-filter-outline);
   border-radius: var(--ah-c-chip-variant-filter-shape);
+  background: transparent;
+  box-shadow: none;
+  --ah-state-layer-color: var(--ah-c-chip-variant-filter-content);
+  transition:
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    border-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+:root .ant-select.ah-select-chip .ant-select-content {
+  height: 100%;
+  padding-inline: 0;
+  border: 0;
+  /* Inherits the chip's corner, so the fill and the ring are one shape. */
+  border-radius: inherit;
   background: transparent;
   color: var(--ah-c-chip-variant-filter-content);
   font-size: var(--ah-c-chip-type-role-size);
   line-height: var(--ah-c-chip-type-role-line);
   letter-spacing: var(--ah-c-chip-type-role-tracking);
   font-weight: var(--ah-c-chip-type-role-weight);
-  transition:
-    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
-    background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
 }
 
-:root .ant-select.ah-select-chip .ant-select-placeholder {
+:root .ant-select.ah-select-chip .ant-select-placeholder,
+:root .ant-select.ah-select-chip .ant-select-suffix {
   color: var(--ah-c-chip-variant-filter-content);
 }
 
 /* Populated or focused: the chip is "on", so it rounds off and takes
    secondary-container — the same state the filter chips use. */
-:root .ant-select.ah-select-chip.ant-select-focused .ant-select-content,
-:root .ant-select.ah-select-chip:has(.ant-select-selection-item) .ant-select-content {
+:root .ant-select.ah-select-chip:has(.ant-select-selection-item),
+:root .ant-select.ah-select-chip.ant-select-focused {
   border-color: transparent;
   border-radius: var(--ah-c-chip-selected-shape);
   background: var(--ah-c-chip-selected-container);
   color: var(--ah-c-chip-selected-content);
+  --ah-state-layer-color: var(--ah-c-chip-selected-content);
 }
 
-:root .ant-select.ah-select-chip .ant-select-suffix {
-  color: var(--ah-c-chip-variant-filter-content);
+:root .ant-select.ah-select-chip:has(.ant-select-selection-item) .ant-select-content,
+:root .ant-select.ah-select-chip:has(.ant-select-selection-item) .ant-select-placeholder,
+:root .ant-select.ah-select-chip:has(.ant-select-selection-item) .ant-select-suffix,
+:root .ant-select.ah-select-chip.ant-select-focused .ant-select-content,
+:root .ant-select.ah-select-chip.ant-select-focused .ant-select-suffix {
+  color: var(--ah-c-chip-selected-content);
+}
+
+/* antd draws its own focus halo on a Select —
+   `:where(.hash).ant-select.ant-select-outlined:not(.ant-select-disabled).ant-select-focused`,
+   which is (0,4,0) and 2px of a colour its algorithm derives (measured
+   `rgba(14, 0, 58, 0.12)` in light theme, and untokenised in both). It sits
+   outside our ring, so the chip looked double-ringed; and because it is a
+   `box-shadow` it also replaced the 12% layer. This rule matches its
+   specificity and is later in the document, so the layer is the only shadow. */
+:root .ant-select.ah-select-chip.ant-select-focused {
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-focus), transparent);
+}
+
+/* The input keeps the behaviour — keyboard, IME, a11y — and gives up the paint,
+   which belongs to the chip whose box the reader actually sees. Without this the
+   12% layer lands twice: once on the chip's box and once on the 132x30 input
+   inside it. */
+:root .ant-select.ah-select-chip .ant-select-input:focus-visible {
+  outline: none;
+  animation: none;
+  box-shadow: none;
 }
 
 /* The toggle in the toolbar is a filter chip, not a button: `⚠ needs reply 8`

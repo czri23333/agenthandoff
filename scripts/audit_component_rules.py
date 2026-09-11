@@ -43,6 +43,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 WEB = REPO / "web"
 
+# How many focusable elements per route the focus sweep reads. The dashboard has
+# 14; the cap is here so one pathological page cannot turn the sweep into a
+# minute of focus/blur round trips.
+FOCUS_LIMIT = 60
+
 
 def free_port() -> int:
     """A port nobody is listening on.
@@ -652,6 +657,165 @@ def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
     return defects, unverified, []
 
 
+# ── The keyboard focus indicator ────────────────────────────────────────────
+# The rules above ask whether a *class* reaches an element. This asks what a
+# keyboard user actually sees: it focuses every focusable element on every route,
+# in both themes, settles the ring's choreography, and reads back the computed
+# ring. Four things are checked, and each one was a live defect at some point:
+#
+#   * the ring is `--ah-secondary` at the official 3px / 2px outward offset — not
+#     antd's `--ant-color-primary-border` (a colour its algorithm derives, so it
+#     was the same grey in both themes and matched no token);
+#   * focusing does not change the element's own `border-radius` (a global
+#     `border-radius: 4px` on `:focus-visible` squared the slider handle);
+#   * the grow/shrink choreography is present, unless the ring is delegated to an
+#     ancestor — a Select's focusable node is its inner input while the visible
+#     box is the chip around it, so "no ring here" is correct exactly when an
+#     ancestor draws one;
+#   * the producer is not empty: the sweep must have examined elements, and the
+#     theme must actually have been applied. An empty sweep is a false green.
+FOCUS_JS = r"""
+(limit) => {
+  const sel = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const els = [...document.querySelectorAll(sel)]
+    .filter(e => {
+      const cs = getComputedStyle(e);
+      return cs.display !== 'none' && cs.visibility !== 'hidden'
+        && e.getBoundingClientRect().width > 0;
+    })
+    .slice(0, limit);
+  const root = getComputedStyle(document.documentElement);
+  const expect = root.getPropertyValue('--ah-secondary').trim();
+  const settle = (e) => e.getAnimations()
+    .filter(a => (a.animationName || '').startsWith('ah-focus'))
+    .forEach(a => { try { a.finish(); } catch (err) {} });
+  const rows = [];
+  for (const el of els) {
+    const before = getComputedStyle(el);
+    const radiusBefore = before.borderTopLeftRadius;
+    el.focus();
+    const anims = el.getAnimations().filter(a => (a.animationName || '').startsWith('ah-focus'));
+    const timings = anims.map(a => {
+      const t = a.effect.getComputedTiming();
+      return { name: a.animationName, duration: Math.round(t.duration), delay: Math.round(t.delay) };
+    });
+    anims.forEach(a => { try { a.finish(); } catch (err) {} });
+    const cs = getComputedStyle(el);
+    const own = { w: cs.outlineWidth, s: cs.outlineStyle, c: cs.outlineColor, o: cs.outlineOffset };
+    let delegate = null;
+    if (own.s === 'none' || own.w === '0px') {
+      let p = el.parentElement;
+      for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+        settle(p);
+        const c = getComputedStyle(p);
+        if (c.outlineStyle !== 'none' && c.outlineWidth !== '0px') {
+          delegate = { cls: String(p.className).slice(0, 48), w: c.outlineWidth, c: c.outlineColor, o: c.outlineOffset };
+          break;
+        }
+      }
+    }
+    const eff = delegate ? { w: delegate.w, c: delegate.c, o: delegate.o } : { w: own.w, c: own.c, o: own.o };
+    el.blur();
+    rows.push({
+      tag: el.tagName,
+      cls: String(el.className).slice(0, 60),
+      radiusBefore,
+      radiusAfter: cs.borderTopLeftRadius,
+      width: eff.w,
+      colour: eff.c,
+      offset: eff.o,
+      delegated: delegate !== null,
+      delegateCls: delegate ? delegate.cls : null,
+      animations: timings,
+    });
+  }
+  return { expect, count: els.length, rows };
+}
+"""
+
+
+def focus_defects(rows: list[dict], expected: str | dict[str, str]) -> list[str]:
+    """What a keyboard user would see, as a list of things that are wrong.
+
+    Split out from the browser work on purpose: `tests/test_tokens_components.py`
+    feeds this function both real and deliberately broken evidence, so the check
+    that guards the focus ring is itself checked.
+
+    `expected` is the `--ah-secondary` the page reported: one hex string, or a
+    per-theme mapping. It has to be per-theme, because the two palettes publish
+    different secondaries (#625b71 against #ccc2dc) and comparing the light rows
+    against the dark value is how the first run of this gate reported 50
+    failures that were all the same measurement mistake.
+    """
+    out: list[str] = []
+    for r in rows:
+        if r.get("tag") == "THEME":
+            out.append(f"{r['cls']}: the requested theme was not applied")
+            continue
+        theme = r.get("theme", "")
+        want = _rgb(expected[theme] if isinstance(expected, dict) else expected)
+        where = f'{r.get("theme", "")}{r.get("route", "")} {r["cls"] or r["tag"]}'.strip()
+        if r["width"] != "3px" or r["colour"] != want or r["offset"] != "2px":
+            out.append(
+                f"{where}: ring is {r['width']} {r['colour']} at {r['offset']}, "
+                f"want 3px {want} at 2px"
+            )
+        if r["radiusBefore"] != r["radiusAfter"]:
+            out.append(
+                f"{where}: border-radius changed on focus "
+                f"({r['radiusBefore']} -> {r['radiusAfter']})"
+            )
+        if not r["delegated"] and not r["animations"]:
+            out.append(f"{where}: focused without the focus-ring choreography")
+    return out
+
+
+def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
+    """Focus every focusable element on every route, in both themes.
+
+    Playwright's page comes in from `main`, because the import lives there — the
+    tool reports a missing browser instead of failing to import.
+    """
+    out: dict = {"rows": [], "examined": 0, "expect": {}, "themes": {}}
+    for theme in ("light", "dark"):
+        # `localStorage` and then a *real* reload. `goto(url + '#/x')` from `url`
+        # is a same-document navigation, so the mode is never re-read and both
+        # passes end up measuring one theme — which is exactly how the first
+        # version of this sweep reported the light palette for both.
+        page.goto(url, wait_until="domcontentloaded")
+        page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["ah-theme", theme])
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#ah-tokens", state="attached")
+        page.wait_for_timeout(1200)
+        applied = page.evaluate("() => document.documentElement.dataset.theme")
+        out["themes"][theme] = applied
+        if applied != theme:
+            out["rows"].append(
+                {
+                    "tag": "THEME",
+                    "cls": f"requested {theme}, app applied {applied}",
+                    "radiusBefore": "",
+                    "radiusAfter": "",
+                    "width": "",
+                    "colour": "",
+                    "offset": "",
+                    "delegated": False,
+                    "animations": [],
+                }
+            )
+        for route in routes:
+            page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+            found = page.evaluate(FOCUS_JS, FOCUS_LIMIT)
+            out["examined"] += found["count"]
+            out["expect"][theme] = found["expect"]
+            for row in found["rows"]:
+                row["theme"] = theme
+                row["route"] = route
+            out["rows"].extend(found["rows"])
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true", help="leave the gallery on disk")
@@ -667,6 +831,14 @@ def main() -> int:
         action="append",
         default=[],
         help="hash route to visit on each --app (repeatable; default #/)",
+    )
+    parser.add_argument(
+        "--focus",
+        action="store_true",
+        help=(
+            "also focus every focusable element on each --app/--route, in both "
+            "themes, and check the ring, the radius and the choreography"
+        ),
     )
     args = parser.parse_args()
 
@@ -750,7 +922,10 @@ def main() -> int:
             # The running cockpit, if one was named. `domcontentloaded` rather
             # than `networkidle`: the app polls, so the network never goes idle.
             app_sweep: dict[str, dict[str, int]] = {}
+            focus: dict = {"rows": [], "examined": 0, "expect": "", "themes": {}}
             for url in args.app:
+                if args.focus:
+                    focus.update(run_focus_sweep(page, url, args.route or ["#/"]))
                 for route in (args.route or ["#/"]):
                     page.goto(url, wait_until="domcontentloaded")
                     page.wait_for_selector("#ah-tokens", state="attached")
@@ -790,6 +965,14 @@ def main() -> int:
     off_weight, off_size = off_scale(sweep)
     app_weights, app_sizes = off_scale(app_sweep)
     app_colors, app_radii = off_token(app_sweep)
+    focus_failures = focus_defects(focus["rows"], focus["expect"]) if args.focus else []
+    if args.focus and focus["examined"] < 20:
+        # An empty producer is the failure mode this whole script exists to
+        # refuse: 0 elements examined is not "no defects", it is "no evidence".
+        focus_failures.append(
+            f"focus sweep examined only {focus['examined']} elements; "
+            "an empty sweep is not a pass"
+        )
     print(
         json.dumps(
             {
@@ -803,6 +986,16 @@ def main() -> int:
                 "app_off_scale_font_sizes": app_sizes,
                 "app_colours_in_no_token": app_colors,
                 "app_radii_in_no_token": app_radii,
+                "focus_sweep": {
+                    "enabled": args.focus,
+                    "elements_examined": focus["examined"],
+                    "expected_ring": focus["expect"],
+                    "themes_applied": focus["themes"],
+                    "delegated_rings": sum(
+                        1 for r in focus["rows"] if r.get("delegated")
+                    ),
+                    "defects": focus_failures,
+                },
                 # How many distinct values the app sweep actually looked at.
                 # A violation list is only evidence if nothing produced it
                 # vacuously: the brief's own rule is that an empty set from an
@@ -822,6 +1015,7 @@ def main() -> int:
         "app sizes": app_sizes,
         "app colours": app_colors,
         "app radii": app_radii,
+        "focus": focus_failures,
     }
     if any(failures.values()):
         for label, items in failures.items():
@@ -832,6 +1026,14 @@ def main() -> int:
     print(f"\nno dead rules. {matched}/{len(rows)} reach an element; "
           f"{len(unverified)} are unverified (see the reasons above). "
           "Every rendered weight is 400 or 500 and every size is an M3 role.")
+    if args.focus:
+        print(
+            f"Focus: {focus['examined']} focusable elements across "
+            f"{len(focus['themes'])} themes, ring "
+            f"{focus['expect'] or '(none measured)'} at 3px/2px, "
+            f"{sum(1 for r in focus['rows'] if r.get('delegated'))} delegated "
+            "to the box the reader sees."
+        )
     return 0
 
 

@@ -309,6 +309,40 @@ MOTION_STAGGER: dict[str, str] = {"row": "12ms"}
 # and 2px in its own pinned v0_192 copy); `docs/theming.md` records which one we
 # spend and why.
 COMPONENTS: dict[str, dict] = {
+    # The keyboard focus indicator. material-web ships it as its own component
+    # (`md-focus-ring`), with its own published token set — this is that set, not
+    # a value we picked. Two things about it are easy to get wrong from memory:
+    # the ring is drawn in the *secondary* role (not primary), and it does not
+    # appear at its resting width: it grows to `activeWidth` over the first
+    # quarter of `duration` and settles back to `width` over the remaining three
+    # quarters, on the emphasized curve (`focus/internal/_focus-ring.scss`).
+    #
+    # We spend the outward variant only. material-web also publishes an inward
+    # variant (`inward-offset`, for hosts that would clip an outside ring); no
+    # surface in the cockpit clips its focus ring, so a second offset would be a
+    # token nothing reads — see `docs/theming.md`.
+    "focusRing": {
+        "_source": (
+            "material-web tokens/_md-comp-focus-ring.scss (design system v0_192): "
+            "width 3px, active-width 8px, color = md-sys-color.secondary, "
+            "outward-offset 2px, duration = md-sys-motion.duration-long4, "
+            "shape = corner-full. The grow/shrink choreography is "
+            "focus/internal/_focus-ring.scss (animation-duration "
+            "calc(duration * 0.25) then calc(duration * 0.75), "
+            "animation-timing-function = easing-emphasized). androidx publishes "
+            "no focus-indicator token file in "
+            "compose/material3/material3/src/commonMain/kotlin/androidx/compose/"
+            "material3/tokens (checked 2026-09-11, 120 files, none matching "
+            "Focus|Indicator), so material-web is the only first-hand source for "
+            "this layer."
+        ),
+        "width": 3,
+        "activeWidth": 8,
+        "color": "@role:secondary",
+        "outwardOffset": 2,
+        "duration": "@dur:long4",
+        "easing": "@ease:emphasized",
+    },
     "button": {
         "_source": (
             "androidx tokens: BaselineButtonTokens.kt, ButtonSmallTokens.kt, "
@@ -1342,24 +1376,29 @@ def spring_curve(damping: float, stiffness: float) -> tuple[str, int]:
 
 # A component token never restates a value that already has an owner: it points
 # at one. `@shape:full` is the shape scale, `@role:on-primary` an official colour
-# role, `@type:label-large` a type role, `@elev:level3` an elevation level and
-# `@spring:expressive-fast-spatial` one of the M3E springs. The resolver below
-# *rewrites* the reference to the value it names and records a problem for
-# anything that does not resolve, so renaming a rung cannot leave a component
-# quietly pointing at nothing (which is how `shape.pill` went missing once).
-_REFERENCE_RE = re.compile(r"^@(shape|corner|type|elev|role|spring):([A-Za-z0-9-]+)$")
+# role, `@type:label-large` a type role, `@elev:level3` an elevation level,
+# `@spring:expressive-fast-spatial` one of the M3E springs, and `@dur:long4` /
+# `@ease:emphasized` a motion duration or curve. The resolver below *rewrites*
+# the reference to the value it names and records a problem for anything that
+# does not resolve, so renaming a rung cannot leave a component quietly pointing
+# at nothing (which is how `shape.pill` went missing once).
+_REFERENCE_RE = re.compile(
+    r"^@(shape|corner|type|elev|role|spring|dur|ease):([A-Za-z0-9-]+)$"
+)
 
 
 def _reference_target(kind: str, name: str) -> tuple[object, str | None]:
     """The value a `@kind:name` reference resolves to, or why it cannot.
 
-    Only `shape` resolves to a bare number (a radius in px). The other four keep
-    their kind as a prefix — `role:on-primary`, `type:label-large`,
-    `elev:level3`, `spring:expressive-fast-spatial` — because the frontend has to
-    treat them differently (a role becomes `var(--ah-<role>)`, a type role becomes
-    four `var(--ah-type-<role>-{size,line,tracking,weight})` references, an
-    elevation a shadow, a spring a duration/easing pair). Tagging them makes that
-    switch mechanical instead of a guess, and keeps the committed JSON readable.
+    Only `shape` resolves to a bare number (a radius in px). The rest keep their
+    kind as a prefix — `role:on-primary`, `type:label-large`, `elev:level3`,
+    `spring:expressive-fast-spatial`, `dur:long4`, `ease:emphasized` — because the
+    frontend has to treat them differently (a role becomes `var(--ah-<role>)`, a
+    type role becomes four `var(--ah-type-<role>-{size,line,tracking,weight})`
+    references, an elevation a shadow, a spring a duration/easing pair, a bare
+    duration or curve the matching `--ah-motion-*` property). Tagging them makes
+    that switch mechanical instead of a guess, and keeps the committed JSON
+    readable.
     """
     if kind == "shape":
         if name not in SHAPE:
@@ -1383,6 +1422,16 @@ def _reference_target(kind: str, name: str) -> tuple[object, str | None]:
         if name not in M3_ROLE_REFS["dark"]:
             return None, f"unknown M3 colour role {name!r}"
         return f"role:{name}", None
+    if kind == "dur":
+        if name not in MOTION_DURATIONS:
+            return None, (
+                f"unknown motion duration {name!r}; known: {sorted(MOTION_DURATIONS)}"
+            )
+        return f"dur:{name}", None
+    if kind == "ease":
+        if name not in MOTION_EASINGS:
+            return None, f"unknown easing {name!r}; known: {sorted(MOTION_EASINGS)}"
+        return f"ease:{name}", None
     if name not in SPRINGS:
         return None, f"unknown spring {name!r}; known: {sorted(SPRINGS)}"
     return f"spring:{name}", None

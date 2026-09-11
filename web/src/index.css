@@ -485,14 +485,74 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Keyboard focus must be visible on both themes — M3 pairs a focus indicator
-   with the 12% focus layer, it does not replace it. */
-:focus-visible {
-  outline: 2px solid var(--ah-accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+/* Keyboard focus is material-web's focus ring, not one we drew by eye: 3px of
+   `secondary` at a 2px outward offset, which grows to 8px over the first quarter
+   of `duration-long4` and settles back over the remaining three quarters on the
+   emphasized curve (`focus/internal/_focus-ring.scss`). M3 pairs the ring with
+   the 12% focus layer and does not replace it, so both are here.
+
+   The ring is an `outline` rather than a second `box-shadow`. An outline never
+   affects layout, and it composes with whatever shadow the host already has —
+   material-web draws its ring as a sibling element for the same reason. The one
+   thing `outline` cannot do is grow the corner radius by the outward offset the
+   way the official `calc($end-end + $outward-offset)` does; it follows the host
+   radius exactly. That 2px delta is in `docs/theming.md` rather than hidden.
+
+   Two things here are corrections, and both were measured before they were
+   changed:
+
+   1. No `border-radius`. The first version set `border-radius: 4px` on any
+      focused element, which squared the slider handle's circular ring and
+      squircle-d the radius of three other targets (`.ah-searchbar__input`,
+      `.ant-select-input` ×2) from 0 to 4.
+   2. The `:not(:disabled)` arms. antd's own
+      `:where(.hash).ant-btn:not(:disabled):focus-visible` is (0,3,0) and paints
+      a 3px outline in `--ant-color-primary-border` — a colour its algorithm
+      derives, so `rgb(194, 189, 201)` in *both* themes. It won on 17 of the 49
+      focusable elements the app sweep touches. Matching its specificity here
+      (three pseudo-classes) and sitting later in the document is what makes the
+      official ring the only one on screen; `scripts/audit_component_rules.py
+      --focus` fails if a new antd family arrives without an arm.
+
+   3. The last arm. A Select's focusable node is its inner input, but its visible
+      box is the element around it: antd sets `outline: none` on that input (so
+      the ring was never drawn) and the input measures 132x30 inside a 176x50
+      chip, so its inset layer reads as a pill inside a pill. `:has()` moves both
+      the ring and the layer to the box the reader sees, and stays keyboard-only,
+      because a mouse click focuses the input without matching `:focus-visible`. */
+:focus-visible,
+.ant-btn:focus-visible:not(:disabled),
+.ant-switch:focus-visible:not(:disabled),
+.ant-segmented:focus-visible:not(:disabled),
+.ant-slider-handle:focus-visible:not(:disabled),
+.ant-select.ah-select-chip:has(:focus-visible) {
+  outline: var(--ah-c-focus-ring-width) solid var(--ah-c-focus-ring-color);
+  outline-offset: var(--ah-c-focus-ring-outward-offset);
+  animation-name: ah-focus-grow, ah-focus-shrink;
+  animation-duration: calc(var(--ah-c-focus-ring-duration) * 0.25),
+    calc(var(--ah-c-focus-ring-duration) * 0.75);
+  animation-delay: 0s, calc(var(--ah-c-focus-ring-duration) * 0.25);
+  animation-timing-function: var(--ah-c-focus-ring-easing);
   box-shadow: inset 0 0 0 9999px
     color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-focus), transparent);
+}
+
+@keyframes ah-focus-grow {
+  from {
+    outline-width: 0;
+  }
+  to {
+    outline-width: var(--ah-c-focus-ring-active-width);
+  }
+}
+
+/* No `to`: the official shrink animates back to the element's own outline-width,
+   which is the ring's resting width. Keeping the keyframe open is what makes this
+   the published choreography rather than a second guess at the same number. */
+@keyframes ah-focus-shrink {
+  from {
+    outline-width: var(--ah-c-focus-ring-active-width);
+  }
 }
 
 /* View switch + list stagger. */
