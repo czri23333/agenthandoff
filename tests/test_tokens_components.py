@@ -261,6 +261,10 @@ def test_tooltip_badge_divider_and_snackbar_are_googles():
 def test_layout_structures_are_googles_heights():
     assert C["appBar"]["small"]["height"] == 64
     assert C["appBar"]["medium"]["height"] == 112
+    # The tab indicator's corner is 3dp, a bespoke value rather than a shape step
+    # — referring it to the scale rounded it to 4 and no gate could tell.
+    assert C["primaryTab"]["indicator"]["height"] == 3
+    assert C["primaryTab"]["indicator"]["shape"] == 3
     assert C["navigationBar"]["height"] == 64
     assert C["navigationBar"]["tallHeight"] == 80
     assert C["navigationBar"]["indicator"]["height"] == 40

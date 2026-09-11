@@ -836,7 +836,13 @@ COMPONENTS: dict[str, dict] = {
         ),
         "height": 48,
         "iconHeight": 64,
-        "indicator": {"height": 3, "shape": "@shape:xs", "color": "@role:primary"},
+        # 3dp, and *not* on the shape scale: `PrimaryNavigationTabTokens
+        # .ActiveIndicatorShape` is `RoundedCornerShape(3.0.dp)`, a bespoke value
+        # that happens to match the indicator's own height. Referring it to
+        # `@shape:xs` rounded it to 4 and every gate passed, because the
+        # reference resolved — the computed radius on the rendered page is what
+        # exposed it.
+        "indicator": {"height": 3, "shape": 3, "color": "@role:primary"},
         "container": "@role:surface",
         "elevation": "@elev:level0",
         "icon": 24,
