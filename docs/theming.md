@@ -130,6 +130,15 @@ former is checkable against Google's spec.
 values honest; nothing asserts the *absence* of `brightness()` any more, because
 there is nothing left to find — the layer is the only mechanism in the stylesheet.
 
+Hover was swept separately for the same reason the focus ring was: if antd can
+out-specify our layer on `:focus-visible`, it can on `:hover`. With a real pointer
+over every button, link, row, tab, chip and select-chip on five routes in both
+themes, **0 elements change `background-color` on hover** — the 8% layer is the
+only hover mechanism on screen — and the components that publish a press morph do
+morph (an icon button measured mid-flight at 47.96px between its full corner and
+its pressed corner). That sweep is a probe rather than a gate: its pressed-layer
+match is a substring test, so it is reported as evidence and not as a check.
+
 ## Keyboard focus (M3)
 
 M3 publishes the focus indicator as a component of its own — material-web ships
