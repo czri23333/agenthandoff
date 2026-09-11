@@ -1214,6 +1214,21 @@ def base_palette(theme: str) -> dict[str, str]:
 TEXT_PAIR_MIN = 4.5
 GRAPHIC_MIN = 3.0
 
+# Starting points offered in the header menu's colour section. **Ours**: M3
+# publishes no seed list — a seed is an input to Google's derivation, not a token
+# with a published value — so this is a product choice, recorded here (and in
+# `tokens.json`, where the contrast gate can see it) rather than typed into a
+# component as a literal. `baseline` is not a seed at all; it is the shipped
+# palette, and clearing the seed is how a reader gets back to it.
+SEEDS: list[dict[str, str]] = [
+    {"id": "baseline", "hex": "", "label": "default palette (M3 baseline)"},
+    {"id": "purple", "hex": "#6750a4", "label": "M3 purple"},
+    {"id": "teal", "hex": "#006a6a", "label": "teal"},
+    {"id": "terracotta", "hex": "#8f4c38", "label": "terracotta"},
+    {"id": "olive", "hex": "#3f6212", "label": "olive"},
+    {"id": "rose", "hex": "#7d5260", "label": "rose"},
+]
+
 
 # -- colour maths -------------------------------------------------------------
 def rgb(hexcolor: str) -> tuple[float, float, float]:
@@ -1778,6 +1793,7 @@ def build() -> tuple[dict, list[str]]:
         },
         "contrast": {"text": TEXT_PAIR_MIN, "graphic": GRAPHIC_MIN},
         "cli": ids,
+        "seeds": SEEDS,
         "themes": themes,
     }
     return tokens, problems

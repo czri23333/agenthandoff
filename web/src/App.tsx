@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Dropdown, Layout, Tooltip, Typography } from "antd";
+import { App as AntApp, Dropdown, Layout, Tooltip, Typography } from "antd";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
-import { setThemeMode, useTheme, type ThemeMode } from "./theme";
+import { getSeed, seeds, setSeed, setThemeMode, useTheme, type ThemeMode } from "./theme";
 import Dashboard from "./views/Dashboard";
 // Route-split (§4-2): the 1.4MB bundle was every view up front. Dashboard
 // stays in the entry chunk; the rest load on first visit with a fallback
@@ -51,6 +51,7 @@ function toHash(v: View): string {
 export default function App() {
   const t = useT();
   const { mode } = useTheme();
+  const { message } = AntApp.useApp();
   const [view, setView] = useState<View>(parseHash);
   const [lang, setLangState] = useState<Lang>(getLang);
   const navDepth = useRef(0);
@@ -222,8 +223,25 @@ export default function App() {
           trigger={["click"]}
           placement="bottomRight"
           menu={{
-            selectedKeys: [`theme:${mode}`, `lang:${lang}`],
+            selectedKeys: [`theme:${mode}`, `seed:${getSeed() ?? "baseline"}`, `lang:${lang}`],
             onClick: ({ key }) => {
+              if (key.startsWith("seed:")) {
+                // The menu carries the seed's *id*; the hex comes from the token
+                // file, so a preset cannot drift between the two places.
+                const id = key.slice("seed:".length);
+                const chosen = seeds.find((seed) => seed.id === id);
+                const value = chosen?.hex || null;
+                // `null` restores the hand-authored baseline; anything else is a
+                // seed Google's dynamic-colour maths derives the roles from. The
+                // verdict is shown when a seed fails the AA gate the baseline is
+                // held to, rather than applied and quietly made unreadable.
+                void setSeed(value).then((verdict) => {
+                  if (!verdict.ok) {
+                    message.warning(`${t("seedRejected")} ${verdict.detail}`);
+                  }
+                });
+                return;
+              }
               const [group, value] = key.split(":");
               if (group === "theme") setThemeMode(value as ThemeMode);
               else setLang(value as Lang);
@@ -232,6 +250,14 @@ export default function App() {
               { key: "theme:auto", label: t("themeAuto") },
               { key: "theme:dark", label: t("themeDark") },
               { key: "theme:light", label: t("themeLight") },
+              { type: "divider" },
+              // From `tokens.json`: a seed is an input to Google's derivation, and
+              // the repo's rule is that a colour with no owner does not appear in
+              // a component — not even as a starting point.
+              ...seeds.map((seed) => ({
+                key: `seed:${seed.id}`,
+                label: seed.id === "baseline" ? t("seedBaseline") : seed.label,
+              })),
               { type: "divider" },
               { key: "lang:zh", label: "中文" },
               { key: "lang:en", label: "EN" },

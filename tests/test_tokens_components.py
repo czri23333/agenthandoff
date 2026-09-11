@@ -877,9 +877,14 @@ def test_the_disabled_gate_reads_its_expectation_from_the_token_file():
     module.loader.exec_module(audit)
 
     # The expectation comes from `tokens.json`, not from a constant in the tool.
-    published = audit.load_disabled_opacities()
-    assert published[".ant-checkbox"] == pytest.approx(0.38)
-    assert published[".ant-radio"] == pytest.approx(0.38)
+    published = audit.load_disabled_expectations()
+    assert published[".ant-checkbox"]["element"] == pytest.approx(0.38)
+    assert published[".ant-radio"]["element"] == pytest.approx(0.38)
+    # The families that publish *parts* instead of a whole-element fade.
+    assert published[".ah-field"]["container"] == pytest.approx(0.04)
+    assert published[".ah-field"]["outline"] == pytest.approx(0.12)
+    assert published[".ant-switch"]["container"] == pytest.approx(0.12)
+    assert published[".ah-fab"]["container"] == pytest.approx(0.12)  # generic pair
 
     def row(**kw):
         base = {

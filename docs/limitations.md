@@ -166,6 +166,22 @@ sampled away.
     model. The two live ones are covered incidentally by the focus and overlap
     sweeps, which walk the session-detail route.
 
+19. **A custom seed has never been refused, and the wall paper is unreadable.**
+    The dynamic-colour palette follows whatever seed is stored
+    (`localStorage["ah-seed"]`), derived by Google's library in the 2021 spec. Two
+    honest limits: the AA gate on that seed has accepted **every** value tried
+    (ten seeds, 5.23:1–5.30:1, because the tonal scheme pins tones) — it is
+    insurance, not a filter, and its reject path was only ever exercised by
+    mutating the threshold; and a browser cannot read the device's wallpaper or
+    system accent, so "follow the device" means light/dark only
+    (`prefers-color-scheme`). The generated palette is also a *different
+    construction* from the shipped baseline — same spec, same roles, but the
+    baseline is a published artefact while a seed is derived — so the two are not
+    expected to coincide, and a seed set to the baseline's own primary does not
+    reproduce the baseline. One browser, one spec version (2025-spec output from
+    the same library was measured at 20–25 differing roles and is not what this
+    ships).
+
 ## How to check any of this yourself
 
 ```bash

@@ -1853,6 +1853,17 @@
   font-weight: var(--ah-c-text-field-supporting-type-role-weight);
 }
 
+/* antd's disabled container is 8% white on dark and 4% black on light; the
+   published filled text field is `on-surface` at 4% in both palettes. Measured
+   by `--disabled` on the gallery, which mounts antd's Input even though the
+   cockpit uses our own `.ah-field` — so this is the rule the family needs, and
+   the rule anyone reaching for `<Input>` later will get. */
+:root .ant-input-disabled,
+:root .ant-input[disabled] {
+  background: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-text-field-disabled-container), transparent);
+  color: color-mix(in srgb, var(--ah-on-surface) var(--ah-c-text-field-disabled-content), transparent);
+}
+
 .ah-field--error .ah-field__input {
   color: var(--ah-c-text-field-error-content);
 }

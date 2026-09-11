@@ -42,7 +42,7 @@ re-derive every judgement.
 | Official | Ours | Why |
 |---|---|---|
 | Roboto (`md-ref-typeface` plain/brand) | the system stack | local-first: no webfont means no network at startup and no FOUT |
-| HCT palette generation from a seed | hand-authored sRGB, AA-gated | generating roles would re-brand every colour; the palette is a product decision, not a derivation |
+| HCT palette generation from a seed | the *shipped* palette is hand-authored sRGB and AA-gated; a **user** seed is derived at runtime by Google's own library | generating the default would re-brand every colour, and the baseline is a published artefact rather than one seed's output — `#6750a4` is the baseline's *primary*, not its seed. So the default stays authored and the derivation is opt-in, per reader, in the 2021 spec the baseline was published under |
 | native springs (Compose `SpringSpec`) | `linear()` sampling of the official damping/stiffness pair, `cubic-bezier` fallback | CSS has no spring primitive; the sampling is deterministic and regenerates with the tokens |
 | white elevation *overlay* on dark surfaces | the MDC-Web black shadow in both themes | that is what material-web compiles to CSS for the web; our dark surfaces already step lighter (surface0→2), which serves the same purpose |
 | tracking applies to every role | CJK-authored prose keeps `letter-spacing: normal` | tracking is a Latin typography device; the roles' numbers are sub-pixel Latin optimisations |
@@ -640,6 +640,61 @@ token and `test_every_supported_cli_has_an_identity` tells you.
   the page never flashes the wrong background.
 - `color-scheme` is set per theme, so native scrollbars, form controls and
   date pickers follow without extra CSS.
+
+### Following the device, and a custom seed
+
+**What "follow the device" can mean on the web.** The platform exposes a
+light/dark *preference* (`prefers-color-scheme`) and nothing more — the wallpaper
+colour that Android's Material You derives a palette from is not exposed to a
+browser, so a web cockpit cannot read it. What it can do, and does:
+
+* a fresh profile with no stored key resolves to `auto` and follows the OS —
+  measured under emulated system schemes: `dark` → primary `#d0bcff`, `light` →
+  `#6750a4`, `data-theme-mode="auto"` in both;
+* flipping the OS scheme **while the page is open** re-themes it without a
+  reload (`matchMedia(...).addEventListener("change")` calls `applyTheme` when
+  the stored mode is `auto`), and the stored key stays absent — the reader never
+  has to choose;
+* a stored `dark`/`light` still wins, because a deliberate choice outranks the
+  environment.
+
+**A custom seed, derived by Google's own maths.** The header menu's colour
+section sets a seed (`localStorage["ah-seed"]`), and the palette is generated at
+runtime by `@material/material-color-utilities` — the HCT tonal-palette machinery
+Material You itself uses — through `SchemeTonalSpot` at the **2021 spec**, the
+spec the shipped baseline was published under. All **49** published roles come
+out of it, then the cockpit's own aliases (`--ah-accent`, `--ah-text-1`,
+`--ah-surface-*`, …) are resolved exactly as `gen_tokens.py` resolves them at
+generation time. Measured: seed `#006a6a` gives light `primary #006a6a`,
+`surface #f4fbfa` and dark `primary #80d5d4`, `surface #0e1514`, with `auto` still
+switching between the two when the OS flips.
+
+Three things a seed deliberately cannot change: the `ok`/`warn` pair and their
+containers (M3 publishes no success or warning role, so they stay ours and
+AA-solved against the baseline surfaces), the CLI identity inks (an identity is
+a name, not a hue — re-deriving them would make `zcode` stop looking like
+`zcode`), and anything measured in px.
+
+**The AA gate, and its honest limit.** A seed is held to the same 4.5:1 check the
+hand-authored palette is (`seedContrastReport`, the same alias pairs
+`tests/test_tokens_contrast.py` checks), and a seed that fails is refused —
+proven by mutation, not by reading: raising the threshold to 10.0 made the menu
+report `这个种子会产生不可读的配色… light accent/surface-2 = 5.23:1`, leave
+`ah-seed` unset and keep the baseline palette on screen. In practice **no seed
+has ever been refused**: ten seeds from `#6750a4` to `#00ff00` all land between
+**5.23:1 and 5.30:1**, because `SchemeTonalSpot` pins each role to a fixed tone
+and HCT keeps luminance nearly constant across hues. The gate is therefore
+insurance against a future spec change or a future bug, not a filter that fires —
+and saying so is more useful than implying it protects against user error.
+
+**It is not in the entry bundle.** The library is 107 KB minified; importing it
+eagerly added **96.4 KB** to the entry chunk (757.0 KB → 853.4 KB, measured).
+It is behind a dynamic `import()` instead: the entry carries only the plumbing
+(778.6 KB), the library arrives as its own 129.7 KB chunk, and a probe with no
+stored seed measures **0** module chunks fetched while a stored seed makes the
+palette the generated one. The first paint after a cold load with a seed shows
+the baseline for one frame, which is a complete legible palette, and then the
+generated one.
 
 ## Adding a colour
 

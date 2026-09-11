@@ -1,5 +1,9 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { theme as antdAlgorithms, type ConfigProviderProps } from "antd";
+// Google's own dynamic-colour implementation: the tonal-palette + HCT maths that
+// turns one seed into the published role set. Imported at runtime (not at
+// generation time) because a *user* seed cannot be known when `tokens.json` is
+// built — see `customSeed()` below.
 import tokensJson from "./tokens.json";
 
 /**
@@ -177,6 +181,7 @@ const TOKENS = tokensJson as unknown as {
   typescale: TypescaleTokens;
   component: ComponentTokens;
   motion: MotionTokens;
+  seeds: { id: string; hex: string; label: string }[];
 };
 const KEY = "ah-theme";
 const STYLE_ID = "ah-tokens";
@@ -186,6 +191,9 @@ export const palettes = TOKENS.themes;
 export const cliIds = TOKENS.cli;
 export const shape = TOKENS.shape;
 export const motion = TOKENS.motion;
+/** The colour starting points the menu offers, owned by `tokens.json` so a seed
+ *  is data with a source rather than a hex typed into a component. */
+export const seeds = TOKENS.seeds;
 /** Named duration, e.g. `dur("short3")` → `150ms`. Unknown names do not compile. */
 export function dur(name: DurationName): string {
   return motion.duration[name];
@@ -361,6 +369,212 @@ function cliRules(name: Effective): string {
     .join("");
 }
 
+/* -- custom seed ------------------------------------------------------------
+ *
+ * The shipped palette is the published M3 *baseline*: hand-authored, WCAG-gated,
+ * and not the output of a generator — `#6750a4` is its primary, it is not its
+ * seed. A reader who wants their own colour gets Google's derivation instead:
+ * one seed in, the full 49-role set out, per palette, through the same
+ * tonal-palette maths Android's Material You uses (`SchemeTonalSpot` at the 2021
+ * spec, which is the spec the baseline was published under).
+ *
+ * Three things this deliberately does *not* touch:
+ *   * `ok` / `warn` and their containers — M3 publishes no success or warning
+ *     role, so they stay ours, AA-solved against the baseline surfaces;
+ *   * the CLI identity inks — an identity is a name, not a hue, and re-deriving
+ *     them from a seed would make `zcode` stop looking like `zcode`;
+ *   * anything measured in px, because a seed is a colour.
+ */
+const SEED_KEY = "ah-seed";
+/** The baseline was published under the 2021 spec; deriving in the same one
+ *  keeps a custom seed the same distance from the design system as the default. */
+const SEED_SPEC = "2021";
+
+/**
+ * Google's dynamic-colour library is **not** in the entry chunk: it is 107 KB
+ * minified, it is only needed when a seed is stored, and most readers never set
+ * one. Measured on this build: importing it eagerly added **96.4 KB** to the
+ * entry bundle (757.0 KB → 853.4 KB); loaded on demand it costs nothing until the
+ * first seed and then arrives as its own chunk.
+ */
+type SeedLib = typeof import("@material/material-color-utilities");
+let seedLib: SeedLib | null = null;
+let seedLibPromise: Promise<SeedLib> | null = null;
+
+function loadSeedLib(): Promise<SeedLib> {
+  seedLibPromise ??= import("@material/material-color-utilities").then((mod) => {
+    seedLib = mod;
+    if (getSeed() && !seedBlocked) {
+      // First seed in this session: the stylesheet was written without the
+      // generated block, so rebuild it now that the maths is here.
+      injectStyles();
+      listeners.forEach((fn) => fn());
+    }
+    return mod;
+  });
+  return seedLibPromise;
+}
+
+/** Set when a stored seed fails the AA gate on boot, so the load handler above
+ *  does not apply a palette this runtime has already refused. */
+let seedBlocked = false;
+
+/** The cockpit's own names → the roles they resolve through. Mirrors
+ *  `SEMANTIC_FROM_ROLES` in `scripts/gen_tokens.py`; the four ours-only colours
+ *  are absent on purpose so a seed cannot re-tint them. */
+const SEED_ALIASES: Record<string, string> = {
+  "surface-0": "surface",
+  "surface-1": "surface-container-low",
+  "surface-2": "surface-container-high",
+  line: "outline-variant",
+  "line-strong": "outline",
+  "text-1": "on-surface",
+  "text-2": "on-surface-variant",
+  "text-3": "on-surface-variant",
+  accent: "primary",
+  "accent-container": "primary-container",
+  err: "error",
+  "err-container": "error-container",
+  "code-bg": "surface-container-lowest",
+};
+
+const ROLE_METHODS = Object.keys(TOKENS.colorRoles.roles.light).reduce<
+  Record<string, string>
+>((acc, role) => {
+  acc[role] = role.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+  return acc;
+}, {});
+
+export function getSeed(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(SEED_KEY);
+  if (!raw || !/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
+  return raw.toLowerCase();
+}
+
+/** The roles a seed generates for one palette, as `--ah-role: #hex` pairs. */
+export function seededRoles(seed: string, dark: boolean): Record<string, string> {
+  if (!seedLib) return {};
+  const { Hct, MaterialDynamicColors, SchemeTonalSpot, argbFromHex, hexFromArgb } = seedLib;
+  const scheme = new SchemeTonalSpot(Hct.fromInt(argbFromHex(seed)), dark, 0, SEED_SPEC);
+  const out: Record<string, string> = {};
+  // `MaterialDynamicColors` declares one method per role *and* a few helpers that
+  // are not roles (`allDynamicColors` returns an array), so the lookup is typed
+  // as a factory rather than indexed off the class type directly.
+  const factories = new MaterialDynamicColors() as unknown as Record<
+    string,
+    () => { getArgb(s: InstanceType<typeof SchemeTonalSpot>): number }
+  >;
+  for (const [role, method] of Object.entries(ROLE_METHODS)) {
+    const argb = factories[method]?.()?.getArgb(scheme);
+    if (typeof argb === "number") out[role] = hexFromArgb(argb).toLowerCase();
+  }
+  return out;
+}
+
+/** WCAG relative-luminance ratio, so a seed is held to the same AA gate the
+ *  hand-authored palette is (`tests/test_tokens_contrast.py`). */
+export function contrast(a: string, b: string): number {
+  const lum = (hex: string): number => {
+    const channels = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const linear = channels.map((c) =>
+      c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Every pair the baseline gate checks, against a generated palette. */
+export function seedContrastReport(seed: string): { worst: number; detail: string } {
+  let worst = Infinity;
+  let detail = "";
+  for (const dark of [false, true]) {
+    const roles = seededRoles(seed, dark);
+    const alias = (name: string) => roles[SEED_ALIASES[name]] ?? "";
+    const pairs: [string, string, string][] = [];
+    for (const surface of ["surface-0", "surface-1", "surface-2"]) {
+      for (const tier of ["text-1", "text-2", "text-3"]) {
+        pairs.push([`${tier}/${surface}`, alias(tier), alias(surface)]);
+      }
+      pairs.push([`accent/${surface}`, alias("accent"), alias(surface)]);
+      pairs.push([`err/${surface}`, alias("err"), alias(surface)]);
+    }
+    pairs.push(["text-1/accent-container", alias("text-1"), alias("accent-container")]);
+    pairs.push(["text-1/err-container", alias("text-1"), alias("err-container")]);
+    for (const [name, fg, bg] of pairs) {
+      if (!fg || !bg) continue;
+      const ratio = contrast(fg, bg);
+      if (ratio < worst) {
+        worst = ratio;
+        detail = `${dark ? "dark" : "light"} ${name} = ${ratio.toFixed(2)}:1`;
+      }
+    }
+  }
+  return { worst, detail };
+}
+
+/** Apply a seed, or clear it with `null`. Returns the AA verdict so the caller
+ *  can refuse a seed rather than ship a palette the design system would not. */
+export async function setSeed(seed: string | null): Promise<{ ok: boolean; detail: string }> {
+  if (seed === null) {
+    seedBlocked = false;
+    localStorage.removeItem(SEED_KEY);
+    applyTheme();
+    listeners.forEach((fn) => fn());
+    window.dispatchEvent(new Event("ah-theme-change"));
+    return { ok: true, detail: "baseline" };
+  }
+  await loadSeedLib();
+  const report = seedContrastReport(seed);
+  if (report.worst < 4.5) {
+    // The stored value is left alone *and* not applied: a refused seed must not
+    // half-exist in localStorage waiting for the next boot to honour it.
+    seedBlocked = true;
+    return { ok: false, detail: report.detail };
+  }
+  seedBlocked = false;
+  localStorage.setItem(SEED_KEY, seed.toLowerCase());
+  applyTheme();
+  listeners.forEach((fn) => fn());
+  window.dispatchEvent(new Event("ah-theme-change"));
+  return { ok: true, detail: report.detail };
+}
+
+/** The override block: every generated role, then the cockpit's aliases. Appended
+ *  after the generated palettes so it wins on source order without specificity
+ *  games, and only when a seed is stored. */
+function seedRule(): string {
+  const seed = getSeed();
+  if (!seed) return "";
+  if (!seedLib) {
+    // No maths yet: load it, then rebuild the stylesheet. Until then the page
+    // shows the baseline palette, which is a complete, legible palette — the
+    // alternative is 96 KB on every reader's first paint.
+    void loadSeedLib();
+    return "";
+  }
+  // The stored seed is re-checked here rather than in `getSeed()` because the
+  // check needs the library: a hand-edited or stale value is held to the same
+  // gate a click is held to, and a failure falls back to the baseline.
+  if (seedContrastReport(seed).worst < 4.5) {
+    seedBlocked = true;
+    return "";
+  }
+  seedBlocked = false;
+  let out = "";
+  for (const [name, dark] of [["light", false], ["dark", true]] as const) {
+    const roles = seededRoles(seed, dark);
+    const vars = Object.entries(roles).map(([role, hex]) => `--ah-${role}:${hex};`);
+    for (const [alias, role] of Object.entries(SEED_ALIASES)) {
+      if (roles[role]) vars.push(`--ah-${alias}:${roles[role]};`);
+    }
+    out += `:root[data-theme="${name}"]{${vars.join("")}}`;
+  }
+  return out;
+}
+
 function injectStyles(): void {
   if (typeof document === "undefined") return;
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
@@ -373,6 +587,7 @@ function injectStyles(): void {
     `:root{${contractVars()}}` +
     `:root[data-theme="dark"]{${cssVars(palettes.dark)}}` +
     `:root[data-theme="light"]{${cssVars(palettes.light)}}` +
+    seedRule() +
     cliRules("dark") +
     cliRules("light");
 }

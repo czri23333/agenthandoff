@@ -219,6 +219,8 @@ const dict = {
     themeAuto: "跟随系统",
     themeDark: "夜间",
     themeLight: "日间",
+    seedBaseline: "默认配色（M3 baseline）",
+    seedRejected: "这个种子会产生不可读的配色，已保留原配色：",
     themeToggleHint: "切换主题（T）· 配色已按 WCAG AA 校验",
     displaySettings: "显示设置（主题 / 语言）",
     /* interruption states -------------------------------------------------- */
@@ -448,6 +450,8 @@ const dict = {
     themeAuto: "system",
     themeDark: "dark",
     themeLight: "light",
+    seedBaseline: "default palette (M3 baseline)",
+    seedRejected: "that seed would not be readable, so the palette is unchanged:",
     themeToggleHint: "cycle theme (T) · every pair is WCAG-AA verified",
     displaySettings: "display settings (theme / language)",
     /* interruption states -------------------------------------------------- */

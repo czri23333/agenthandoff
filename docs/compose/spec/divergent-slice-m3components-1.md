@@ -38,6 +38,8 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | token consumption, at runtime | injected `446` = referenced `446`, **0** read-but-never-injected, **0** injected-but-never-read |
 | rule reachability, at runtime | of 302 rules that read a component token, **247 match an element** in a gallery mounting every antd family and every `.ah-*` class, **0 unverified** — the dot Badge, vertical Divider and `type="link"` Button that used to sit in the "knowingly not mounted" list are mounted now, and so is a disabled variant of every family with disabled tokens. The rest are `:hover`/`:active`/`:disabled`/`:focus-*` or animation-only. Before the review's finding: 34 matched |
 | disabled states, gated | `--disabled` checks 18 gallery variants: none fades itself, none takes focus, none answers the pointer. The expected opacity comes from `tokens.json` (`checkbox`/`radio` publish `disabled.opacity: 0.38`; switch, field, segmented and slider publish per-part opacities and must stay at 1). It found a disabled FAB and a disabled filter chip falling through to `button:disabled { opacity: 0.38 }`, which fades container, content and the FAB's elevation together. Mutation proof: renaming both new rules made it report `opacity 0.38, want 1.00` for each |
+| device colour scheme | a fresh profile resolves to `auto` and follows the emulated OS scheme (`dark` → primary `#d0bcff`, `light` → `#6750a4`); flipping the OS scheme **while the page is open** re-themes without a reload and without writing a stored key; a stored `dark`/`light` still wins. Browsers expose no wallpaper/accent colour, so this is the whole of "follow the device" on the web |
+| custom seed | seed `#006a6a` → light `primary #006a6a` / `surface #f4fbfa`, dark `primary #80d5d4` / `surface #0e1514`, generated at runtime by `@material/material-color-utilities` (`SchemeTonalSpot`, 2021 spec) for all 49 roles plus the cockpit's aliases; survives a reload; composes with `auto` (the OS flip still switches palettes). Lazy: with no stored seed **0** module chunks are fetched, and the library is a 129.7 KB chunk instead of +96.4 KB on the entry. AA gate: refused a seed only under a mutated 10.0 threshold (`light accent/surface-2 = 5.23:1`, seed not stored, palette unchanged) — every real seed tried passes at 5.23–5.30:1 |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
@@ -220,6 +222,22 @@ by a look:
     them: a baseline read before the entry animation settled, and a `.ah-select-chip`
     click that landed on a newly-mounted *disabled* select and turned a live rule
     into a phantom dead one.
+12. **Following the device, and a colour of your own.** Two questions from the
+    reader, both answered with measurements rather than assurances. *Device*: the
+    platform exposes `prefers-color-scheme` and nothing else — no wallpaper, no
+    system accent — and the `auto` mode already followed it, including a live flip
+    while the page is open (`dark` → `#d0bcff`, `light` → `#6750a4`, no stored key
+    written). *Custom*: a seed in the header menu now derives all 49 roles at
+    runtime through Google's own `@material/material-color-utilities`
+    (`SchemeTonalSpot`, 2021 spec), aliases included, with `ok`/`warn`, the CLI
+    identity inks and every length deliberately untouched. The library is behind a
+    dynamic import because eager loading cost **+96.4 KB** on the entry chunk
+    (measured), and a probe confirms **zero** module chunks are fetched without a
+    seed. A seed is held to the same 4.5:1 gate as the hand-authored palette; ten
+    seeds all pass (5.23–5.30:1, because tones are pinned), so the reject path was
+    proven by mutation instead — raising the threshold to 10.0 made the menu warn,
+    refuse to store the seed and keep the baseline palette. Both limits are in
+    `docs/limitations.md` item 19.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -548,4 +566,8 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       Button; `--disabled` compares each against the opacity its own token
       publishes and found the FAB and filter chip fading themselves; the
       reachability audit drops to 0 unverified (covers: S2; depends: T1)
-
+- [x] T18: Device scheme and custom seed — `auto` verified against emulated system
+      schemes including a live flip with no reload; a seed derives all 49 roles
+      through Google's dynamic-colour library at the 2021 spec, lazily loaded
+      (0 chunks fetched without one), AA-gated on the same pairs as the baseline,
+      with `ok`/`warn` and the CLI inks deliberately untouched (covers: S2)

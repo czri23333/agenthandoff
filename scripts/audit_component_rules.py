@@ -274,13 +274,16 @@ import {
 import { antdConfig, applyTheme } from "../srcwork/theme";
 import "../srcwork/index.css";
 
-const THEME = "dark" as const;
-localStorage.setItem("ah-theme", THEME);
-applyTheme(THEME);
-
 const params = new URLSearchParams(location.search);
 const wantModal = params.has("modal");
 const wantConfirm = params.has("confirm");
+// The gallery used to be dark-only, which meant every computed value the audit
+// read from it was dark-only too — including the disabled opacities, where the
+// light and dark palettes composite different inks. `?theme=light` is the same
+// page against the other palette.
+const THEME = params.get("theme") === "light" ? "light" : "dark";
+localStorage.setItem("ah-theme", THEME);
+applyTheme(THEME);
 
 function Gallery() {
   useEffect(() => {
@@ -992,6 +995,8 @@ DISABLED_SELECTOR = (
 DISABLED_LIMIT = 40
 DISABLED_JS = r"""
 (sel) => {
+  const onSurface = getComputedStyle(document.documentElement)
+    .getPropertyValue("--ah-on-surface").trim();
   const out = [];
   for (const el of document.querySelectorAll(sel)) {
     const cs = getComputedStyle(el);
@@ -1004,12 +1009,14 @@ DISABLED_JS = r"""
       opacity: cs.opacity,
       bg: cs.backgroundColor,
       bd: cs.borderTopColor,
+      bw: cs.borderTopWidth,
+      colour: cs.color,
       sh: cs.boxShadow.slice(0, 90),
       focusable: el.tabIndex >= 0 && !el.disabled,
     });
     if (out.length >= 40) break;
   }
-  return out;
+  return { onSurface, controls: out };
 }
 """
 
@@ -1020,26 +1027,82 @@ DISABLED_JS = r"""
 # segmented and slider publish per-part opacities instead, so their element must
 # stay at 1 and let the parts carry it. Reading the expectation from the token
 # file is what makes this a comparison rather than an opinion.
-DISABLED_ELEMENT_OPACITY_KEYS = {
-    ".ant-checkbox": ("checkbox", "disabled", "opacity"),
-    ".ant-radio": ("radio", "disabled", "opacity"),
+# Which family each control belongs to, so its disabled expectations can be read
+# from the token file instead of being asserted here. Checkbox and radio publish
+# a whole-element `disabled.opacity`; switch and the fields publish per-part
+# opacities; the rest fall back to the generic `state.disabled` pair.
+DISABLED_FAMILIES = {
+    ".ah-btn": "button",
+    ".ant-btn": "button",
+    ".ah-iconbtn": "iconButton",
+    ".ah-mchip": "chip",
+    ".ah-filterchip": "chip",
+    ".ah-fab": None,  # FabTokens publishes no disabled pair
+    ".ah-field": "textField",
+    ".ant-input": "textField",
+    ".ant-switch": "switch",
+    ".ant-segmented": "segmented",
+    ".ant-checkbox": "checkbox",
+    ".ant-radio": "radio",
 }
 DISABLED_OPACITY_TOLERANCE = 0.02
+# How far a disabled composite may sit from the theme's `on-surface` and still be
+# the same neutral. antd's disabled container is white-on-dark and black-on-light,
+# which lands within 32/255 of `on-surface` in both palettes — near-neutral by
+# construction, and nowhere near a hue like primary or error.
+DISABLED_NEUTRAL_DELTA = 32
 
 
-def load_disabled_opacities() -> dict[str, float]:
-    """`class substring -> the element opacity the token file publishes`."""
+def _channel_delta(a: str, b: str) -> int:
+    """The largest per-channel difference between two `#rrggbb` strings."""
+    if len(a) != 7 or len(b) != 7:
+        return 255
+    return max(abs(int(a[i : i + 2], 16) - int(b[i : i + 2], 16)) for i in (1, 3, 5))
+
+
+def load_disabled_expectations() -> dict[str, dict[str, float | None]]:
+    """`class substring -> {element, content, container, outline}` from tokens.json.
+
+    Read, not asserted: the file publishes `disabled.opacity` for checkbox and
+    radio (the whole control at 38%), `disabled.content/container/outline` for the
+    fields, `content-opacity`/`track-opacity` for the switch, and nothing for the
+    FAB — which is why the generic `state.disabled` pair is the fallback rather
+    than a constant in this tool.
+    """
     tokens = json.loads((WEB / "src" / "tokens.json").read_text(encoding="utf-8"))
-    out: dict[str, float] = {}
-    for marker, path in DISABLED_ELEMENT_OPACITY_KEYS.items():
-        node: object = tokens["component"]
-        for part in path:
-            node = node[part]  # type: ignore[index]
-        out[marker] = float(node)
+    component = tokens["component"]
+    generic = tokens["state"]["disabled"]
+
+    def number(value: object) -> float | None:
+        return None if value is None else float(value)  # type: ignore[arg-type]
+
+    out: dict[str, dict[str, float | None]] = {}
+    for marker, family in DISABLED_FAMILIES.items():
+        spec: dict[str, object] = {}
+        if family:
+            spec = dict(component.get(family, {}).get("disabled", {}) or {})
+        out[marker] = {
+            "element": number(spec.get("opacity")),
+            "content": number(
+                spec.get("content")
+                if spec.get("content") is not None
+                else spec.get("content-opacity", generic["content"])
+            ),
+            "container": number(
+                spec.get("container")
+                if spec.get("container") is not None
+                else spec.get("track-opacity", generic["container"])
+            ),
+            "outline": number(
+                spec.get("outline", spec.get("container", generic["container"]))
+            ),
+        }
     return out
 
 
-def disabled_defects(rows: list[dict], element_opacity: dict[str, float]) -> list[str]:
+def disabled_defects(
+    rows: list[dict], expectations: dict[str, dict[str, float | None]]
+) -> list[str]:
     """What a disabled control must not do, as failure lines.
 
     `opacity: 0` is skipped rather than judged: antd's checkbox and radio keep a
@@ -1054,15 +1117,54 @@ def disabled_defects(rows: list[dict], element_opacity: dict[str, float]) -> lis
         if measured == 0 and row.get("tag") == "INPUT":
             continue
         expected = 1.0
-        for marker, value in element_opacity.items():
-            if marker in row["label"]:
-                expected = value
+        spec: dict[str, float | None] = {}
+        for marker, family in expectations.items():
+            if marker.lstrip(".") in row["label"] or marker in row["label"]:
+                expected = family.get("element") or 1.0
+                spec = family
                 break
         if abs(measured - expected) > DISABLED_OPACITY_TOLERANCE:
             out.append(
                 f"{where}: opacity {measured:.2f}, want {expected:.2f} — a blanket "
                 "fade takes the focus ring and every child with it"
             )
+        if spec and expected == 1.0:
+            # The *composed* treatment: every translucent colour the control
+            # paints has to be the theme's `on-surface` at the published opacity.
+            # That is the check the light pass exists for — light's ink is dark
+            # where dark's is light, so a rule can be right in one and wrong in
+            # the other, and comparing only element opacity would never notice.
+            on_surface = row.get("on_surface") or ""
+            rest = row.get("rest") or {}
+            for key, want in (
+                ("color", spec.get("content")),
+                ("bg", spec.get("container")),
+                ("bd", spec.get("outline")),
+            ):
+                if want is None:
+                    continue
+                if key == "bd" and str(rest.get("bw") or "0px") in ("0px", "0"):
+                    # No border: `border-top-color` is just `currentColor`, so
+                    # judging it reports the *content* opacity as a border defect.
+                    continue
+                colour, alpha = _colour_and_alpha(str(rest.get(key) or ""))
+                # Only a *partial* alpha is a composite. `rgba(0, 0, 0, 0)` is
+                # nothing painted (its RGB channels are meaningless), and an
+                # opaque colour is not compositing anything — the first version
+                # called every transparent border `#000000` and reported ten
+                # defects that were its own arithmetic.
+                if colour is None or alpha >= 1 or alpha == 0:
+                    continue
+                if on_surface and _channel_delta(colour, on_surface) > DISABLED_NEUTRAL_DELTA:
+                    out.append(
+                        f"{where}: disabled {key} composites {colour}, which is not "
+                        f"the theme's on-surface {on_surface} (or a neutral within "
+                        f"{DISABLED_NEUTRAL_DELTA})"
+                    )
+                elif abs(alpha - float(want)) > DISABLED_OPACITY_TOLERANCE:
+                    out.append(
+                        f"{where}: disabled {key} is {alpha:.2f}, want {want:.2f}"
+                    )
         if row.get("focusable"):
             out.append(f"{where}: is disabled and can still take focus")
         hover, press, rest = row.get("hover"), row.get("press"), row.get("rest")
@@ -1079,15 +1181,28 @@ def disabled_defects(rows: list[dict], element_opacity: dict[str, float]) -> lis
     return out
 
 
-def run_disabled_sweep(page, url: str) -> dict:
-    """Every disabled control on the gallery page, with and without a pointer."""
-    page.goto(url, wait_until="domcontentloaded")
+def run_disabled_sweep(page, url: str, theme: str = "dark") -> dict:
+    """Every disabled control on the gallery page, with and without a pointer.
+
+    Per palette: the disabled look composites `on-surface`, and light's ink is
+    dark where dark's is light, so a rule can be right in one and wrong in the
+    other. The gallery used to be dark-only and this sweep inherited that.
+    """
+    page.goto(f"{url}?theme={theme}", wait_until="domcontentloaded")
     page.wait_for_timeout(1500)
     found = page.evaluate(DISABLED_JS, DISABLED_SELECTOR)
+    on_surface = found.get("onSurface", "")
+    controls = found.get("controls", [])
     rows: list[dict] = []
-    for index, row in enumerate(found[:DISABLED_LIMIT]):
+    for index, row in enumerate(controls[:DISABLED_LIMIT]):
         handle = page.locator(DISABLED_SELECTOR).nth(index)
-        rest = {"bg": row["bg"], "bd": row["bd"], "sh": row["sh"]}
+        rest = {
+            "bg": row["bg"],
+            "bd": row["bd"],
+            "bw": row["bw"],
+            "sh": row["sh"],
+            "color": row["colour"],
+        }
         hover = press = None
         try:
             box = handle.bounding_box()
@@ -1106,6 +1221,7 @@ def run_disabled_sweep(page, url: str) -> dict:
                             "bg": settled["bg"],
                             "bd": settled["bd"],
                             "sh": settled["sh"],
+                            "color": settled["colour"],
                         }
                     page.mouse.move(
                         box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
@@ -1123,8 +1239,9 @@ def run_disabled_sweep(page, url: str) -> dict:
                 page.mouse.move(5, 5)
         rows.append(
             {
-                "label": f'{row["tag"]}.{row["cls"][:34]}',
+                "label": f'{theme} {row["tag"]}.{row["cls"][:30]}',
                 "tag": row["tag"],
+                "on_surface": on_surface,
                 "opacity": row["opacity"],
                 "focusable": row["focusable"],
                 "rest": rest,
@@ -1760,8 +1877,16 @@ def main() -> int:
                 **({"executable_path": executable} if executable else {}),
             )
             page = browser.new_page(viewport={"width": 1400, "height": 1000})
-            for url, scope in ((base, "interactive"), (base + "?modal=1", "modal"),
-                               (base + "?confirm=1", "confirm")):
+            # Both palettes: the gallery used to run dark-only, so every value
+            # this sweep read — disabled opacities, colours, radii against the
+            # tokens — had one theme's evidence behind it.
+            for url, scope in (
+                (base, "interactive"),
+                (base + "?modal=1", "modal"),
+                (base + "?confirm=1", "confirm"),
+                (base + "?theme=light", "interactive-light"),
+                (base + "?theme=light&modal=1", "modal-light"),
+            ):
                 page.goto(url, wait_until="networkidle")
                 page.wait_for_timeout(1400)
                 if scope == "interactive":
@@ -1795,7 +1920,10 @@ def main() -> int:
             # way to cover the families.
             disabled: dict = {"rows": [], "examined": 0}
             if args.disabled:
-                disabled = run_disabled_sweep(page, base)
+                for theme in ("dark", "light"):
+                    found = run_disabled_sweep(page, base, theme)
+                    disabled["rows"].extend(found["rows"])
+                    disabled["examined"] += found["examined"]
 
             # The running cockpit, if one was named. `domcontentloaded` rather
             # than `networkidle`: the app polls, so the network never goes idle.
@@ -1881,7 +2009,7 @@ def main() -> int:
     overlap_failures = overlaps if args.overlap else []
     state_failures = state_defects(states["rows"]) if args.states else []
     disabled_failures = (
-        disabled_defects(disabled["rows"], load_disabled_opacities())
+        disabled_defects(disabled["rows"], load_disabled_expectations())
         if args.disabled
         else []
     )
