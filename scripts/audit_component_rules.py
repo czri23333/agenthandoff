@@ -755,8 +755,18 @@ FOCUS_ACTIVE_JS = r"""
   const root = getComputedStyle(document.documentElement);
   const expect = root.getPropertyValue('--ah-secondary').trim();
   const settle = (e) => e.getAnimations()
-    .filter(a => (a.animationName || '').startsWith('ah-focus'))
-    .forEach(a => { try { a.finish(); } catch (err) {} });
+    .forEach(a => {
+      // Every *finite* animation, not just the focus ones: the cockpit
+      // transitions `outline-color`/`outline-offset` like any other property, so
+      // a reading taken while a transition is still interpolating shows a colour
+      // that is neither antd's nor ours — measured on the pager's next button as
+      // `rgb(37, 34, 41) at 1px`, which is 15% of the way from
+      // `rgb(29, 27, 32)` to `rgb(98, 91, 113)`. Infinite animations (the
+      // spinner) are left alone; `finish()` on those never returns a value.
+      const t = a.effect && a.effect.getComputedTiming();
+      if (!t || t.iterations === Infinity) return;
+      try { a.finish(); } catch (err) {}
+    });
   const hasBox = (e) => {
     const b = e.getBoundingClientRect();
     return b.width > 0 && b.height > 0;
@@ -845,8 +855,13 @@ FOCUS_JS = r"""
   const root = getComputedStyle(document.documentElement);
   const expect = root.getPropertyValue('--ah-secondary').trim();
   const settle = (e) => e.getAnimations()
-    .filter(a => (a.animationName || '').startsWith('ah-focus'))
-    .forEach(a => { try { a.finish(); } catch (err) {} });
+    .forEach(a => {
+      // Same rule as the synthetic pass: finish every finite animation, because
+      // a transition still interpolating reports a value that belongs to no rule.
+      const t = a.effect && a.effect.getComputedTiming();
+      if (!t || t.iterations === Infinity) return;
+      try { a.finish(); } catch (err) {}
+    });
   const hasBox = (e) => {
     const b = e.getBoundingClientRect();
     return b.width > 0 && b.height > 0;
@@ -1062,6 +1077,24 @@ def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
     Playwright's page comes in from `main`, because the import lives there — the
     tool reports a missing browser instead of failing to import.
     """
+    # The session-detail route is not in the list routes and the read-only review
+    # could not reach it either; ask the API for a real id so the surface the rail
+    # lives on is covered. Measured: 2.4s to 187 rows, so the waits here are
+    # generous on purpose.
+    detail_route = ""
+    try:
+        with urllib.request.urlopen(
+            url.rstrip("/") + "/api/sessions", timeout=90
+        ) as resp:
+            rows_api = json.loads(resp.read())
+        if isinstance(rows_api, list) and rows_api:
+            detail_route = "#/session/{}/{}".format(
+                urllib.parse.quote(str(rows_api[0]["cli"])),
+                urllib.parse.quote(str(rows_api[0]["session_id"])),
+            )
+    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError):
+        detail_route = ""
+    routes = [*routes, *([detail_route] if detail_route else [])]
     out: dict = {
         "rows": [],
         "examined": 0,

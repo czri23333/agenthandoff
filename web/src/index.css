@@ -539,7 +539,20 @@ button:disabled {
 .ant-select.ah-select-chip:has(:focus-visible),
 .ah-searchbar:has(:focus-visible),
 .ant-segmented .ant-segmented-item-focused,
-.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible {
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible,
+/* antd's pagination is (0,4,0) the same way:
+   `:where(.hash).ant-pagination:not(.ant-pagination-disabled)
+   .ant-pagination-item:focus-visible { outline: var(--ant-pagination-line-width-focus)
+   solid var(--ant-color-primary-border); outline-offset: 1px }`. Reached only
+   after this sweep learned to visit a session-detail route: a keyboard user saw
+   `rgb(194, 189, 201)` at 1px on the pager, drawn at whatever width our own
+   grow animation was passing through at the time. */
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-item:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-prev:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-next:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-jump-prev:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-jump-next:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-item-link:focus-visible {
   outline: var(--ah-c-focus-ring-width) solid var(--ah-c-focus-ring-color);
   outline-offset: var(--ah-c-focus-ring-outward-offset);
   animation-name: ah-focus-grow, ah-focus-shrink;

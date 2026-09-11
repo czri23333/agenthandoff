@@ -60,7 +60,19 @@ export function InterruptionBanner({ it }: { it: Interruption }) {
       message={`${t("interrupted")} — ${label}`}
       description={
         <>
-          {it.detail && <div className="ah-meta">{it.detail}</div>}
+          {/* The engine's own words, labelled as such rather than dropped into a
+              localized sentence. `detail` is diagnostic prose built by the
+              parsers — `error_type=…`, `turn_end:…`, "newest message is an
+              un-answered user instruction" — so it is shown verbatim and
+              attributed; translating it would be inventing text the engine did
+              not produce, and leaving it unattributed read as a missing
+              translation in the Chinese UI. */}
+          {it.detail && (
+            <div className="ah-meta flex flex-wrap items-baseline gap-1.5">
+              <span className="ah-label">{t("engineDetail")}</span>
+              <span dir="auto">{it.detail}</span>
+            </div>
+          )}
           {it.kind === "user_pending" && it.pending_user_text && (
             <div className="ah-code mt-1.5 px-2 py-1.5 text-[12px]">
               <span className="ah-label">{t("pendingDirective")}</span>

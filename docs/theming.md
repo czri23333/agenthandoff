@@ -225,6 +225,23 @@ Four things this replaced, all measured first:
    sees, and reads pseudo-element indicators by `outline-style` (antd's
    transitions in from `0px`, so a width check reads zero at t=0).
 
+A fifth surface came from *extending the sweep* rather than from the review: the
+session-detail route (found by asking the API for a real session id — it is not
+one of the five list routes) carries antd's `Pagination`, whose own focus rule is
+`:where(.hash).ant-pagination:not(.ant-pagination-disabled)
+.ant-pagination-item:focus-visible` — (0,4,0) again, painting
+`rgb(194, 189, 201)` at a 1px offset while our grow animation passed through it.
+Six arms cover the pager, and the sweep is green on that route.
+
+That extension also exposed a flaw in the *measurement*, which is worth writing
+down because it produced a colour that belonged to no rule: `settle()` finished
+only the `ah-focus-*` animations, so a reading taken while the cockpit's
+`outline-color`/`outline-offset` transition was still interpolating reported
+`rgb(37, 34, 41) at 1px` on the pager's next button — about 15% of the way from
+antd's `rgb(29, 27, 32)` to our `rgb(98, 91, 113)`. `settle()` now finishes every
+*finite* animation (infinite ones, like the spinner, are left alone), and the
+same button reads `3px` of `secondary` at `2px`.
+
 `scripts/audit_component_rules.py --focus` is the check, and it refuses an empty
 sweep. Its decision logic (`focus_defects`) is a plain function so
 `tests/test_tokens_components.py` can feed it broken evidence: antd's grey, a
