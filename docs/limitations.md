@@ -69,6 +69,9 @@ sampled away.
 6. **`claude` parser has never parsed Claude Code data.** Written against
    documented JSONL shapes; the family parser is shared by five CLIs that *are*
    proven, so it probably works — "probably" is what this list exists to expose.
+   The same is true of `codebuddy-cn`, `qoder-ide` (roadmap: its sessions live in
+   an Electron leveldb) and `qwenwork-app` (the store exists here with zero
+   message rows in it).
 7. **Cockpit performance is measured in one place only.** Search went 15.3 s →
    7 ms (warm, in-process) / 0.39 s (fresh process, warm disk cache) on the
    maintainer's machine. The 450-row session list takes several seconds to paint
@@ -81,7 +84,11 @@ sampled away.
    and six 11px text nodes. Those are gone; what remains is that below ~500px the
    usage table scrolls inside its card, the timeline's 72 bins fall to ~4px each,
    and the sweep ran in a Chromium webview with same-origin iframes — not on a
-   real phone or a touch browser.
+   real phone or a touch browser. The *content* half of that was measured
+   afterwards — five routes × seven widths (1600→430px), 0 elements wider than
+   the page outside their own scroller, with a positive control so the sweep can
+   fail — but it was still a Chromium webview, still one font stack, still a
+   pointer rather than a finger.
 9. **Collaboration is file-based, not live.** `publish / claim / release` now
    carry a lease (holder, deadline, exclusive claim write, 409 on conflict) so two
    agents cannot work the same handoff unknowingly. There is no push channel: the

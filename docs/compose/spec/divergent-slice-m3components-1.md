@@ -52,6 +52,7 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | FAB / icon button | `56×56` `corner-large` on `primary-container` with the level-3 recipe / `40×40` `corner-full` |
 | first paint | **0/8** white cold captures, 8/8 at the exact `rgb(20,18,24)` (was 7/8 white) |
 | narrow widths | six widths (1600/1280/1100/900/760/430px): document scroll width == viewport at every one, **0** header controls whose own centre hit-tests to something else, **0** outside the viewport, title stays 22px and the bar wraps 69 → 115 → 161px |
+| content overflow, every route | **5 routes × 7 widths (1600→430px) = 35 combinations, 0 offenders**: no element is wider than the page unless it is inside its own scroller, which is what the scroller is for. The check has a positive control — an injected 2000px element is reported — because a sweep that cannot fail is not evidence |
 
 The width check is a **hit test**, not a bounding-box intersection, and the first
 version of it was wrong: it reported two overlaps at 900px that were a tab
