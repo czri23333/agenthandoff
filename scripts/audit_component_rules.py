@@ -37,6 +37,7 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -691,6 +692,57 @@ FOCUS_SELECTOR = (
 )
 FOCUS_OVERLAY_SELECTOR = ".ant-dropdown-menu-item"
 
+# ── Controls that sit on top of each other ──────────────────────────────────
+# One antd card head can carry a title, a segmented control and three buttons.
+# At the rail's 400px that is ~450px of content, and antd's single-row head
+# painted them over one another: measured, the `.zip` button at x 1081–1187 over
+# the 摘要/全文 switch at x 1109–1213. Nothing in this repo looked for that — the
+# colour, radius, size and focus sweeps all pass on a page whose controls
+# overlap — so this is the check for it. Pairs that contain one another are
+# skipped (a button inside a row is not an overlap), as are zero-area boxes.
+OVERLAP_JS = r"""
+() => {
+  const sel = 'a[href], button, input, select, textarea, [role="button"], .ant-segmented-item, [tabindex]:not([tabindex="-1"])';
+  const els = [...document.querySelectorAll(sel)].filter(e => {
+    const c = getComputedStyle(e);
+    if (c.display === 'none' || c.visibility === 'hidden' || c.opacity === '0') return false;
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  const MIN = 4;
+  const out = [];
+  for (let i = 0; i < els.length; i++) {
+    for (let j = i + 1; j < els.length; j++) {
+      const a = els[i], b = els[j];
+      if (a.contains(b) || b.contains(a)) continue;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const ox = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+      const oy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+      if (ox > MIN && oy > MIN) {
+        const name = (e) => (e.tagName.toLowerCase() + '.' + String(e.className).split(' ').slice(0, 2).join('.')).slice(0, 46)
+          + ' "' + (e.innerText || e.value || '').replace(/\s+/g, ' ').slice(0, 18) + '"';
+        out.push({a: name(a), b: name(b), ox: Math.round(ox), oy: Math.round(oy)});
+      }
+    }
+  }
+  return {examined: els.length, pairs: out.slice(0, 40), total: out.length};
+}
+"""
+
+
+def overlap_defects(where: str, found: dict) -> list[str]:
+    """Overlapping controls, as failure lines. Zero examined is a failure too."""
+    out: list[str] = []
+    if not found.get("examined"):
+        return [f"{where}: the overlap sweep examined no controls"]
+    for pair in found.get("pairs", []):
+        out.append(
+            f"{where}: {pair['a']} overlaps {pair['b']} by "
+            f"{pair['ox']}x{pair['oy']}px"
+        )
+    return out
+
+
 # The synthetic pass calls `element.focus()`, which is not the same event a
 # keyboard produces: antd adds `ant-segmented-item-focused` only for a real key
 # focus, so the segmented control *passes* a synthetic sweep while the reader
@@ -941,6 +993,69 @@ def focus_defects(rows: list[dict], expected: str | dict[str, str]) -> list[str]
     return out
 
 
+def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int]:
+    """Controls that sit on top of one another, in both themes.
+
+    The five list routes plus one session-detail route, because the detail view
+    is where the rail lives and it is the only place a card head carries a title,
+    a switch and three buttons at 400px.
+
+    Returns the defect lines and how many controls were examined — the count is
+    part of the evidence, because "no overlaps" from a page that rendered no
+    controls is not a pass.
+    """
+    out: list[str] = []
+    examined = 0
+    detail_route = ""
+    try:
+        with urllib.request.urlopen(
+            url.rstrip("/") + "/api/sessions", timeout=90
+        ) as resp:
+            rows_api = json.loads(resp.read())
+        if isinstance(rows_api, list) and rows_api:
+            first = rows_api[0]
+            detail_route = (
+                "#/session/"
+                + urllib.parse.quote(str(first["cli"]))
+                + "/"
+                + urllib.parse.quote(str(first["session_id"]))
+            )
+    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as exc:
+        # Not a pass and not a defect in the app: say what happened.
+        out.append(f"could not discover a session-detail route: {exc}")
+    for theme in ("light", "dark"):
+        page.goto(url, wait_until="domcontentloaded")
+        page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["ah-theme", theme])
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#ah-tokens", state="attached")
+        page.wait_for_timeout(1200)
+        seen = [*routes, *([detail_route] if detail_route else [])]
+        for route in seen:
+            page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+            # Wait for the page to leave its loading state rather than guessing a
+            # duration: the first version waited 4s and measured 160 controls on
+            # one run and 630 on the next, because one of those runs was still
+            # looking at skeletons. A page that never loads is a defect too — it
+            # is the shape of the bug that made this gate necessary.
+            page.wait_for_timeout(1200)
+            loaded = True
+            try:
+                page.wait_for_function(
+                    "() => document.querySelectorAll('.ah-skeleton').length === 0",
+                    timeout=30000,
+                )
+            except Exception:  # noqa: BLE001 - a slow page is the finding, not a crash
+                loaded = False
+            page.wait_for_timeout(1200)
+            found = page.evaluate(OVERLAP_JS)
+            examined += found.get("examined", 0)
+            defects = overlap_defects(f"{theme} {route}", found)
+            if not loaded:
+                defects.append(f"{theme} {route}: still in its loading state after 30s")
+            out.extend(defects)
+    return out, examined
+
+
 def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
     """Focus every focusable element on every route, in both themes.
 
@@ -1067,6 +1182,14 @@ def main() -> int:
             "themes, and check the ring, the radius and the choreography"
         ),
     )
+    parser.add_argument(
+        "--overlap",
+        action="store_true",
+        help=(
+            "also check that no two rendered controls sit on top of one another, "
+            "in both themes and on a session-detail route"
+        ),
+    )
     args = parser.parse_args()
 
     if not (WEB / "node_modules").is_dir():
@@ -1149,8 +1272,22 @@ def main() -> int:
             # The running cockpit, if one was named. `domcontentloaded` rather
             # than `networkidle`: the app polls, so the network never goes idle.
             app_sweep: dict[str, dict[str, int]] = {}
-            focus: dict = {"rows": [], "examined": 0, "expect": "", "themes": {}}
+            focus: dict = {
+                "rows": [],
+                "examined": 0,
+                "keyboard": 0,
+                "expect": "",
+                "themes": {},
+            }
+            overlaps: list[str] = []
+            overlap_examined = 0
             for url in args.app:
+                if args.overlap:
+                    found_overlaps, seen = run_overlap_sweep(
+                        page, url, args.route or ["#/"]
+                    )
+                    overlaps.extend(found_overlaps)
+                    overlap_examined += seen
                 if args.focus:
                     focus.update(run_focus_sweep(page, url, args.route or ["#/"]))
                 for route in (args.route or ["#/"]):
@@ -1208,6 +1345,7 @@ def main() -> int:
             f"the Tab pass measured only {focus['keyboard']} elements; the nodes "
             "a synthetic focus cannot judge were therefore never judged"
         )
+    overlap_failures = overlaps if args.overlap else []
     print(
         json.dumps(
             {
@@ -1221,6 +1359,11 @@ def main() -> int:
                 "app_off_scale_font_sizes": app_sizes,
                 "app_colours_in_no_token": app_colors,
                 "app_radii_in_no_token": app_radii,
+                "overlap_sweep": {
+                    "enabled": args.overlap,
+                    "controls_examined": overlap_examined,
+                    "defects": overlap_failures,
+                },
                 "focus_sweep": {
                     "enabled": args.focus,
                     "elements_examined": focus["examined"],
@@ -1257,6 +1400,7 @@ def main() -> int:
         "app colours": app_colors,
         "app radii": app_radii,
         "focus": focus_failures,
+        "overlapping controls": overlap_failures,
     }
     if any(failures.values()):
         for label, items in failures.items():
@@ -1274,6 +1418,11 @@ def main() -> int:
             f"{focus['expect'] or '(none measured)'} at 3px/2px, "
             f"{sum(1 for r in focus['rows'] if r.get('delegated'))} delegated "
             "to the box the reader sees."
+        )
+    if args.overlap:
+        print(
+            f"Overlap: {overlap_examined} controls compared across two themes "
+            "and a session detail; no two interactives sit on top of one another."
         )
     return 0
 

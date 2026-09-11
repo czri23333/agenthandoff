@@ -8,6 +8,7 @@ shipped inside the wheel). See docs/decisions.md ADR-006/007/008.
 from __future__ import annotations
 
 import mimetypes
+import threading
 import time
 from dataclasses import asdict
 from importlib import resources
@@ -109,6 +110,58 @@ def stores():
 # 30s poll doesn't re-decompress 46 zstd rolls per request (ADR-006).
 _sessions_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 20.0
+# One build per cache key. Measured on this machine: a cold build is 3.7–5.7s of
+# CPU over 802 metas, and without this a second request that arrives while the
+# first is still building starts *its own* build. The cockpit polls every 30s per
+# open tab, so a handful of tabs was enough to keep several builds in flight,
+# saturate the thread pool, and leave the whole app — even `/api/stores` — queued
+# behind them for minutes. A per-key lock plus a stale answer is the whole fix.
+_sessions_locks: dict[str, threading.Lock] = {}
+_sessions_locks_guard = threading.Lock()
+
+
+def _session_lock(key: str) -> threading.Lock:
+    with _sessions_locks_guard:
+        lock = _sessions_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _sessions_locks[key] = lock
+        return lock
+
+
+def _session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
+    """The cached session list, with one build in flight per key.
+
+    Three cases, and the third is the one that mattered:
+
+    * **fresh** — return it, no work;
+    * **stale, and someone is already refreshing** — return the stale list. It is
+      at most one TTL out of date, which the 30s poll cannot tell apart from
+      "nothing changed", and answering it costs no CPU;
+    * **cold** — wait on the lock and then re-check, so N simultaneous first
+      requests produce one build instead of N.
+    """
+    key = f"{cli}|{cwd}|{q}"
+    hit = _sessions_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _CACHE_TTL:
+        return hit[1]
+    lock = _session_lock(key)
+    if hit:
+        if not lock.acquire(blocking=False):
+            return hit[1]
+        try:
+            roots = _build_session_roots(cli, cwd, q)
+            _sessions_cache[key] = (time.monotonic(), roots)
+            return roots
+        finally:
+            lock.release()
+    with lock:
+        fresh = _sessions_cache.get(key)
+        if fresh is not None:
+            return fresh[1]
+        roots = _build_session_roots(cli, cwd, q)
+        _sessions_cache[key] = (time.monotonic(), roots)
+        return roots
 
 
 def _domain_for(cwd: str) -> str:
@@ -162,6 +215,88 @@ def _git_info(cwd: str) -> dict:
     hit = _git_cache.get(cwd)
     if hit and now - hit[0] < _GIT_TTL:
         return hit[1]
+    info = _git_info_from_files(cwd)
+    if info is None:
+        info = _git_info_from_git(cwd)
+    _git_cache[cwd] = (now, info)
+    return info
+
+
+def _git_info_from_files(cwd: str) -> dict | None:
+    """The same answer `git` gives, read off the files instead of spawned.
+
+    `git branch --show-current` and `git worktree list --porcelain` are two
+    processes per distinct cwd, and the cockpit has a cwd per session: measured
+    over 802 metas, **2.03s** of the 5.7s cold build was those spawns. The branch
+    is one line of `<gitdir>/HEAD` and the linked-worktree count is a directory
+    listing, so the whole thing is a few reads. `None` means "not the common
+    shape" (a packed ref, an unreadable store, a detached HEAD with no worktrees)
+    and the caller falls back to the real `git`, which stays the source of truth.
+    """
+    try:
+        p = Path(cwd)
+        # A relative cwd is resolved against *this process*, not against the CLI
+        # that recorded it, so the walk can land in an unrelated repository — it
+        # did: a session whose cwd is the literal string `workspace` reported this
+        # worktree's branch. And a path that is not there cannot have a repo, so
+        # `git -C <path>` would return nothing after paying for a process spawn;
+        # 41 of this machine's 53 cwds are stale like that, which was 1.4s of every
+        # build. Both cases answer `{}` here exactly as `git` answers it.
+        if not p.is_absolute() or not p.is_dir():
+            return {}
+        gitdir: Path | None = None
+        for _ in range(48):
+            candidate = p / ".git"
+            if candidate.is_dir():
+                gitdir = candidate
+                break
+            if candidate.is_file():
+                text = candidate.read_text(encoding="utf-8", errors="replace").strip()
+                if not text.lower().startswith("gitdir:"):
+                    return None
+                target = Path(text.split(":", 1)[1].strip())
+                gitdir = target if target.is_absolute() else (candidate.parent / target)
+                break
+            if p.parent == p:
+                return {}
+            p = p.parent
+        if gitdir is None:
+            return {}
+        head = (gitdir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+        info: dict = {}
+        if head.startswith("ref:"):
+            ref = head[4:].strip()
+            if not ref.startswith("refs/heads/"):
+                return None
+            info["branch"] = ref[len("refs/heads/") :]
+        elif head:
+            # Detached HEAD: `git branch --show-current` prints nothing and this
+            # path leaves `branch` unset too. Not adding a `detached` key here on
+            # purpose — the payload is what the frontend was written against, and
+            # this change is about cost, not about new fields.
+            pass
+        else:
+            return None
+        common = gitdir
+        commondir = gitdir / "commondir"
+        if commondir.is_file():
+            text = commondir.read_text(encoding="utf-8", errors="replace").strip()
+            if text:
+                target = Path(text)
+                common = target if target.is_absolute() else (gitdir / target)
+        worktrees = common / "worktrees"
+        count = 1
+        if worktrees.is_dir():
+            count += sum(1 for entry in worktrees.iterdir() if entry.is_dir())
+        if count > 1:
+            info["worktree_count"] = count
+        return info
+    except OSError:
+        return None
+
+
+def _git_info_from_git(cwd: str) -> dict:
+    """The subprocess path. Kept as the fallback, not as the common case."""
     import subprocess
     info: dict = {}
     try:
@@ -188,7 +323,6 @@ def _git_info(cwd: str) -> dict:
                 info["worktree_count"] = len(worktrees)
     except (OSError, subprocess.TimeoutExpired):
         pass
-    _git_cache[cwd] = (now, info)
     return info
 
 
@@ -210,14 +344,7 @@ def sessions(
     import hashlib
     import json as _json
 
-    cache_key = f"{cli}|{cwd}|{q}"
-    now = time.monotonic()
-    hit = _sessions_cache.get(cache_key)
-    if hit and now - hit[0] < _CACHE_TTL:
-        roots = hit[1]
-    else:
-        roots = _build_session_roots(cli, cwd, q)
-        _sessions_cache[cache_key] = (now, roots)
+    roots = _session_roots(cli, cwd, q)
     fingerprint = hashlib.sha1(
         _json.dumps(
             [(s.get("cli"), s.get("session_id"), s.get("updated_at")) for s in roots]

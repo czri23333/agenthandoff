@@ -859,23 +859,29 @@ export default function SessionDetail({
                 />
               </span>
             }
-            extra={
-              <span className="flex items-center gap-1.5">
-                <Button
-                  size="small"
-                  href={api.rawUrl(cli, sid)}
-                  target="_blank"
-                  title={t("rawArchiveTitle")}
-                >
-                  {t("downloadRaw")}
-                </Button>
-                <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
-                  {t("downloadBrief")}
-                </Button>
-                <CopyButton text={shownBrief} label={t("copyBrief")} />
-              </span>
-            }
           >
+            {/* The three transport actions used to live in the card's `extra`,
+                beside a title that already carried the 摘要/全文 switch. The rail
+                is 400px wide and the two groups came to ~450px, so antd's
+                single-row head painted them on top of each other — measured: the
+                `.zip` button (x 1081–1187) over the segmented control (x
+                1109–1213) and over the title. M3's card header carries a title
+                and one trailing affordance; the actions that operate on the body
+                belong in the body, where they can also wrap on a narrower rail. */}
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <Button
+                size="small"
+                href={api.rawUrl(cli, sid)}
+                target="_blank"
+                title={t("rawArchiveTitle")}
+              >
+                {t("downloadRaw")}
+              </Button>
+              <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
+                {t("downloadBrief")}
+              </Button>
+              <CopyButton text={shownBrief} label={t("copyBrief")} />
+            </div>
             {briefMode === "full" && fullBrief && (
               <div className="ah-faint mb-1.5 font-mono text-[11px]">
                 {t("fullBriefMeta")

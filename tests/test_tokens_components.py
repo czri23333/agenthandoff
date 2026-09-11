@@ -857,3 +857,45 @@ def test_the_percentage_gate_can_fail():
         "background: color-mix(in srgb, var(--ah-c-y-role) var(--ah-c-y-opacity), transparent);"
     )
     assert not offending("padding-inline-end: calc(var(--ah-c-a) + var(--ah-c-b));")
+
+
+def test_the_overlap_gate_reports_a_pair_and_refuses_an_empty_sweep():
+    """The check that found a `.zip` button painted over a segmented control.
+
+    Nothing else in this repo looks at *where* controls are, only at what they
+    are made of: a page whose buttons sit on top of each other passed the token,
+    radius, colour, size and focus sweeps. Measured before the fix, on the
+    session-detail rail: `.zip` at x 1081–1187 over the 摘要/全文 switch at x
+    1109–1213. Both halves below are the point — it must report a pair, and it
+    must not pass a page it never measured.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_6", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    assert audit.overlap_defects("light #/", {"examined": 0, "pairs": [], "total": 0}) == [
+        "light #/: the overlap sweep examined no controls"
+    ]
+
+    found = {
+        "examined": 670,
+        "total": 1,
+        "pairs": [
+            {
+                "a": 'button.ant-btn "下载原文包 (.zip)"',
+                "b": ".ant-segmented-item 摘要",
+                "ox": 78,
+                "oy": 20,
+            }
+        ],
+    }
+    assert audit.overlap_defects("light #/session/zcode/s1", found) == [
+        'light #/session/zcode/s1: button.ant-btn "下载原文包 (.zip)" overlaps '
+        ".ant-segmented-item 摘要 by 78x20px"
+    ]
+
+    # A measured page with no pairs passes.
+    assert audit.overlap_defects("dark #/", {"examined": 42, "pairs": []}) == []

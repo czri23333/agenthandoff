@@ -40,6 +40,8 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
 | hover, with a real pointer | 5 routes × 2 themes, every button, link, row, tab, chip and select-chip: **0** elements change `background-color` on hover — the 8% layer is the only hover mechanism — and the published press morphs still run (an icon button sampled mid-flight at `47.96px` between its full corner and its pressed corner) |
+| control overlap, swept | `--overlap` compares every rendered interactive pair on every route, in both themes, **and on a session-detail route** (the one surface the focus sweep never visited, discovered from `/api/sessions`): **670 controls, 0 pairs overlap**. It exists because a `.zip` button was painting over the 摘要/全文 switch (x 1081–1187 against 1109–1213) and every other gate passed that page. Mutation proof: a negative margin on the second body button made it report `74x40px` of overlap in both themes, and removing it went green again |
+| the cockpit's own loading state | the dashboard now paints **187 rows in 2.4s**; before this round it never left its skeleton, and the server behind it was measured burning **115% of one core** with `/api/stores` at 8.7s and `/api/sessions` timing out at 150s |
 | the rendered product, swept | across five routes: **2 font weights, 4 sizes, 7 radii, 15 colours** distinct, **none of them off-token**, and every weight is 400 or 500 |
 | the dialog scrim | `rgba(0,0,0,0)` before (a `calc(percent * percent)`, invalid at computed-value time, discarding every candidate); the token alone after |
 | top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
@@ -152,6 +154,24 @@ by a look:
    fixed, the gate grew a keyboard channel and an overlay pass so it can see
    them, and each was re-introduced on purpose to watch it fail. The round ends
    at 540 nodes examined and 0 defects.
+8. **The cockpit could not load, and nothing in the repo was looking.** Opening
+   the built product on this machine showed ten skeletons and never a row — for
+   minutes. The server was at **115% of one core** with `/api/stores` taking
+   8.7s and `/api/sessions` timing out at 150s, while an in-process build of the
+   same call was 5.7s. Two defects, both measured: every request that arrived
+   while a build was in flight started *its own* build (a 30s poll per tab is
+   enough to pile them up until the thread pool is saturated), and 2.03s of each
+   build was two `git` processes per session cwd. Fixed with one build per key
+   plus a stale-while-revalidate answer, and with the branch read off
+   `.git/HEAD` (2.03s → 0.01s, 53 of 53 cwds agreeing with `git`, one of them
+   caught disagreeing first because a *relative* cwd was walking into this
+   worktree). After: cold 3.1s, cached 0.01s, six concurrent requests after
+   expiry = one 3.64s rebuild and five answers in 0.11–0.13s, dashboard paints
+   187 rows in 2.4s. The same round added the gate that would have found the
+   other visible defect of this session: `--overlap`, which compares every pair
+   of rendered controls and reported the `.zip` button painted over the
+   摘要/全文 switch in the session rail (670 controls examined, 0 pairs after the
+   fix, `74x40px` under a deliberate mutation).
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -466,3 +486,7 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       rule whose selector arms match antd's specificity, with the Select chip's
       ring delegated to the box the reader sees; `--focus` gate plus a live
       mutation proof (covers: S2; depends: T1)
+- [x] T15: The list that never loaded — one build in flight per cache key and a
+      stale answer while one caller refreshes; the git probe reads `.git/HEAD`
+      instead of spawning two processes per cwd; `--overlap` gate for controls
+      painted over one another, with a mutation proof (covers: S2; depends: T1)
