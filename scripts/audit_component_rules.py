@@ -28,6 +28,7 @@ The static gates run everywhere; this one runs where a browser is.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -743,6 +744,281 @@ def overlap_defects(where: str, found: dict) -> list[str]:
     return out
 
 
+# ── Hover and press ─────────────────────────────────────────────────────────
+# The focus ring taught this tool that a static read is not evidence. These are
+# the states a pointer produces, and the check is the same shape: put the real
+# mouse on the control, let the transitions *settle*, and compare what changed
+# against the token table and against the published opacities (hover 8%, pressed
+# 12%). It found what reading the sheet did not: every icon button answered the
+# pointer with nothing at all — hover layer alpha `0.000` on all ten of them —
+# because the family had a press rule and no hover rule.
+STATE_SELECTOR = (
+    'button, [role="button"], .ah-row, .ah-tab, .ah-filterchip, '
+    ".ah-select-chip, .ant-segmented-item, .ant-slider-handle"
+)
+STATE_LIMIT = 22  # per route, per theme
+# Sample by *family*, not by document order: a route with 187 rows would
+# otherwise spend every slot on rows and never reach the controls below them.
+# antd's runtime hash classes are stripped first, so `ant-btn css-wgezi7` and
+# `ant-btn css-abc123` are one family.
+# `query_selector_all` hands back handles that React invalidates on its next
+# render — measured as 16 of 25 families skipped with "Element is not attached to
+# the DOM", i.e. the sweep was quietly sampling only the controls that happened
+# to survive. These two functions replace handles with a family key plus a live
+# index, and the interaction goes through a locator, which re-resolves.
+STATE_FAMILIES_JS = r"""
+([sel, limit]) => {
+  const key = (el) => el.tagName + "." + String(el.className)
+    .split(" ")
+    .filter(c => c && !/^css-[a-z0-9]+$/i.test(c) && !/^css-var-/i.test(c))
+    .slice(0, 3)
+    .join(".");
+  const out = [];
+  const seen = new Set();
+  for (const el of document.querySelectorAll(sel)) {
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    if (el.disabled) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const k = key(el);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(k);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+"""
+
+STATE_INDEX_JS = r"""
+([sel, wanted]) => {
+  const key = (el) => el.tagName + "." + String(el.className)
+    .split(" ")
+    .filter(c => c && !/^css-[a-z0-9]+$/i.test(c) && !/^css-var-/i.test(c))
+    .slice(0, 3)
+    .join(".");
+  const els = [...document.querySelectorAll(sel)];
+  for (let i = 0; i < els.length; i++) {
+    if (key(els[i]) === wanted) return i;
+  }
+  return -1;
+}
+"""
+STATE_HOVER_ALPHA = 0.08
+STATE_PRESS_ALPHA = 0.12
+STATE_ALPHA_TOLERANCE = 0.02
+
+STATE_SNAP_JS = r"""
+() => {
+  const el = window.__stateEl;
+  if (!el) return null;
+  // `{subtree: true}` includes the pseudo-elements' transitions — a tab's state
+  // layer lives on `::before`, and finishing only the element's own animations
+  // reads a half-started transition as "no feedback at all".
+  el.getAnimations({subtree: true}).forEach(a => {
+    const t = a.effect && a.effect.getComputedTiming();
+    if (!t || t.iterations === Infinity) return;
+    try { a.finish(); } catch (err) {}
+  });
+  const c = getComputedStyle(el);
+  return {
+    cls: String(el.className).slice(0, 44),
+    tag: el.tagName,
+    bg: c.backgroundColor,
+    bd: c.borderTopColor,
+    sh: c.boxShadow.slice(0, 110),
+    radius: c.borderTopLeftRadius,
+    filter: c.filter,
+    pseudo: ["::before", "::after"].map(p => {
+      const q = getComputedStyle(el, p);
+      return { p, bg: q.backgroundColor, sh: q.boxShadow.slice(0, 90) };
+    }),
+  };
+}
+"""
+
+STATE_TOKENS_JS = r"""
+() => {
+  const root = getComputedStyle(document.documentElement);
+  const out = [];
+  for (const p of root) {
+    const v = root.getPropertyValue(p).trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) out.push(v.toLowerCase());
+  }
+  return out;
+}
+"""
+
+
+def _colour_and_alpha(value: str) -> tuple[str | None, float]:
+    """`rgb()`/`rgba()`/`color(srgb …)` → (`#hex`, alpha).
+
+    Rounded, not truncated: `0.270588 * 255` is 68.99994, and `int()` turned a
+    token's `#49454f` into `#49444f` — a colour in no table, reported as a defect
+    that did not exist.
+    """
+    text = value or ""
+    m = re.match(r"rgba?\(([^)]+)\)", text)
+    if m:
+        n = [float(x.strip()) for x in m.group(1).split(",")]
+        return (
+            f"#{round(n[0]):02x}{round(n[1]):02x}{round(n[2]):02x}",
+            n[3] if len(n) > 3 else 1.0,
+        )
+    m = re.match(r"color\(srgb ([^)]+)\)", text)
+    if m:
+        n = [float(x) for x in m.group(1).replace("/", " ").split()]
+        return (
+            f"#{round(n[0] * 255):02x}{round(n[1] * 255):02x}{round(n[2] * 255):02x}",
+            n[3] if len(n) > 3 else 1.0,
+        )
+    return None, 1.0
+
+
+def _state_layer(snap: dict) -> tuple[str | None, float]:
+    """The state layer a snapshot shows: an inset overlay, or a pseudo-element's
+    translucent background — whichever the component uses.
+
+    Commas are split at the top level only: `rgba(103, 80, 164, 0.12) 0 0 0 9999px
+    inset` has four commas and three of them are inside the colour, so a plain
+    `split(",")` hands the parser a fragment that matches nothing — which is how
+    the first version of this function reported "no hover feedback" for every
+    control whose layer is a shadow.
+    """
+    for part in re.split(r",(?![^()]*\))", snap.get("sh") or ""):
+        if "inset" in part:
+            colour, alpha = _colour_and_alpha(part)
+            if colour and alpha < 1:
+                return colour, alpha
+    for pseudo in snap.get("pseudo", []):
+        colour, alpha = _colour_and_alpha(pseudo.get("bg") or "")
+        if colour and alpha < 1:
+            return colour, alpha
+    return None, 1.0
+
+
+def state_defects(rows: list[dict]) -> list[str]:
+    """What a pointer sees on hover and press, as failure lines.
+
+    Four questions, all measurable: is there a layer at all; is its opacity the
+    published 8%/12%; is its colour one the token file publishes; and did the
+    control answer by *swapping* a colour (a mechanism M3 does not use) or by
+    filtering itself (which turns the wrong direction in exactly one theme).
+
+    Each row carries the token set of *its own theme*, because the two palettes
+    publish different hexes and judging a dark row against the light table is how
+    the focus gate first reported fifty defects that were one measurement bug.
+    """
+    out: list[str] = []
+    for row in rows:
+        where = row["label"]
+        tokens = {c.lower() for c in row.get("tokens", [])}
+        hover, press, rest = row["hover"], row["press"], row["rest"]
+        if hover["filter"] != rest["filter"]:
+            out.append(
+                f"{where}: hover changes `filter` ({rest['filter']} -> {hover['filter']})"
+            )
+        hover_colour, hover_alpha = _state_layer(hover)
+        press_colour, press_alpha = _state_layer(press)
+        if not hover_colour:
+            out.append(f"{where}: no hover feedback")
+        else:
+            if abs(hover_alpha - STATE_HOVER_ALPHA) > STATE_ALPHA_TOLERANCE:
+                out.append(
+                    f"{where}: hover layer is {hover_alpha:.3f}, want {STATE_HOVER_ALPHA}"
+                )
+            if hover_colour not in tokens:
+                out.append(f"{where}: hover layer colour {hover_colour} is in no token")
+        if not press_colour:
+            out.append(f"{where}: no press feedback")
+        else:
+            if abs(press_alpha - STATE_PRESS_ALPHA) > STATE_ALPHA_TOLERANCE:
+                out.append(
+                    f"{where}: press layer is {press_alpha:.3f}, want {STATE_PRESS_ALPHA}"
+                )
+            if press_colour not in tokens:
+                out.append(f"{where}: press layer colour {press_colour} is in no token")
+        for key in ("bg", "bd"):
+            colour, alpha = _colour_and_alpha(hover[key])
+            if (
+                colour
+                and alpha > 0.95
+                and colour not in tokens
+                and hover[key] != rest[key]
+            ):
+                out.append(f"{where}: hover swaps {key} to {colour}, which is in no token")
+    return out
+
+
+def run_state_sweep(page, url: str, routes: list[str]) -> dict:
+    """Hover and press every interactive control, in both themes.
+
+    Returns `{"rows": [...], "examined": n}` so the caller can judge the rows and
+    show that the sweep was not empty.
+    """
+    rows: list[dict] = []
+    tokens: set[str] = set()
+    for theme in ("light", "dark"):
+        page.goto(url, wait_until="domcontentloaded")
+        page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["ah-theme", theme])
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#ah-tokens", state="attached")
+        page.wait_for_timeout(1200)
+        tokens = {c.lower() for c in page.evaluate(STATE_TOKENS_JS)}
+        for route in routes:
+            page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+            families = page.evaluate(
+                STATE_FAMILIES_JS, [STATE_SELECTOR, STATE_LIMIT]
+            )
+            for family in families:
+                try:
+                    index = page.evaluate(
+                        STATE_INDEX_JS, [STATE_SELECTOR, family]
+                    )
+                    if index < 0:
+                        continue
+                    handle = page.locator(STATE_SELECTOR).nth(index)
+                    handle.scroll_into_view_if_needed(timeout=1500)
+                    box = handle.bounding_box()
+                    if not box or box["width"] < 6 or box["height"] < 6:
+                        continue
+                    element = handle.element_handle()
+                    if element is None:
+                        continue
+                    page.evaluate("(el) => { window.__stateEl = el; }", element)
+                    page.mouse.move(5, 5)
+                    page.wait_for_timeout(30)
+                    rest = page.evaluate(STATE_SNAP_JS)
+                    page.mouse.move(
+                        box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                    )
+                    page.wait_for_timeout(120)
+                    hover = page.evaluate(STATE_SNAP_JS)
+                    page.mouse.down()
+                    page.wait_for_timeout(120)
+                    press = page.evaluate(STATE_SNAP_JS)
+                    page.mouse.up()
+                except Exception:  # noqa: BLE001 - a control that moves is not a finding
+                    continue
+                finally:
+                    with contextlib.suppress(Exception):
+                        page.mouse.move(5, 5)
+                if not (rest and hover and press):
+                    continue
+                rows.append(
+                    {
+                        "label": f"{theme} {route} {hover['cls'][:26]}",
+                        "tokens": sorted(tokens),
+                        "rest": rest,
+                        "hover": hover,
+                        "press": press,
+                    }
+                )
+    return {"rows": rows, "examined": len(rows)}
+
+
 # The synthetic pass calls `element.focus()`, which is not the same event a
 # keyboard produces: antd adds `ant-segmented-item-focused` only for a real key
 # focus, so the segmented control *passes* a synthetic sweep while the reader
@@ -1228,6 +1504,14 @@ def main() -> int:
             "in both themes and on a session-detail route"
         ),
     )
+    parser.add_argument(
+        "--states",
+        action="store_true",
+        help=(
+            "also hover and press every interactive control with a real pointer, "
+            "in both themes, and check the state layer, its opacity and its colour"
+        ),
+    )
     args = parser.parse_args()
 
     if not (WEB / "node_modules").is_dir():
@@ -1319,7 +1603,12 @@ def main() -> int:
             }
             overlaps: list[str] = []
             overlap_examined = 0
+            states: dict = {"rows": [], "examined": 0}
             for url in args.app:
+                if args.states:
+                    found_states = run_state_sweep(page, url, args.route or ["#/"])
+                    states["rows"].extend(found_states["rows"])
+                    states["examined"] += found_states["examined"]
                 if args.overlap:
                     found_overlaps, seen = run_overlap_sweep(
                         page, url, args.route or ["#/"]
@@ -1384,6 +1673,17 @@ def main() -> int:
             "a synthetic focus cannot judge were therefore never judged"
         )
     overlap_failures = overlaps if args.overlap else []
+    state_failures = state_defects(states["rows"]) if args.states else []
+    # The sample is per *family*, so the floor is per family too: a route in this
+    # cockpit shows at least two distinct control families (a tab and a button on
+    # an empty page), in two themes. An absolute floor of 20 called a legitimate
+    # single-route run "empty".
+    state_floor = 2 * max(1, len(args.route or ["#/"])) * 2
+    if args.states and states["examined"] < state_floor:
+        state_failures.append(
+            f"the state sweep examined only {states['examined']} controls, "
+            f"fewer than the {state_floor} a run over these routes should reach"
+        )
     print(
         json.dumps(
             {
@@ -1401,6 +1701,11 @@ def main() -> int:
                     "enabled": args.overlap,
                     "controls_examined": overlap_examined,
                     "defects": overlap_failures,
+                },
+                "state_sweep": {
+                    "enabled": args.states,
+                    "controls_examined": states["examined"],
+                    "defects": state_failures,
                 },
                 "focus_sweep": {
                     "enabled": args.focus,
@@ -1439,6 +1744,7 @@ def main() -> int:
         "app radii": app_radii,
         "focus": focus_failures,
         "overlapping controls": overlap_failures,
+        "hover and press": state_failures,
     }
     if any(failures.values()):
         for label, items in failures.items():
@@ -1461,6 +1767,11 @@ def main() -> int:
         print(
             f"Overlap: {overlap_examined} controls compared across two themes "
             "and a session detail; no two interactives sit on top of one another."
+        )
+    if args.states:
+        print(
+            f"States: {states['examined']} controls hovered and pressed with a real "
+            "pointer; every one shows a token-coloured layer at 8%/12%."
         )
     return 0
 

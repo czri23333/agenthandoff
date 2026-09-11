@@ -132,13 +132,32 @@ values honest; nothing asserts the *absence* of `brightness()` any more, because
 there is nothing left to find — the layer is the only mechanism in the stylesheet.
 
 Hover was swept separately for the same reason the focus ring was: if antd can
-out-specify our layer on `:focus-visible`, it can on `:hover`. With a real pointer
-over every button, link, row, tab, chip and select-chip on five routes in both
-themes, **0 elements change `background-color` on hover** — the 8% layer is the
-only hover mechanism on screen — and the components that publish a press morph do
-morph (an icon button measured mid-flight at 47.96px between its full corner and
-its pressed corner). That sweep is a probe rather than a gate: its pressed-layer
-match is a substring test, so it is reported as evidence and not as a check.
+out-specify our layer on `:focus-visible`, it can on `:hover`. The first version
+of that sweep was a probe with a substring test, and it was too weak to be worth
+trusting — so it became `--states`: a real pointer, a settled transition
+(`getAnimations({subtree: true})`, because a tab's layer lives on `::before`), and
+four questions per control — is there a layer, is it at the published 8%/12%, is
+its colour in the token table, and did the control answer by *swapping* a colour
+or filtering itself.
+
+It found two things the stylesheet looked fine while hiding:
+
+* **every icon button answered the pointer with nothing.** The family set
+  `--ah-state-layer-color` and spent it only on `:active`, so hover layer alpha
+  read `0.000` on all ten of them. The fix is the ordinary 8% layer — and it had
+  to be followed by an explicit 12% on press, because pressing keeps `:hover`
+  true and the two selectors tie at (0,4,0): without it, the *hover* value won on
+  source order (measured `press 0.080`).
+* **a hovered segment looked selected.** `:root .ant-segmented
+  .ant-segmented-item:hover:not(.ant-segmented-item-selected)` was painted with
+  the same `secondary-container` as the selected segment — the swapped-background
+  mechanism this contract forbids, wearing the selection colour. It is now the 8%
+  layer over the segment's own ink (and `on-secondary-container` when the segment
+  *is* selected), so pointing at a segment no longer claims it is chosen.
+
+The sweep samples by **family** rather than by document order (a route with 187
+rows would otherwise spend every slot on rows), and it is honest about the
+denominator: `States: 44 controls hovered and pressed with a real pointer`.
 
 ## Keyboard focus (M3)
 

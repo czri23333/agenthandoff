@@ -26,7 +26,7 @@ declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **397 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+tests/` → **398 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
 --check` → 21 rows, README and `support-matrix.json` match the fixtures ·
 `conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
 `npm run build` → clean, dist rebuilt and committed.
@@ -36,11 +36,12 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | Claim | Measured |
 |---|---|
 | token consumption, at runtime | injected `446` = referenced `446`, **0** read-but-never-injected, **0** injected-but-never-read |
-| rule reachability, at runtime | of 302 rules that read a component token, **235 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
+| rule reachability, at runtime | of 301 rules that read a component token, **235 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
 | hover, with a real pointer | 5 routes × 2 themes, every button, link, row, tab, chip and select-chip: **0** elements change `background-color` on hover — the 8% layer is the only hover mechanism — and the published press morphs still run (an icon button sampled mid-flight at `47.96px` between its full corner and its pressed corner) |
+| hover and press, gated | `--states` puts a real pointer on one representative of every control **family** on each route, both themes: **44 controls**, every one with a token-coloured layer at **8% hover / 12% press**, 0 colour swaps, 0 filters. It found two live defects: every icon button had *no* hover feedback (alpha `0.000` on all ten), and a hovered segment was painted with the selected `secondary-container` — hover wearing the selection colour. Mutation proof: renaming the icon-button hover rule made the gate report `hover layer is 0.000, want 0.08` in both themes |
 | control overlap, swept | `--overlap` compares every rendered interactive pair on every route, in both themes, **and on a session-detail route** (the one surface the focus sweep never visited, discovered from `/api/sessions`): **718 controls, 0 pairs overlap**. It exists because a `.zip` button was painting over the 摘要/全文 switch (x 1081–1187 against 1109–1213) and every other gate passed that page. Mutation proof: a negative margin on the second body button made it report `74x40px` of overlap in both themes, and removing it went green again |
 | the cockpit's own loading state | the dashboard now paints **187 rows in 2.4s**; before this round it never left its skeleton, and the server behind it was measured burning **115% of one core** with `/api/stores` at 8.7s and `/api/sessions` timing out at 150s |
 | the thread view's loading state | it answered in **15.4s** with `{sessions: 802, with_files: 72, budget_hit: true}`, 0.0s from cache, and 15.7s for a *load more* that continued to 85 without re-reading the first 72. Before: still `聚类中…` after **121s**, because the pass called `Parser.load()` for all 802 sessions — measured at 189ms each, ~150s |
@@ -186,6 +187,20 @@ by a look:
    and the ~10 minutes of repeated passes needed to cover a 802-session store are
    in `docs/limitations.md` item 16, with the disk-backed cache named as the
    follow-up.
+10. **The pointer states were only weakly verified, and that is where two more
+    defects were living.** The previous round's hover evidence was a substring
+    test over a probe that finished only the element's own animations, so it
+    could not see a layer on `::before` and never asked whether the *opacity* was
+    the published one. `--states` asks four questions per control (layer present,
+    opacity 8%/12%, colour in the token table, no colour swap and no filter) with
+    a real pointer, a settled transition and a family-based sample. It found:
+    every icon button answered the pointer with **nothing** (alpha `0.000` on all
+    ten — the family spent its layer colour on `:active` only), and a **hovered
+    segment was painted with the selected `secondary-container`**, i.e. hover that
+    looks like selection. Both fixed, both re-verified, and the icon-button rule
+    was renamed afterwards to watch the gate fail with
+    `hover layer is 0.000, want 0.08` in both themes. The sweep's sample size and
+    its remaining blind spots are in `docs/limitations.md` item 17.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -504,3 +519,8 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       stale answer while one caller refreshes; the git probe reads `.git/HEAD`
       instead of spawning two processes per cwd; `--overlap` gate for controls
       painted over one another, with a mutation proof (covers: S2; depends: T1)
+- [x] T16: Pointer states — `--states` hovers and presses a representative of
+      every control family with a real pointer, in both themes, and checks the
+      layer, its 8%/12% opacity, token-colouredness and the absence of colour
+      swaps or filters; found and fixed a missing icon-button hover layer and a
+      hovered segment painted with the selection container (covers: S2; depends: T1)

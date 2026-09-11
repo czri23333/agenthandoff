@@ -145,6 +145,17 @@ sampled away.
     of the view. A disk-backed cache keyed by `(cli, session_id, updated_at)`
     would make the second run free, and that is the follow-up.
 
+17. **The hover/press sweep is a family sample, not a census.** `--states` puts a
+    real pointer on one representative of each control *family* it finds on each
+    route (44 controls across five routes × two themes on the current build),
+    so a defect that only affects, say, the third row's button rather than the
+    first would be missed — the sampling exists because a full census is ~700
+    controls × four round trips each. It skips disabled and hidden controls (they
+    cannot answer a pointer), it measures with one browser's transition timing,
+    and its 8%/12% comparison is against the shadow's own alpha rather than
+    against a composited screenshot, so a layer that is present but painted over
+    by something else would pass. Focus, by contrast, *is* a census.
+
 ## How to check any of this yourself
 
 ```bash

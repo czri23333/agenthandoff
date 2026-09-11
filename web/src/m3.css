@@ -253,10 +253,29 @@
   --ah-state-layer-color: var(--ah-c-icon-button-variant-standard-content);
 }
 
+/* M3's state layer applies to every interactive component, and this family had
+   none on hover — the base rule set `--ah-state-layer-color` and the press rule
+   spent it, so an icon button answered the pointer with nothing at all.
+   Measured by the state sweep: hover layer alpha **0.000** on all ten icon
+   buttons it reaches (light and dark, five routes) while the same elements
+   showed 0.12 on press. `IconButtonTokens` publishes the same 8%/12% pair as
+   every other family, so this is the ordinary layer, not a new decision. */
+.ah-iconbtn:hover:not(:disabled),
+:root .ant-btn-icon-only:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-hover), transparent);
+}
+
+/* The press rule carries its own layer, and it has to come after the hover rule:
+   pressing keeps `:hover` true, both selectors are (0,4,0), and without the 12%
+   here the 8% hover layer won on source order — measured as `press 0.080` on all
+   ten icon buttons the state sweep reaches. */
 .ah-iconbtn:active:not(:disabled),
 :root .ant-btn-icon-only:active:not(:disabled) {
   border-radius: var(--ah-c-icon-button-small-shape-pressed);
   transform: none;
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-pressed), transparent);
 }
 
 .ah-iconbtn--filled {
@@ -756,17 +775,36 @@
   font-weight: var(--ah-c-segmented-type-role-weight);
 }
 
+:root .ant-segmented .ant-segmented-item {
+  /* The layer composites the *segment's own* content colour, so a selected
+     segment gets `on-secondary-container` over its container and an unselected
+     one gets its own ink. */
+  --ah-state-layer-color: var(--ah-c-segmented-unselected-content);
+}
+
 :root .ant-segmented .ant-segmented-item-selected,
-:root .ant-segmented .ant-segmented-thumb,
-:root .ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) {
+:root .ant-segmented .ant-segmented-thumb {
   background: var(--ah-c-segmented-selected-container);
   color: var(--ah-c-segmented-selected-content);
   box-shadow: none;
+  --ah-state-layer-color: var(--ah-c-segmented-selected-content);
 }
 
-:root .ant-segmented .ant-segmented-item:active {
+/* Hover is the official 8% layer — not the selected container. The previous
+   version painted an *unselected* segment with `secondary-container` on hover,
+   which made pointing at a segment look like selecting it, and that is the
+   swapped-background mechanism this contract forbids. The state sweep found it
+   as `hover layer 0.000`: there was no layer, only a fill. */
+:root .ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-disabled) {
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-hover), transparent);
+}
+
+:root .ant-segmented .ant-segmented-item:active:not(.ant-segmented-item-disabled) {
   border-radius: var(--ah-c-segmented-shape);
   transform: none;
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color) var(--ah-state-pressed), transparent);
 }
 
 :root .ant-segmented .ant-segmented-item-label {

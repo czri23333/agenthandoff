@@ -859,6 +859,67 @@ def test_the_percentage_gate_can_fail():
     assert not offending("padding-inline-end: calc(var(--ah-c-a) + var(--ah-c-b));")
 
 
+def test_the_state_gate_finds_a_control_with_no_hover_feedback():
+    """The gate that found every icon button answering the pointer with nothing.
+
+    Reading the stylesheet would not have: the family set
+    `--ah-state-layer-color` in its base rule and spent it in its press rule, so
+    the sheet *looked* complete. The pointer said otherwise — hover layer alpha
+    `0.000` on all ten icon buttons — and this is the decision that says so.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_7", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    # The parser bug that produced a defect which did not exist: `int()` on
+    # `0.270588 * 255` is 68, so a token's `#49454f` read back as `#49444f`.
+    assert audit._colour_and_alpha("color(srgb 0.286275 0.270588 0.309804 / 0.08)") == (
+        "#49454f",
+        0.08,
+    )
+    assert audit._state_layer(
+        {"sh": "rgba(103, 80, 164, 0.12) 0px 0px 0px 9999px inset", "pseudo": []}
+    ) == ("#6750a4", 0.12)
+    assert audit._state_layer(
+        {"sh": "none", "pseudo": [{"bg": "color(srgb 0.403922 0.313726 0.643137 / 0.08)"}]}
+    ) == ("#6750a4", 0.08)
+
+    def row(**kw):
+        base = {
+            "label": "light #/ ah-iconbtn",
+            "tokens": ["#6750a4", "#49454f"],
+            "rest": {"bg": "rgba(0, 0, 0, 0)", "bd": "#49454f", "sh": "none",
+                     "filter": "none", "pseudo": []},
+            "hover": {"bg": "rgba(0, 0, 0, 0)", "bd": "#49454f",
+                      "sh": "rgba(103, 80, 164, 0.08) 0px 0px 0px 9999px inset",
+                      "filter": "none", "pseudo": []},
+            "press": {"bg": "rgba(0, 0, 0, 0)", "bd": "#49454f",
+                      "sh": "rgba(103, 80, 164, 0.12) 0px 0px 0px 9999px inset",
+                      "filter": "none", "pseudo": []},
+        }
+        for key, value in kw.items():
+            base[key] = {**base[key], **value} if isinstance(value, dict) else value
+        return base
+
+    assert audit.state_defects([row()]) == []
+    assert audit.state_defects([row(hover={"sh": "none"})]) == [
+        "light #/ ah-iconbtn: no hover feedback"
+    ]
+    pressed = row()
+    pressed["press"]["sh"] = "rgba(103, 80, 164, 0.08) 0px 0px 0px 9999px inset"
+    assert audit.state_defects([pressed]) == [
+        "light #/ ah-iconbtn: press layer is 0.080, want 0.12"
+    ]
+    derived = row()
+    derived["hover"]["sh"] = "rgba(194, 189, 201, 0.08) 0px 0px 0px 9999px inset"
+    assert "is in no token" in audit.state_defects([derived])[0]
+    assert "hover swaps bg" in audit.state_defects([row(hover={"bg": "rgba(230, 224, 233, 1)"})])[0]
+    assert "changes `filter`" in audit.state_defects([row(hover={"filter": "brightness(0.9)"})])[0]
+
+
 def test_the_overlap_gate_reports_a_pair_and_refuses_an_empty_sweep():
     """The check that found a `.zip` button painted over a segmented control.
 
