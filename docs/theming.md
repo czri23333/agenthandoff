@@ -696,6 +696,41 @@ palette the generated one. The first paint after a cold load with a seed shows
 the baseline for one frame, which is a complete legible palette, and then the
 generated one.
 
+### The device's other requests
+
+Light/dark is not the only thing a platform can ask for. Two more signals are
+handled, and both were measured before they were written:
+
+**`forced-colors: active`** (Windows high contrast, and the high-contrast
+extension). The state layer is an inset `box-shadow`, and this mode forces
+`box-shadow: none` — measured: every control answered the pointer with
+`sh: none`, so hover and press produced nothing but the M3E shape morph. The
+affordance moves to an outline in *system* colours (`CanvasText` on hover,
+`Highlight` on press, inset by 2px so nothing reflows): the brand palette is
+supposed to disappear in this mode, the feedback is not. Everything else was
+checked rather than assumed — the focus ring survives as
+`rgb(55, 0, 110) solid 3px` at a 2px offset (the UA's `Highlight`), the tab
+indicator survives as a 3px system-coloured bar, a selected segment still differs
+from an unselected one by its forced fill, and the CLI chips fall back to
+`Canvas`/`CanvasText`.
+
+That arm is a *list* of families, which is exactly the kind of thing that rots
+silently — and the first version did: it named only `.ah-*` classes, and most
+buttons in this cockpit are antd `Button`s that never carry one, so the arm
+measured no effect at all. `--states` now repeats its pass under
+`forced-colors: active` and requires each sampled control to show an outline on
+hover and on press, so a family missing from that list is a failure rather than a
+silence.
+
+**`prefers-contrast: more`.** The palette is already WCAG-AA, so the honest answer
+is not a second palette but stronger *separators*: `--ah-line` is re-pointed at
+`--ah-line-strong`, the published rung above it in both themes (`#cac4d0` →
+`#79747e` light, `#49454f` → `#938f99` dark). No opacity is invented and the
+official 8%/12% state layers are untouched. The rule needs `html:root[data-theme]`
+because the generated stylesheet is appended at runtime: a plain `:root` rule
+loses on both specificity and order, which is how the first version measured no
+change at all.
+
 ## Adding a colour
 
 1. Add it to `BASE` in `scripts/gen_tokens.py` for both themes.

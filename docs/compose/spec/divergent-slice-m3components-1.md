@@ -26,7 +26,7 @@ declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **399 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+tests/` → **400 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
 --check` → 21 rows, README and `support-matrix.json` match the fixtures ·
 `conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
 `npm run build` → clean, dist rebuilt and committed.
@@ -40,6 +40,7 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | disabled states, gated | `--disabled` checks 18 gallery variants: none fades itself, none takes focus, none answers the pointer. The expected opacity comes from `tokens.json` (`checkbox`/`radio` publish `disabled.opacity: 0.38`; switch, field, segmented and slider publish per-part opacities and must stay at 1). It found a disabled FAB and a disabled filter chip falling through to `button:disabled { opacity: 0.38 }`, which fades container, content and the FAB's elevation together. Mutation proof: renaming both new rules made it report `opacity 0.38, want 1.00` for each |
 | device colour scheme | a fresh profile resolves to `auto` and follows the emulated OS scheme (`dark` → primary `#d0bcff`, `light` → `#6750a4`); flipping the OS scheme **while the page is open** re-themes without a reload and without writing a stored key; a stored `dark`/`light` still wins. Browsers expose no wallpaper/accent colour, so this is the whole of "follow the device" on the web |
 | custom seed | seed `#006a6a` → light `primary #006a6a` / `surface #f4fbfa`, dark `primary #80d5d4` / `surface #0e1514`, generated at runtime by `@material/material-color-utilities` (`SchemeTonalSpot`, 2021 spec) for all 49 roles plus the cockpit's aliases; survives a reload; composes with `auto` (the OS flip still switches palettes). Lazy: with no stored seed **0** module chunks are fetched, and the library is a 129.7 KB chunk instead of +96.4 KB on the entry. AA gate: refused a seed only under a mutated 10.0 threshold (`light accent/surface-2 = 5.23:1`, seed not stored, palette unchanged) — every real seed tried passes at 5.23–5.30:1 |
+| high-contrast modes | under `forced-colors: active` the mode drops every `box-shadow` (measured: `sh: none` on hover and press), so feedback moves to a system-coloured outline — hover `solid 1px` `CanvasText`, press `solid 2px` `Highlight` inset by 2px, measured on a real pointer. The focus ring survives at `rgb(55, 0, 110) solid 3px @2px`, the tab indicator as a 3px system bar, a selected segment by its forced fill. `prefers-contrast: more` re-points `--ah-line` at `--ah-line-strong` (`#cac4d0` → `#79747e` light, `#49454f` → `#938f99` dark). `--states` repeats under forced colours: five routes × two themes × both modes = **88 controls**, 0 defects. Mutation proof: removing `.ant-btn` from that arm made it report `no visible hover feedback in forced-colors` in both themes |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
@@ -238,6 +239,20 @@ by a look:
     proven by mutation instead — raising the threshold to 10.0 made the menu warn,
     refuse to store the seed and keep the baseline palette. Both limits are in
     `docs/limitations.md` item 19.
+13. **The device's other two requests.** Light/dark is not the only signal a
+    platform sends. Under `forced-colors: active` every state layer vanished —
+    the mode forces `box-shadow: none`, measured on a real pointer — so hover and
+    press became "nothing happens". Feedback now moves to a system-coloured
+    outline (`CanvasText` on hover, `Highlight` on press), while the focus ring
+    (`rgb(55, 0, 110) solid 3px @2px`), the tab indicator and the selected segment
+    were each measured to survive as system colours. `prefers-contrast: more` had
+    no effect at all before this round; it now re-points the separator token at the
+    published rung above it. Both arms are checked, not asserted: `--states` runs a
+    second pass under forced colours (88 controls across both modes) and a mutation — dropping
+    `.ant-btn` from the arm — made it report `no visible hover feedback in
+    forced-colors` in both themes. That mutation also caught a bug in the check
+    itself: `"rgb(0, 0, 0) none 3px".split(" ")[1]` is `"0,"`, so the first version
+    read every invisible outline as visible.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -571,3 +586,8 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       through Google's dynamic-colour library at the 2021 spec, lazily loaded
       (0 chunks fetched without one), AA-gated on the same pairs as the baseline,
       with `ok`/`warn` and the CLI inks deliberately untouched (covers: S2)
+- [x] T19: High-contrast modes — `forced-colors: active` gets system-coloured
+      hover/press outlines (the mode drops `box-shadow`), the ring/indicator/
+      selected states were each measured to survive, and `prefers-contrast: more`
+      strengthens separators; `--states` re-runs under forced colours so the
+      family list cannot rot silently (covers: S2; depends: T16)

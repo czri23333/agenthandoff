@@ -717,6 +717,92 @@ html {
   }
 }
 
+/* ── The device's other requests ─────────────────────────────────────────────
+   `prefers-reduced-motion` is handled above. Two more signals a device can send,
+   both measured before they were written:
+
+   **forced-colors: active** (Windows high contrast, and the high-contrast
+   extension). The state layer is an inset `box-shadow`, and this mode forces
+   `box-shadow: none` — measured: every control answered the pointer with
+   `sh: none`, so hover and press produced nothing but the M3E shape morph. The
+   affordance moves to an outline in *system* colours: the brand palette is
+   supposed to disappear in this mode, the feedback is not. Everything else
+   degrades well and was checked rather than assumed — the focus ring survives
+   (`rgb(55, 0, 110) solid 3px at a 2px offset`, the UA's `Highlight`), the tab
+   indicator survives as a 3px system-coloured bar, and a selected segment still
+   differs from an unselected one by its forced fill.
+
+   **prefers-contrast: more.** The palette is already WCAG-AA, so the honest
+   response is not a new palette but stronger *separators*: the border token
+   moves from `outline-variant` to `outline`, which is the published rung above it
+   in both themes (`#cac4d0` → `#79747e` light, `#49454f` → `#938f99` dark). No
+   opacity is invented and the official 8%/12% state layers are left alone. */
+@media (forced-colors: active) {
+  /* The list is every family that carries a state layer, ours *and* antd's: the
+     first version named only `.ah-*` and measured no effect at all, because most
+     buttons in this app are antd `Button`s that never carry the `.ah-` class. */
+  :is(
+      .ah-btn,
+      .ant-btn,
+      .ah-iconbtn,
+      .ant-btn-icon-only,
+      .ah-fab,
+      .ah-mchip,
+      .ah-filterchip,
+      .ah-row,
+      .ah-tab,
+      .ant-segmented-item,
+      .ant-dropdown-menu-item,
+      .ant-switch,
+      .ant-slider-handle,
+      .ah-select-chip,
+      .ant-select.ah-select-chip,
+      .ant-pagination-item,
+      .ant-pagination-prev,
+      .ant-pagination-next,
+      .ant-pagination-jump-prev,
+      .ant-pagination-jump-next
+    ):hover:not(:disabled):not([aria-disabled="true"]) {
+    outline: 1px solid CanvasText;
+    outline-offset: -2px;
+  }
+
+  :is(
+      .ah-btn,
+      .ant-btn,
+      .ah-iconbtn,
+      .ant-btn-icon-only,
+      .ah-fab,
+      .ah-mchip,
+      .ah-filterchip,
+      .ah-row,
+      .ah-tab,
+      .ant-segmented-item,
+      .ant-dropdown-menu-item,
+      .ant-switch,
+      .ant-slider-handle,
+      .ah-select-chip,
+      .ant-select.ah-select-chip,
+      .ant-pagination-item,
+      .ant-pagination-prev,
+      .ant-pagination-next,
+      .ant-pagination-jump-prev,
+      .ant-pagination-jump-next
+    ):active:not(:disabled):not([aria-disabled="true"]) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  /* `html:root[data-theme]` is (0,2,1) against the injected `:root[data-theme="…"]`
+     at (0,2,0), and the injected stylesheet is appended at runtime — so a plain
+     `:root` rule here loses twice. */
+  html:root[data-theme] {
+    --ah-line: var(--ah-line-strong);
+  }
+}
+
 /* The budget gauge is the same "surface resizing" case as the progress bar: the
    fill is sized inline by React, so easing the width is what makes a sampling
    update read as the gauge moving rather than jumping between two numbers. */

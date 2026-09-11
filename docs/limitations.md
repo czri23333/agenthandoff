@@ -182,6 +182,19 @@ sampled away.
     the same library was measured at 20–25 differing roles and is not what this
     ships).
 
+20. **High-contrast modes are handled, not proven.** `forced-colors: active`
+    restores hover/press feedback as a system-coloured outline (the mode drops
+    `box-shadow`), and `--states` re-runs under it — but that arm is a *list* of
+    families, and the check only covers the families the family-based sample
+    reaches on the routes it visits; a control that appears nowhere in those five
+    routes is not covered. `prefers-contrast: more` only strengthens separators
+    (`--ah-line` → `--ah-line-strong`); it does not raise text contrast, change the
+    palette, or thicken the focus ring, because M3 publishes no high-contrast
+    variant for any of those and inventing one would be ours, not Google's. Both
+    were measured under emulation in one browser — no real Windows high-contrast
+    theme, no macOS "increase contrast", and no forced-colors run on the *gallery*
+    (which the disabled sweep uses).
+
 ## How to check any of this yourself
 
 ```bash

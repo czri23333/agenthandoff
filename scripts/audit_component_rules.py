@@ -855,6 +855,8 @@ STATE_SNAP_JS = r"""
     sh: c.boxShadow.slice(0, 110),
     radius: c.borderTopLeftRadius,
     filter: c.filter,
+    outline: c.outline,
+    outlineOffset: c.outlineOffset,
     pseudo: ["::before", "::after"].map(p => {
       const q = getComputedStyle(el, p);
       return { p, bg: q.backgroundColor, sh: q.boxShadow.slice(0, 90) };
@@ -940,6 +942,20 @@ def state_defects(rows: list[dict]) -> list[str]:
         where = row["label"]
         tokens = {c.lower() for c in row.get("tokens", [])}
         hover, press, rest = row["hover"], row["press"], row["rest"]
+        if row.get("forced"):
+            # Forced colours drop `box-shadow`, so the state layer *cannot* be the
+            # feedback here: the mode's answer is an outline in system colours, and
+            # that is what this pass requires. Colour and opacity are the user's in
+            # this mode, so they are not judged.
+            for state, snap in (("hover", hover), ("press", press)):
+                if not _outline_is_visible(str(snap.get("outline") or "")):
+                    out.append(
+                        f"{where}: no visible {state} feedback in forced-colors "
+                        "(box-shadow is dropped by the mode)"
+                    )
+            if hover["filter"] != rest["filter"]:
+                out.append(f"{where}: hover changes `filter` in forced-colors")
+            continue
         if hover["filter"] != rest["filter"]:
             out.append(
                 f"{where}: hover changes `filter` ({rest['filter']} -> {hover['filter']})"
@@ -1058,6 +1074,27 @@ def _channel_delta(a: str, b: str) -> int:
     if len(a) != 7 or len(b) != 7:
         return 255
     return max(abs(int(a[i : i + 2], 16) - int(b[i : i + 2], 16)) for i in (1, 3, 5))
+
+
+_OUTLINE_STYLE_RE = re.compile(
+    r"\b(none|hidden|solid|dashed|dotted|double|groove|ridge|inset|outset)\b"
+)
+_OUTLINE_WIDTH_RE = re.compile(r"(\d+(?:\.\d+)?)px")
+
+
+def _outline_is_visible(text: str) -> bool:
+    """Is a computed `outline` string an outline a reader can see?
+
+    Keyword-matching, not positional: `rgb(0, 0, 0) none 3px`.split(" ")[1] is
+    `"0,"`, so the first version of this check read every invisible outline as
+    visible and reported "forced-colors feedback is fine" on a build where it was
+    not. (Same comma trap as `_state_layer`, one function earlier.)
+    """
+    style = _OUTLINE_STYLE_RE.search(text or "")
+    if not style or style.group(1) in ("none", "hidden"):
+        return False
+    width = _OUTLINE_WIDTH_RE.search(text or "")
+    return bool(width) and float(width.group(1)) > 0
 
 
 def load_disabled_expectations() -> dict[str, dict[str, float | None]]:
@@ -1252,14 +1289,23 @@ def run_disabled_sweep(page, url: str, theme: str = "dark") -> dict:
     return {"rows": rows, "examined": len(rows)}
 
 
-def run_state_sweep(page, url: str, routes: list[str]) -> dict:
+def run_state_sweep(page, url: str, routes: list[str], forced: bool = False) -> dict:
     """Hover and press every interactive control, in both themes.
 
     Returns `{"rows": [...], "examined": n}` so the caller can judge the rows and
     show that the sweep was not empty.
+
+    `forced=True` repeats the pass under `forced-colors: active`, where the
+    platform drops every `box-shadow` and the feedback has to come from an
+    outline instead. That pass exists because the alternative is a hand-written
+    selector list nobody checks — and the first version of that list named only
+    `.ah-*` classes, which most buttons in this app do not carry, so it silently
+    did nothing.
     """
     rows: list[dict] = []
     tokens: set[str] = set()
+    if forced:
+        page.emulate_media(forced_colors="active")
     for theme in ("light", "dark"):
         page.goto(url, wait_until="domcontentloaded")
         page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["ah-theme", theme])
@@ -1312,11 +1358,14 @@ def run_state_sweep(page, url: str, routes: list[str]) -> dict:
                     {
                         "label": f"{theme} {route} {hover['cls'][:26]}",
                         "tokens": sorted(tokens),
+                        "forced": forced,
                         "rest": rest,
                         "hover": hover,
                         "press": press,
                     }
                 )
+    if forced:
+        page.emulate_media(forced_colors="none")
     return {"rows": rows, "examined": len(rows)}
 
 
@@ -1943,6 +1992,11 @@ def main() -> int:
                     found_states = run_state_sweep(page, url, args.route or ["#/"])
                     states["rows"].extend(found_states["rows"])
                     states["examined"] += found_states["examined"]
+                    forced_states = run_state_sweep(
+                        page, url, args.route or ["#/"], forced=True
+                    )
+                    states["rows"].extend(forced_states["rows"])
+                    states["examined"] += forced_states["examined"]
                 if args.overlap:
                     found_overlaps, seen = run_overlap_sweep(
                         page, url, args.route or ["#/"]

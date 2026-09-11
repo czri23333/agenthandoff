@@ -859,6 +859,34 @@ def test_the_percentage_gate_can_fail():
     assert not offending("padding-inline-end: calc(var(--ah-c-a) + var(--ah-c-b));")
 
 
+def test_the_forced_colors_check_reads_an_outline_by_keyword():
+    """Forced colours drop `box-shadow`, so feedback there has to be an outline.
+
+    The check that says so has to parse `getComputedStyle().outline`, and the
+    first version split it on spaces: `"rgb(0, 0, 0) none 3px".split(" ")[1]` is
+    `"0,"`, so every invisible outline read as visible and the gate reported
+    "fine" on a build where the hover feedback was gone. A mutation caught it —
+    removing `.ant-btn` from the forced-colors arm changed nothing until this
+    function learned to look for the keyword.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_9", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    # What Chrome actually prints, invisible and visible.
+    assert not audit._outline_is_visible("rgb(0, 0, 0) none 3px")
+    assert audit._outline_is_visible("rgb(0, 0, 0) solid 1px")
+    assert audit._outline_is_visible("rgb(55, 0, 110) solid 2px")
+    # Style present but no width, and the reverse.
+    assert not audit._outline_is_visible("rgb(0, 0, 0) solid 0px")
+    assert not audit._outline_is_visible("none")
+    assert not audit._outline_is_visible("")
+    assert audit._outline_is_visible("solid 2px rgb(0, 0, 0)")  # order is not fixed
+
+
 def test_the_disabled_gate_reads_its_expectation_from_the_token_file():
     """Two families publish a whole-element disabled opacity; the rest do not.
 
