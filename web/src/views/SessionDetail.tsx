@@ -92,6 +92,12 @@ function TranscriptRow({
   const shown = showRaw && m.raw_text ? m.raw_text : text;
   // Elapsed-time cost proxy (store clocks): "3.2s" when the store kept no
   // token billing for this turn. Verifiable, never estimated.
+  // Render rule #7: the official message area carries **no billing**. The
+  // measured duration is still available — it rides the row's hover tip and the
+  // model chip's title, which is where the asar-derived rule puts usage
+  // ("usage = header waterlevel hover") — but it is no longer a chip standing
+  // in the transcript. It used to be: `⏱ 1.2s` sat beside every assistant
+  // message that had no token rows, which is the deviation this closes.
   const durTip =
     typeof m.dur_ms === "number"
       ? m.dur_ms < 1000
@@ -135,14 +141,6 @@ function TranscriptRow({
       {!hasTokens && !hasCredits && hasEst ? (
         <span className="ah-faint">≈{m.tokens_estimated}</span>
       ) : null}
-      {!hasTokens && !hasCredits && !hasEst && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
-    </span>
-  ) : durTip ? (
-    <span
-      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-      title={`no model/token billing in store · measured +${durTip}`}
-    >
-      <span className="ah-faint">⏱ {durTip}</span>
     </span>
   ) : null;
 
@@ -204,9 +202,6 @@ function TranscriptRow({
                 {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
                 {!hasTokens && !hasCredits && hasEst ? (
                   <span className="ah-faint">≈{m.tokens_estimated}</span>
-                ) : null}
-                {!hasTokens && !hasCredits && !hasEst && durTip ? (
-                  <span className="ah-faint">⏱ {durTip}</span>
                 ) : null}
               </span>
             ) : null}
