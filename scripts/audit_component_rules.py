@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -171,6 +172,62 @@ SWEEP_JS = """
     bump('sizes', cs.fontSize, where);
   }
   return bad;
+}
+"""
+
+# The same question asked of a *running app* rather than of the gallery: every
+# distinct computed colour, radius, size and weight, each one checked against the
+# token table. This is what found `th { font-weight: 600 }` (antd's rule, in
+# antd's stylesheet, invisible to every source-scanning gate), a status tag at
+# 3.37:1 in the light theme, and the last two values that were not from a token.
+APP_SWEEP_JS = """
+() => {
+  const out = {};
+  const bump = (bucket, value, where) => {
+    if (!value || value === 'none' || value === 'normal' || value === 'auto') return;
+    out[bucket] = out[bucket] || {};
+    const key = `${value} :: ${where}`;
+    out[bucket][key] = (out[bucket][key] || 0) + 1;
+  };
+  // Tokens live on `:root` *and* on elements: a CLI identity chip carries
+  // `--ah-cli-bg` on itself, so a reader that only looks at the root reports
+  // every chip colour as off-token.
+  const values = {};
+  for (const el of [document.documentElement, ...document.querySelectorAll('[data-cli]')]) {
+    const cs = getComputedStyle(el);
+    for (const name of cs) {
+      if (!name.startsWith('--ah')) continue;
+      const v = cs.getPropertyValue(name).trim();
+      if (v) values[v] = true;
+    }
+  }
+  for (const el of document.querySelectorAll('body *')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+    const cs = getComputedStyle(el);
+    const where = el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0];
+    const hasText = [...el.childNodes].some(
+      (n) => n.nodeType === 3 && (n.textContent || '').trim().length > 0
+    );
+    if (hasText) {
+      bump('weights', cs.fontWeight, where);
+      bump('sizes', cs.fontSize, where);
+    }
+    bump('radii', cs.borderTopLeftRadius, where);
+    bump('colors', cs.color, where);
+    if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)') bump('colors', cs.backgroundColor, where);
+  }
+  // The comparison against the token table happens in Python, not here: a
+  // decision that only a browser can make is a decision no test can check.
+  // This side collects; `off_token()` decides.
+  // The distinct *values* per bucket, not the distinct (value, element) pairs:
+  // "188 colours examined" should mean 188 colours, not the same 20 counted
+  // once per element that happens to have them.
+  const distinct = {};
+  for (const bucket of Object.keys(out)) {
+    distinct[bucket] = [...new Set(Object.keys(out[bucket]).map((k) => k.split(' :: ')[0]))];
+  }
+  return { buckets: out, tokens: Object.keys(values), values: distinct };
 }
 """
 
@@ -517,6 +574,50 @@ def off_scale(sweep: dict) -> tuple[list[str], list[str]]:
     return weights, sizes
 
 
+def _rgb(value: str) -> str:
+    """A CSS colour in `rgb(r, g, b)` form, so hex and computed can be compared.
+
+    Tokens are stored as hex and computed values come back as `rgb(...)`; a raw
+    string comparison reports every single colour as off-token, which is how the
+    first version of this sweep produced a page of false positives.
+    """
+    text = " ".join(value.split())
+    six = re.fullmatch(r"#([0-9a-fA-F]{6})", text)
+    if six:
+        n = int(six.group(1), 16)
+        return f"rgb({(n >> 16) & 255}, {(n >> 8) & 255}, {n & 255})"
+    three = re.fullmatch(r"#([0-9a-fA-F]{3})", text)
+    if three:
+        c = three.group(1)
+        return (
+            f"rgb({int(c[0] * 2, 16)}, {int(c[1] * 2, 16)}, {int(c[2] * 2, 16)})"
+        )
+    return text
+
+
+def off_token(sweep: dict) -> tuple[list[str], list[str]]:
+    """Colours and radii from a running app that are in no token anywhere.
+
+    Weights and sizes are closed sets and `off_scale` checks them exactly.
+    Colours and radii are open — a value is only wrong if *nothing* in the token
+    table equals it — so this is the weaker question, and it is the one that
+    found a status tag at 3.37:1 whose pair antd's algorithm derived.
+    """
+    tokens = {_rgb(value) for value in sweep.get("tokens", [])}
+    buckets = sweep.get("buckets", {})
+
+    def rows(bucket: str) -> list[str]:
+        out: list[str] = []
+        for key, count in buckets.get(bucket, {}).items():
+            value = key.split(" :: ")[0]
+            if _rgb(value) in tokens:
+                continue
+            out.append(f"{key} (x{count})")
+        return sorted(out)
+
+    return rows("colors"), rows("radii")
+
+
 def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
     """Split the audit into defects, unverified and fine.
 
@@ -546,6 +647,19 @@ def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true", help="leave the gallery on disk")
+    parser.add_argument(
+        "--app",
+        action="append",
+        metavar="URL",
+        default=[],
+        help="also sweep a running cockpit (repeatable), e.g. --app http://127.0.0.1:18753/",
+    )
+    parser.add_argument(
+        "--route",
+        action="append",
+        default=[],
+        help="hash route to visit on each --app (repeatable; default #/)",
+    )
     args = parser.parse_args()
 
     if not (WEB / "node_modules").is_dir():
@@ -624,6 +738,32 @@ def main() -> int:
                 for bucket, entries in found.items():
                     for key, count in entries.items():
                         sweep[bucket][key] = sweep[bucket].get(key, 0) + count
+
+            # The running cockpit, if one was named. `domcontentloaded` rather
+            # than `networkidle`: the app polls, so the network never goes idle.
+            app_sweep: dict[str, dict[str, int]] = {}
+            for url in args.app:
+                for route in (args.route or ["#/"]):
+                    page.goto(url, wait_until="domcontentloaded")
+                    page.wait_for_selector("#ah-tokens", state="attached")
+                    page.wait_for_timeout(1200)
+                    page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+                    page.wait_for_timeout(2000)
+                    found = page.evaluate(APP_SWEEP_JS)
+                    app_sweep.setdefault("buckets", {})
+                    app_sweep.setdefault("tokens", [])
+                    app_sweep.setdefault("seen", {})
+                    app_sweep["tokens"] = sorted(
+                        set(app_sweep["tokens"]) | set(found.get("tokens", []))
+                    )
+                    for name, entries in found.get("values", {}).items():
+                        app_sweep["seen"][name] = sorted(
+                            set(app_sweep["seen"].get(name, [])) | set(entries)
+                        )
+                    for bucket, entries in found.get("buckets", {}).items():
+                        target = app_sweep["buckets"].setdefault(bucket, {})
+                        for key, count in entries.items():
+                            target[key] = target.get(key, 0) + count
             browser.close()
     finally:
         kill_tree(preview)
@@ -640,6 +780,8 @@ def main() -> int:
     defects, unverified, _ = reachable(rows)
     matched = sum(1 for r in rows if r["matched"] > 0)
     off_weight, off_size = off_scale(sweep)
+    app_weights, app_sizes = off_scale(app_sweep)
+    app_colors, app_radii = off_token(app_sweep)
     print(
         json.dumps(
             {
@@ -649,12 +791,32 @@ def main() -> int:
                 "unverified": unverified,
                 "off_scale_font_weights": off_weight,
                 "off_scale_font_sizes": off_size,
+                "app_off_scale_font_weights": app_weights,
+                "app_off_scale_font_sizes": app_sizes,
+                "app_colours_in_no_token": app_colors,
+                "app_radii_in_no_token": app_radii,
+                # How many distinct values the app sweep actually looked at.
+                # A violation list is only evidence if nothing produced it
+                # vacuously: the brief's own rule is that an empty set from an
+                # empty producer is a false green.
+                "app_distinct_values_examined": {
+                    name: len(entries) for name, entries in app_sweep.get("seen", {}).items()
+                },
             },
             indent=2,
         )
     )
-    if defects or off_weight or off_size:
-        for label, items in (("dead rules", defects), ("weights", off_weight), ("sizes", off_size)):
+    failures = {
+        "dead rules": defects,
+        "weights": off_weight,
+        "sizes": off_size,
+        "app weights": app_weights,
+        "app sizes": app_sizes,
+        "app colours": app_colors,
+        "app radii": app_radii,
+    }
+    if any(failures.values()):
+        for label, items in failures.items():
             for item in items:
                 print(f"  {label}: {item}")
         print(f"\n{len(defects)} rule(s) read component tokens and reach nothing.")

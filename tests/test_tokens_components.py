@@ -654,6 +654,49 @@ def test_the_audit_catches_a_weight_m3_does_not_publish():
     assert weights == [] and sizes == []
 
 
+def test_the_app_sweep_reports_what_it_looked_at():
+    """An empty violation list is only evidence if the sweep examined something.
+
+    The brief's own rule: "an empty set from an empty producer is a false
+    green". The running-app sweep returns the counts it checked beside the
+    violations it found, so a sweep that silently matched nothing is visible in
+    its own output rather than reported as a pass.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_3", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    colors, radii = audit.off_token(
+        {
+            "tokens": ["#e6e0e9", "#d0bcff", "#141218", "9999px"],
+            "buckets": {
+                "colors": {
+                    "rgb(230, 224, 233) :: div": 1391,
+                    "rgb(180, 163, 220) :: i.ant-spin-dot-item": 4,
+                },
+                "radii": {
+                    "9999px :: button": 249,
+                    "calc(infinity * 1px) :: span.freshness-dot": 1,
+                },
+            },
+            "checked": {"colors": 188, "radii": 147},
+        }
+    )
+    # `#e6e0e9` is a token, so the first colour is *not* a violation even though
+    # it is written differently on the two sides; and `9999px` is a token too
+    # (`--ah-shape-full`), so `rounded-full` written as a length passes while
+    # Tailwind's `calc(infinity * 1px)` spelling does not.
+    assert colors == ["rgb(180, 163, 220) :: i.ant-spin-dot-item (x4)"]
+    assert radii == ["calc(infinity * 1px) :: span.freshness-dot (x1)"]
+
+    # A sweep that examined nothing says so.
+    colors, radii = audit.off_token({"buckets": {}, "tokens": [], "checked": {}})
+    assert colors == [] and radii == []
+
+
 def test_the_percentage_gate_can_fail():
     """Positive control for the guard above."""
 

@@ -391,8 +391,25 @@ It writes the gallery to a temp directory (junctions to `web/node_modules` and
 states — a dialog traps the pointer, and a dropdown only exists while it is open
 — and merges the results. Its classifier is exercised by a pytest, so the part
 that decides *dead* from *unverified* runs in CI even where no browser does.
-Measured on the shipped sheet: **222 of 271** rules reach an element, **0**
+Measured on the shipped sheet: **224 of 278** rules reach an element, **0**
 defects, 3 unverified with a written reason each.
+
+Point it at a running cockpit as well and it sweeps the *rendered product*:
+
+```bash
+python scripts/audit_component_rules.py --app http://127.0.0.1:18753/ \
+    --route "#/" --route "#/memory" --route "#/threads" --route "#/doctor"
+```
+
+That pass collects every distinct computed colour, radius, font size and font
+weight on each route and asks whether each one exists in the token table. It is
+the only check that can see a value antd *derives*, and it has found three:
+`th { font-weight: 600 }` (M3 publishes no 600, and the rule lives in antd's
+stylesheet), a status tag at **3.37:1** in the light theme, and a spinner drawn
+in `rgb(180,163,220)`, a colour in no token anywhere. Measured now: **2 weights,
+3 sizes, 5 radii and 14 colours** distinct across the four routes, **none of them
+off-token** — and the counts are printed beside the verdict, because a violation
+list is only evidence if the sweep examined something.
 
 Two more gates: the values themselves are an independent hand transcription of
 Google's files (so a generator typo fails instead of regenerating a wrong file
