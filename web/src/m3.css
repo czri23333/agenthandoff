@@ -1957,3 +1957,61 @@
 .ah-card__rule--err::before {
   background: var(--ah-err);
 }
+/* ── Banner (antd's Alert) ──────────────────────────────────────────────────
+   M3 publishes no banner, so this is our composition and it says so in the
+   deviation register — but it takes the one pattern M3 *does* publish for
+   "message on a surface": a tonal container with the surface's own ink on it,
+   which is exactly what `.ah-tonal-*` already does elsewhere in the app.
+
+   antd's own warning palette made this the loudest thing on the transcript
+   screen: a full-width olive band with amber text, whose contrast nobody had
+   checked. Ours is `--ah-warn-container` / `--ah-err-container` (both AA-gated
+   against `text1` in tests/test_tokens_contrast.py) with `text1` on top. */
+:root .ant-alert {
+  border: 0;
+  color: var(--ah-text-1);
+}
+
+:root .ant-alert-info {
+  background: var(--ah-accent-container);
+}
+
+:root .ant-alert-success {
+  background: var(--ah-ok-container);
+}
+
+:root .ant-alert-warning {
+  background: var(--ah-warn-container);
+}
+
+:root .ant-alert-error {
+  background: var(--ah-err-container);
+}
+
+:root .ant-alert .ant-alert-message {
+  color: var(--ah-text-1);
+  font-size: var(--ah-type-label-large-size);
+  line-height: var(--ah-type-label-large-line);
+  font-weight: var(--ah-type-label-large-weight);
+}
+
+:root .ant-alert .ant-alert-description {
+  color: var(--ah-text-1);
+}
+
+/* The icon carries the severity; the container carries the message. */
+:root .ant-alert-info .ant-alert-icon {
+  color: var(--ah-accent);
+}
+
+:root .ant-alert-success .ant-alert-icon {
+  color: var(--ah-ok);
+}
+
+:root .ant-alert-warning .ant-alert-icon {
+  color: var(--ah-warn);
+}
+
+:root .ant-alert-error .ant-alert-icon {
+  color: var(--ah-err);
+}
