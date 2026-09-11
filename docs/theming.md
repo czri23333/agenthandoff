@@ -58,7 +58,7 @@ re-derive every judgement.
 | `FabMediumTokens.ContainerShape` | **ours**: `corner-large` (16px) | Google's file has that line commented out (`// TODO: uncomment when ShapeKeyTokens.CornerLargeIncreased is available`) and no published token set gives `corner-large-increased` a dp value. M3E's intent is 20dp; 16 is our inference, marked `shapeOurs` in `tokens.json` rather than presented as Google's |
 | one number, one operator | the opacity token *is* the percentage, and no rule multiplies it again | `color-mix(… var(--ah-c-dialog-scrim-opacity) …)`. The first draft wrote `calc(var(… ) * 100%)`, i.e. percentage × percentage, which is not a valid calc type: the declaration was invalid at computed-value time and the dialog painted **no scrim at all**. A fallback would not have rescued it — an invalid substituted value discards every candidate for that property |
 | list rows sit on `surface` (`ListTokens.ItemContainerColor`) | `surface-container-low`, no border | a screen of 118 rows needs a resting fill to scan; the *border* is gone, which is what M3 actually forbids, and the fill is one step |
-| M3E's loading indicator morphs between shapes | it rotates | the morph is a Compose path animation; CSS has no equivalent, and a loader that lies about its progress is worse than one that spins |
+| M3E's loading indicator morphs between shapes along a path | it morphs its *corner* while turning: `corner-full` → `corner-extra-small` four times per revolution | the Compose morph is a path animation CSS cannot express, so this is the closest equivalent and is labelled as one. The first attempt rotated a circle, which is a no-op — a circle has no feature to turn — so the loader read as a static purple dot. Measured after the fix: 28 distinct corner radii in 1.2 s, from 19.5px to fully round |
 | `SearchBarTokens` publishes no placeholder ink | the placeholder borrows the supporting-text role, `on-surface-variant` | same tier, same published role, rather than a new colour |
 | M3 primary navigation tabs are a top-level destination control | the cockpit's shortcut keys (`1`–`5`) render inside each tab as a small hint | the shortcuts are a real feature of this product and cannot live in a tooltip; the label itself is no longer `会话 1`, which is what made the tabs read as names |
 
@@ -264,8 +264,8 @@ Corner-radius tuning does not fix a control that is the wrong component.
 
 **What this round cost, in honesty:** the list row keeps a `surface-container-low`
 fill where `ListTokens.ItemContainerColor` says `surface` (a 118-row screen needs
-a resting fill to scan); the loading indicator rotates instead of morphing
-between M3E's shapes, because that morph is a Compose path animation CSS cannot
+a resting fill to scan); the loading indicator morphs its *corner* rather than
+along M3E's shape path, because that morph is a Compose path animation CSS cannot
 express; and the search bar's placeholder borrows the supporting-text role,
 because SearchBarTokens publishes no placeholder ink. All three are in the
 deviation register below.

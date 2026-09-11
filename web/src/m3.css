@@ -1268,9 +1268,15 @@
 /* ── Loading indicator (M3E) ────────────────────────────────────────────────
    LoadingIndicatorTokens: a 48dp corner-full container in primary-container with
    a 38dp active shape in on-primary-container. antd's `Spin` is a 20px antd dot
-   in `colorPrimary`; this is the M3E shape-morphing loader's container. Its
-   animation is a rotation, because the shape morph between the M3E shapes is a
-   Compose path animation CSS cannot express — recorded as a deviation. */
+   in `colorPrimary`; this is the M3E shape-morphing loader's container.
+
+   The first version rotated a circle, which is a no-op: a circle has no feature
+   to rotate, so the loader read as a *static purple dot* and said nothing. What
+   M3E's indicator actually does is change shape, so this one morphs — the
+   corner travels between `corner-full` and `corner-extra-small` while the whole
+   shape turns, which is the closest CSS gets to the Compose path morph. That
+   morph is still an approximation and is recorded as one; a loader that does
+   not appear to move is not an approximation, it is a defect. */
 
 .ah-loading {
   display: inline-flex;
@@ -1280,7 +1286,8 @@
   height: var(--ah-c-loading-indicator-container-height);
   border-radius: var(--ah-c-loading-indicator-container-shape);
   background: var(--ah-c-loading-indicator-container-color);
-  animation: ah-spin var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-linear) infinite;
+  animation: ah-loading-turn var(--ah-motion-duration-extra-long4)
+    var(--ah-motion-easing-linear) infinite;
 }
 
 .ah-loading::after {
@@ -1289,6 +1296,27 @@
   height: var(--ah-c-loading-indicator-active-size);
   border-radius: var(--ah-c-loading-indicator-active-shape);
   background: var(--ah-c-loading-indicator-active-color);
+  animation: ah-loading-morph calc(var(--ah-motion-duration-extra-long4) / 4)
+    var(--ah-motion-easing-standard) infinite;
+}
+
+/* The turn is on the container and the morph on the shape, so the two can have
+   different periods: the shape changes four times per revolution, which is the
+   rhythm M3E's indicator has (a morph every ~250ms against a 1s turn). */
+@keyframes ah-loading-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ah-loading-morph {
+  0%,
+  100% {
+    border-radius: var(--ah-c-loading-indicator-active-shape);
+  }
+  50% {
+    border-radius: var(--ah-shape-xs);
+  }
 }
 
 .ah-loading--uncontained {
