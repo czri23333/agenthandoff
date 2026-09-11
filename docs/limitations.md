@@ -124,8 +124,10 @@ sampled away.
     the 2px outward offset (an `outline` cannot read a host's radius — recorded in
     `docs/theming.md`), and the focus *layer* is tied to `:focus-visible` rather
     than `:focus`, so a pointer click focuses a control without the 12%.
-    `prefers-reduced-motion` collapses the grow/settle animation through the
-    existing block, which is verified by the stylesheet rather than measured.
+    `prefers-reduced-motion` was measured on one element (no animations, `3px`
+    immediately, against the running pair and a `5px` mid-flight sample with
+    motion allowed) rather than across the sweep, which does not run in a
+    reduced-motion context.
 
 ## How to check any of this yourself
 

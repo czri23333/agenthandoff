@@ -174,6 +174,14 @@ Select's inner input — delegate the ring to the chip that draws their box, whi
 is why the gate treats "no ring here, a ring on an ancestor" as a pass rather
 than a failure.
 
+`prefers-reduced-motion: reduce` skips the pulse without losing the ring, which
+the existing block's `animation-duration: 0.001ms !important` is not obviously
+enough to guarantee — so it was measured rather than assumed. Same element, same
+focus call: with `no-preference` the two animations are running (`150ms` and
+`450ms` after a `150ms` delay) and the width reads `0px` at t=0 and `5px` at
+250ms on its way to 3; with `reduce` the element reports **no** animations and
+`3px` of `secondary` at a `2px` offset immediately.
+
 Three things this replaced, all measured first:
 
 1. `2px solid var(--ah-accent)` — our thickness and our role.
