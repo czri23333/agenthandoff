@@ -1214,6 +1214,37 @@
   font-weight: var(--ah-c-menu-type-role-weight);
 }
 
+/* A Dropdown's menu is the same component as a Select's, and antd gives them
+   different class names — `.ant-dropdown-menu-item` versus `.ant-select-item`.
+   Styling only the Select left the display-settings menu with antd's derived
+   `rgb(76,70,91)` for its selected row instead of `secondary-container`. */
+:root .ant-dropdown-menu-item {
+  border-radius: var(--ah-c-menu-item-shape);
+  color: var(--ah-c-menu-content);
+  font-size: var(--ah-c-menu-type-role-size);
+  line-height: var(--ah-c-menu-type-role-line);
+  letter-spacing: var(--ah-c-menu-type-role-tracking);
+  font-weight: var(--ah-c-menu-type-role-weight);
+}
+
+:root .ant-dropdown .ant-dropdown-menu-item-selected {
+  background: var(--ah-c-menu-selected-container);
+  color: var(--ah-c-menu-selected-content);
+}
+
+:root .ant-dropdown .ant-dropdown-menu-item-selected .ant-dropdown-menu-item-icon,
+:root .ant-dropdown .ant-dropdown-menu-item-selected .anticon {
+  color: var(--ah-c-menu-leading-icon-color);
+}
+
+:root .ant-dropdown .ant-dropdown-menu-item:hover:not(.ant-dropdown-menu-item-selected) {
+  background: color-mix(
+    in srgb,
+    var(--ah-c-menu-content) var(--ah-state-hover),
+    transparent
+  );
+}
+
 /* Hovering a menu item is the official state layer, not antd's derived tint:
    M3 composites the item's own content colour at 8% over the menu surface. */
 :root .ant-select-item-option-active:not(.ant-select-item-option-selected),

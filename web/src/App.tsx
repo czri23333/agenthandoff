@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { Layout, Segmented, Tooltip, Typography } from "antd";
+import { Dropdown, Layout, Tooltip, Typography } from "antd";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
 import { setThemeMode, useTheme, type ThemeMode } from "./theme";
 import Dashboard from "./views/Dashboard";
@@ -171,29 +171,44 @@ export default function App() {
             );
           })}
         </nav>
-        <Tooltip title={t("themeToggleHint")}>
-          <Segmented
-            size="small"
-            className="shrink-0"
-            value={mode}
-            onChange={(v) => setThemeMode(v as ThemeMode)}
-            options={[
-              { label: t("themeAuto"), value: "auto" },
-              { label: t("themeDark"), value: "dark" },
-              { label: t("themeLight"), value: "light" },
-            ]}
-          />
-        </Tooltip>
-        <Segmented
-          size="small"
-          className="shrink-0"
-          value={lang}
-          onChange={(v) => setLang(v as Lang)}
-          options={[
-            { label: "中", value: "zh" },
-            { label: "EN", value: "en" },
-          ]}
-        />
+        {/* Display settings are an icon button and a menu, not two more
+            segmented buttons. The toolbar above already has one segmented
+            control (the search mode) and one below it (the grouping), which is
+            what a segmented button is *for* — a filter. Theme and language are
+            settings: M3 puts them on an IconButtonTokens trigger that opens a
+            MenuTokens menu, and four identical pills in one bar is the thing
+            that read as "not a Material app". The `T` shortcut still cycles the
+            theme without opening the menu. */}
+        <Dropdown
+          trigger={["click"]}
+          placement="bottomRight"
+          menu={{
+            selectedKeys: [`theme:${mode}`, `lang:${lang}`],
+            onClick: ({ key }) => {
+              const [group, value] = key.split(":");
+              if (group === "theme") setThemeMode(value as ThemeMode);
+              else setLang(value as Lang);
+            },
+            items: [
+              { key: "theme:auto", label: t("themeAuto") },
+              { key: "theme:dark", label: t("themeDark") },
+              { key: "theme:light", label: t("themeLight") },
+              { type: "divider" },
+              { key: "lang:zh", label: "中文" },
+              { key: "lang:en", label: "EN" },
+            ],
+          }}
+        >
+          <Tooltip title={t("themeToggleHint")}>
+            <button
+              type="button"
+              className="ah-iconbtn shrink-0"
+              aria-label={t("displaySettings")}
+            >
+              <span aria-hidden="true">◐</span>
+            </button>
+          </Tooltip>
+        </Dropdown>
         <Typography.Text className="ah-md-hide ah-faint" style={{ whiteSpace: "nowrap" }}>
           {t("localOnly")}
         </Typography.Text>

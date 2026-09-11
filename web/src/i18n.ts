@@ -216,6 +216,7 @@ const dict = {
     themeDark: "夜间",
     themeLight: "日间",
     themeToggleHint: "切换主题（T）· 配色已按 WCAG AA 校验",
+    displaySettings: "显示设置（主题 / 语言）",
     /* interruption states -------------------------------------------------- */
     it_clean: "正常结束",
     it_user_pending: "有未执行的指令",
@@ -440,6 +441,7 @@ const dict = {
     themeDark: "dark",
     themeLight: "light",
     themeToggleHint: "cycle theme (T) · every pair is WCAG-AA verified",
+    displaySettings: "display settings (theme / language)",
     /* interruption states -------------------------------------------------- */
     it_clean: "clean end",
     it_user_pending: "un-executed directive",
