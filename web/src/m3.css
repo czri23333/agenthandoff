@@ -1225,18 +1225,24 @@
   border-radius: var(--ah-c-chip-selected-shape);
 }
 
-/* CheckboxTokens.IconSize and the 40px state layer both land on antd's box. */
-:root .ant-checkbox::after {
+/* Two pseudo-elements with two jobs — and writing them as two rules on the *same*
+   pseudo-element is a real defect the browser-side rule check found: the minifier
+   merged the duplicate selectors, kept only the last declarations, and silently
+   dropped CheckboxTokens' 18dp icon size. The static gate still passed, because
+   the text of the file named the token. `::after` is the tick and `::before` is
+   antd's 40px state layer. */
+:root .ant-checkbox-checked::after {
   width: var(--ah-c-checkbox-icon);
   height: var(--ah-c-checkbox-icon);
 }
 
-:root .ant-checkbox::after {
+:root .ant-checkbox::before {
   width: var(--ah-c-checkbox-state-layer);
   height: var(--ah-c-checkbox-state-layer);
+  border-radius: var(--ah-c-checkbox-state-layer);
 }
 
-:root .ant-radio::after {
+:root .ant-radio::before {
   width: var(--ah-c-radio-state-layer);
   height: var(--ah-c-radio-state-layer);
 }
