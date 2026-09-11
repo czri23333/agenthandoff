@@ -479,8 +479,13 @@ export default function SessionDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* agent identity bar — the thing that used to be 1.1:1 contrast */}
-      <div className="ah-bar flex flex-wrap items-center gap-3 px-5 py-2.5">
+      {/* agent identity bar — the thing that used to be 1.1:1 contrast.
+          DockedToolbarTokens: a 64dp `surface-container` strip, corner-none,
+          16dp leading and trailing. It was a `.ah-bar` (a 1px rule on a
+          *different* surface), which made the app bar and this row two stacked
+          bars with different fills; on the same container they read as one
+          two-line header, which is what a large M3 app bar is. */}
+      <div className="ah-docked-toolbar ah-detailbar">
         <Button type="text" size="small" onClick={onBack}>
           ← {t("back")}
         </Button>

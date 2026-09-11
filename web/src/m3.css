@@ -1180,6 +1180,20 @@
   }
 }
 
+/* The session-detail action row. It sits directly under the app bar, so it takes
+   the same container and lets the app bar's own hairline be the only separator:
+   two surfaces with two rules read as two bars, which is what "the app bar is
+   followed by a second app bar" looks like. The controls inside it are spread
+   rather than packed, because this row has a title in the middle. */
+.ah-detailbar {
+  background: var(--ah-c-docked-toolbar-container);
+  box-shadow: none;
+}
+
+.ah-detailbar > * + * {
+  margin-inline-start: 0;
+}
+
 /* ── Menu (a Select's dropdown) ─────────────────────────────────────────────
    MenuTokens: surface-container at corner-extra-small and elevation 2, with a
    selected item in secondary-container. */
