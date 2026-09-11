@@ -10,31 +10,34 @@ commits: 0cb9eb1..HEAD
 
 ## Report
 
-**What was built.** `scripts/gen_tokens.py` gained a `component` block: 22
+**What was built.** `scripts/gen_tokens.py` gained a `component` block: 28
 families of per-component anatomy, transcribed from Google's own token files
 (androidx material3 v0_14_0) and cross-checked against material-web (design
 system v0_192). A value is a *reference*, not a copy — `@shape:`, `@corner:`,
-`@role:`, `@type:`, `@elev:`, `@spring:` — and `build()` refuses to run if a
-reference does not resolve, so renaming a rung of the shape scale cannot leave a
-component pointing at nothing. `theme.ts` flattens the block into 375 `--ah-c-*`
+`@role:`, `@type:`, `@elev:`, `@spring:`, `@dur:`, `@ease:` — and `build()`
+refuses to run if a reference does not resolve, so renaming a rung of the shape
+scale cannot leave a component pointing at nothing. `theme.ts` flattens the block
+into 446 `--ah-c-*`
 custom properties and hands antd the same numbers through `ConfigProvider`.
-`web/src/m3.css` spends all 375 of them and writes no length, colour or curve of
-its own. Also generated, and also `--check`-gated: `web/src/firstpaint.css`, two
+`web/src/m3.css` and `web/src/index.css` spend all 446 of them and write no
+length, colour or curve of
+their own. Also generated, and also `--check`-gated: `web/src/firstpaint.css`, two
 declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **316 passed** · `uv run ruff check .` → clean · `evidence --check` →
-21 rows, README and `support-matrix.json` match the fixtures · `conformance
---check` → 12 CLIs match their baselines · `npx tsc -b` → exit 0 · `npm run
-build` → clean, dist rebuilt and committed.
+tests/` → **390 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+--check` → 21 rows, README and `support-matrix.json` match the fixtures ·
+`conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
+`npm run build` → clean, dist rebuilt and committed.
 
 Browser-measured on the built bundle in headless Chromium (dark unless noted):
 
 | Claim | Measured |
 |---|---|
-| token consumption, at runtime | injected `440` = referenced `440`, **0** read-but-never-injected, **0** injected-but-never-read |
-| rule reachability, at runtime | of 281 rules that read a component token, **227 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
+| token consumption, at runtime | injected `446` = referenced `446`, **0** read-but-never-injected, **0** injected-but-never-read |
+| rule reachability, at runtime | of 293 rules that read a component token, **234 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
+| keyboard focus, swept | `--focus` over **5 routes × 2 themes = 98 focusable elements**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, **4** whose ring is drawn by the chip around them. Before: antd's `rgb(194,189,201)` — the same in both themes, and no token equals it — on 17 of 49; a `border-radius: 4px` rewritten on 4; and a 12% layer that never landed on our own buttons |
 | the rendered product, swept | across five routes: **2 font weights, 4 sizes, 7 radii, 15 colours** distinct, **none of them off-token**, and every weight is 400 or 500 |
 | the dialog scrim | `rgba(0,0,0,0)` before (a `calc(percent * percent)`, invalid at computed-value time, discarding every candidate); the token alone after |
 | top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
@@ -123,6 +126,23 @@ by a look:
    state underneath, which `List` had been drawing all along.
 6. **The tab indicator now travels** rather than popping, on the spatial spring,
    with 7 measured intermediate positions between the first tab and the last.
+7. **The focus indicator was ours, and it lost to antd's.** "Google-official
+   level" is decided by the keyboard, and that is where the sheet was weakest:
+   the ring was 2px of `primary` where material-web publishes 3px of `secondary`
+   with a grow/settle choreography, and on 17 of the 49 focusable elements the
+   old sweep could see, antd's `--ant-color-primary-border` won the cascade
+   outright — the same `rgb(194,189,201)` in both themes, equal to no token. Two
+   more defects were sitting in the same rule: a `border-radius: 4px` that
+   rewrote the geometry of whatever took focus, and a 12% layer that never landed
+   on our own buttons because `.ah-btn, :root .ant-btn.ant-btn` (0,2,0) beat
+   `:focus-visible` (0,1,0) to `box-shadow`. `focusRing` is now a token family
+   cited to material-web's `tokens/_md-comp-focus-ring.scss` and
+   `focus/internal/_focus-ring.scss` (androidx publishes no focus-indicator token
+   file — 120 files listed, none matching `Focus|Indicator`), the selector arms
+   match antd's specificity, and the check is
+   `scripts/audit_component_rules.py --focus`. 98 elements, both themes, 0
+   defects; then made to fail for real by pointing the ring at `primary`, which
+   it reported as `rgb(103,80,164)` against `rgb(98,91,113)`.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -395,3 +415,9 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
 - [x] T13: Docs, deviation register and verification — `docs/theming.md` gains
       the component contract and every new deviation; all gates green; one
       independent review recorded with its verdict (covers: S2; depends: T2–T12)
+- [x] T14: Keyboard focus — the `focusRing` family from material-web's
+      `_md-comp-focus-ring.scss` (3px `secondary`, 2px outward offset, the
+      `0 → 8px → 3px` choreography on `duration-long4`/emphasized), spent by one
+      rule whose selector arms match antd's specificity, with the Select chip's
+      ring delegated to the box the reader sees; `--focus` gate plus a live
+      mutation proof (covers: S2; depends: T1)

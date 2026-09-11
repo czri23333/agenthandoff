@@ -28,6 +28,7 @@ the token table.
 | any `font-weight` | 400 or 500 — M3 publishes no heavier text weight |
 | any animated property | names a `--ah-motion-*`/`--ah-spring-*` token, never a literal duration (the `prefers-reduced-motion` block is the one exception: it exists to *zero* durations) |
 | interaction feedback | the official state layer (content colour at hover 8% / focus 12% / pressed 12%), never a brightness filter or a swapped background |
+| keyboard focus | material-web's focus ring — 3px of `secondary` at a 2px outward offset, growing to 8px and settling on the emphasized curve — paired with the 12% focus layer; never antd's `--ant-color-primary-border`, and never a `border-radius` written on `:focus-visible` |
 | depth | level 0 (outline, no shadow) unless the surface floats: popover/dropdown/menu/tooltip/dialog take levels 2–3, a hovered row level 1 |
 | reduced motion | `prefers-reduced-motion: reduce` collapses every duration and delay |
 | a control's geometry | an official per-component token, *referenced* (never restated) from `tokens.json`'s `component` block and spent only as a `--ah-c-*` custom property |
@@ -47,6 +48,9 @@ re-derive every judgement.
 | tracking applies to every role | CJK-authored prose keeps `letter-spacing: normal` | tracking is a Latin typography device; the roles' numbers are sub-pixel Latin optimisations |
 | M3 publishes no `disabled` opacity | `container 12%` / `content 38%`, labelled ours in `tokens.json` | a disabled control has to look disabled; the value is recorded as ours rather than dressed as Google's |
 | `label-small` at 11px | 11px only beside a mono family | 11px CJK is illegible; the role is marked `mono_only` and the floor test enforces the pairing |
+| the focus ring grows its corner with the host: `calc($end-end + $outward-offset)` | an `outline`, which follows the host's own radius exactly | an outline never affects layout and composes with whatever shadow the host already has, which is why material-web draws its ring as a *sibling element*. CSS cannot read a host's radius into an outline, so the ring's corner is 2px tighter than the published one on a rounded rect. Measured on the chip: ring radius 12px against a published 14px. A `md-focus-ring`-style overlay would close it; nothing in the cockpit is ambiguous at that difference |
+| the focus *state layer* is part of the focus state (12% whenever a control holds focus) | it is on `:focus-visible`, so a pointer click focuses a control without the layer | keyboard-only focus is the case that has to be legible, and widening it to `:focus` would double the layer on every component that already draws its own (`md-tab`-style `::before`, the Select chip). Recorded rather than silent: the ring and the layer are split across two pseudo-classes on purpose |
+| a Select's focus indicator is the control's own outline | the ring is drawn on the chip around the input, via `:has(:focus-visible)` | antd sets `outline: none` on the inner input, and that input measures 132x30 inside a 176x50 chip — so the ring landed on a node with no visible box while the outline never rendered at all. `:has()` moves both the ring and the layer to the box the reader sees and stays keyboard-only, because a pointer click focuses the input without matching `:focus-visible` |
 | a dense text field is 40dp in Material's own spec pages | built from the same three published numbers (`8 + 24 + 8`), labelled ours | the *token* files publish only the 56dp geometry; the derivation is shown so it can be checked rather than trusted |
 | the filled field's focus indicator is 3px (`tokens/_md-comp-filled-field.scss`) | 3px | material-web's own pinned `versions/v0_192/_md-comp-filled-text-field.scss` still says 2px; the current field token set is the newer document and we follow it, but the disagreement is real and recorded here |
 | a list item's disabled label is 38% (`ListTokens.kt`) | 38% | material-web's `_md-comp-list.scss` says 0.3 for the same token. androidx is the newer source; either way the value is Google's, not a guess |
@@ -125,6 +129,64 @@ former is checkable against Google's spec.
 `tests/test_typography_scale.py` and `tests/test_tokens_m3official.py` keep the
 values honest; nothing asserts the *absence* of `brightness()` any more, because
 there is nothing left to find — the layer is the only mechanism in the stylesheet.
+
+## Keyboard focus (M3)
+
+M3 publishes the focus indicator as a component of its own — material-web ships
+it as `md-focus-ring`, with its own token set — and two of its values are not what
+memory supplies. The ring is **`secondary`**, not `primary`, and it does not
+appear at its resting width: it grows to 8px over the first quarter of
+`duration-long4` and settles back to 3px over the remaining three quarters, on
+the emphasized curve.
+
+`tokens/_md-comp-focus-ring.scss` (the values) and
+`focus/internal/_focus-ring.scss` (the choreography) are the sources;
+`gen_tokens.py`'s `focusRing` family carries all six numbers and `index.css`
+spends them as one `outline` plus two keyframes:
+
+```css
+:focus-visible,
+.ant-btn:focus-visible:not(:disabled), /* + switch, segmented, slider, chip arms */
+.ant-select.ah-select-chip:has(:focus-visible) {
+  outline: var(--ah-c-focus-ring-width) solid var(--ah-c-focus-ring-color);
+  outline-offset: var(--ah-c-focus-ring-outward-offset);
+  animation-name: ah-focus-grow, ah-focus-shrink;
+  animation-duration: calc(var(--ah-c-focus-ring-duration) * 0.25),
+    calc(var(--ah-c-focus-ring-duration) * 0.75);
+  animation-delay: 0s, calc(var(--ah-c-focus-ring-duration) * 0.25);
+}
+```
+
+Measured over 5 routes × 2 themes (`--focus`, 98 focusable elements): every ring
+is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, the
+choreography times as `150ms` + `450ms` after a `150ms` delay, and no element's
+own `border-radius` changes when it receives focus. Four of those elements — a
+Select's inner input — delegate the ring to the chip that draws their box, which
+is why the gate treats "no ring here, a ring on an ancestor" as a pass rather
+than a failure.
+
+Three things this replaced, all measured first:
+
+1. `2px solid var(--ah-accent)` — our thickness and our role.
+2. `border-radius: 4px` on `:focus-visible`, which rewrote the radius of four
+   elements (`.ah-searchbar__input`, two `.ant-select-input`s, and the slider
+   handle, whose ring should be a circle) the moment they took focus.
+3. antd's `--ant-color-primary-border`, the colour its algorithm derives, which
+   was `rgb(194, 189, 201)` **in both themes** and equalled no token. Its rule is
+   `:where(.hash).ant-btn:not(:disabled):focus-visible` — `:where()` contributes
+   nothing, but the three remaining class/pseudo-class levels make it (0,3,0),
+   above a bare `:focus-visible`. The selector arms above match that specificity
+   and sit later in the document; the Select's own halo rule is (0,4,0), which is
+   why its arm is written as a chip rule rather than a component hint.
+
+`scripts/audit_component_rules.py --focus` is the check, and it refuses an empty
+sweep. Its decision logic (`focus_defects`) is a plain function so
+`tests/test_tokens_components.py` can feed it broken evidence: antd's grey, a
+squared radius, a missing ring and a theme that did not apply all fail it. The
+gate was then made to fail for real by pointing the ring at `primary` and
+rebuilding: it exited 1 and reported `rgb(103, 80, 164)` against the expected
+`rgb(98, 91, 113)` in light, and `rgb(208, 188, 255)` against `rgb(204, 194, 220)`
+in dark.
 
 ## Depth (M3)
 
@@ -478,11 +540,14 @@ token and `test_every_supported_cli_has_an_identity` tells you.
    `Ours`. The generator refuses a family without one.
 2. Point at an existing value rather than restating it: `@shape:sm`,
    `@role:on-surface-variant`, `@type:body-medium`, `@elev:level3`,
-   `@corner:extra-small-top`, `@spring:standard-fast-spatial`. The generator
-   refuses a reference that does not resolve.
+   `@corner:extra-small-top`, `@spring:standard-fast-spatial`, `@dur:long4`,
+   `@ease:emphasized`. The generator refuses a reference that does not resolve.
 3. Run `python scripts/gen_tokens.py`, then read the token in `m3.css` as
    `var(--ah-c-<path>)` — the path with `-` between the keys and camelCase folded
-   (`listItem.height.oneLine` → `--ah-c-list-item-height-one-line`).
+   (`listItem.height.oneLine` → `--ah-c-list-item-height-one-line`). `index.css`
+   spends component tokens too — the focus ring is global — and the consumption
+   gate reads both stylesheets, so a token spent only by the shell is still
+   covered.
 4. **The consumption gate is exact, so you cannot skip step 3.** Publishing a
    token no rule reads fails `test_stylesheet_reads_exactly_the_published_component_tokens`,
    and so does reading one the generator does not emit. That is deliberate: a

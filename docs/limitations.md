@@ -113,6 +113,19 @@ sampled away.
     is still untested ground.
 14. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
+15. **The focus sweep is synthetic and single-browser.** `--focus` calls
+    `element.focus()` on every focusable element in five routes × two themes and
+    reads the computed ring (98 elements, 0 defects on the current build), so it
+    proves the *style* and not the journey: real <kbd>Tab</kbd> order, focus
+    trapping inside the dialog, and what a screen reader announces are not
+    covered, and no ring has been seen on a second browser or a HiDPI display with
+    different rounding. Two published details are knowingly looser than
+    material-web: the ring's corner follows the host radius instead of growing by
+    the 2px outward offset (an `outline` cannot read a host's radius — recorded in
+    `docs/theming.md`), and the focus *layer* is tied to `:focus-visible` rather
+    than `:focus`, so a pointer click focuses a control without the 12%.
+    `prefers-reduced-motion` collapses the grow/settle animation through the
+    existing block, which is verified by the stylesheet rather than measured.
 
 ## How to check any of this yourself
 
@@ -133,11 +146,15 @@ runs rather than tests CI runs:
 ```bash
 python scripts/sanitize_fixtures.py --cli <id>   # needs that CLI's live store
 python scripts/audit_component_rules.py          # needs playwright + `npm ci`
+python scripts/audit_component_rules.py --app http://127.0.0.1:8620/ \
+  --route '#/' --route '#/memory' --focus          # the ring, in both themes
 ```
 
 The second one asks the browser whether each Material rule in `web/src/m3.css`
 reaches an element at all. Its absence is what let five families of dead CSS ship
 — including a white snackbar on the dark theme — while every static gate was
 green, because a rule can read every token it names and still apply to nothing.
+`--focus` is the third question: not whether a rule matches, but what a keyboard
+user sees when it does.
 
 If you close a gap here, delete its entry. This file is done when it is empty.
