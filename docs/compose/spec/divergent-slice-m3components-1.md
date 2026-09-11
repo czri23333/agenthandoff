@@ -34,7 +34,7 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | Claim | Measured |
 |---|---|
 | token consumption, at runtime | injected `375` = referenced `375`, **0** read-but-never-injected, **0** injected-but-never-read |
-| rule reachability, at runtime | of 222 rules that read a component token, **152 match an element** in a gallery mounting every antd family and every `.ah-*` class; the 70 that do not are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or unmounted. Before the review's finding: 34 matched |
+| rule reachability, at runtime | of 223 rules that read a component token, **153 match an element** in a gallery mounting every antd family and every `.ah-*` class; the 70 that do not are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or unmounted. Before the review's finding: 34 matched |
 | the dialog scrim | `rgba(0,0,0,0)` before (a `calc(percent * percent)`, invalid at computed-value time, discarding every candidate); the token alone after |
 | top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
 | filled button | `40px`, radius `9999px`, `min-width 64px`, padding `16px`, `14px/20px/500`, `rgb(208,188,255)` on `rgb(56,30,114)`, no shadow; transitions `0.16s, 0.24s, …` from the springs |
@@ -162,6 +162,15 @@ hex in that file is mutated.
    the corners — and one `!important` Tailwind class in `Inbox.tsx` was removed,
    because it had been silently holding that row at 12px while every other row
    moved.
+8. **Two rules on one pseudo-element, and a minifier that merged them.**
+   `:root .ant-checkbox::after` appeared twice — once for CheckboxTokens' 18dp
+   icon size, once for the 40px state layer — and the build kept only the last
+   declarations, so the icon size vanished from the emitted stylesheet. Both
+   *static* gates still passed: the literal/consumption one because the file's
+   text names the token, and the probe because it read the file rather than the
+   output. The two jobs now belong to two pseudo-elements (`::after` is the tick,
+   `::before` the layer), and this is the second defect the browser-side rule
+   check caught that nothing else could.
 
 *What it could not verify:* `Modal.confirm`'s inner rules beyond the two the
 gallery now mounts, the exit animation's class, any colour but first paint in the
