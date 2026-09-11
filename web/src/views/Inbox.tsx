@@ -66,9 +66,7 @@ export default function Inbox() {
       ) : (
         <Button
           key="c"
-          size="small"
-          color="green"
-          variant="outlined"
+          type="primary"
           onClick={() => void doClaim(it.path)}
         >
           {t("claim")}

@@ -123,7 +123,16 @@ def test_no_component_hardcodes_a_colour() -> None:
             continue
         if path.name in generated:
             continue
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        # Blank block comments before scanning, keeping line numbers. This gate
+        # documents the very presets it forbids — `color="green"` appears in the
+        # comment that explains why it was removed — so a scanner that reads
+        # prose reports prose. That has now happened three times, in three files.
+        text = path.read_text(encoding="utf-8")
+        if path.suffix == ".css":
+            text = re.sub(
+                r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S
+            )
+        for lineno, line in enumerate(text.splitlines(), 1):
             if _is_comment(line):
                 continue
             if "PRIMARY =" in line:
@@ -131,7 +140,16 @@ def test_no_component_hardcodes_a_colour() -> None:
             for pattern in (
                 r"#[0-9a-fA-F]{6}\b",
                 r"\b(?:bg|text|border)-(?:zinc|neutral|gray|slate|stone|sky|amber)-\d{2,3}",
-                r'color="(?:sky|amber|volcano)"',  # presets that do not exist in antd v6
+                # *Any* antd preset colour, not the three that were known to be
+                # fictional. The gate used to allowlist `sky|amber|volcano` on
+                # the theory that a name antd does not recognise is the danger;
+                # the real danger is a name it *does* recognise, because then
+                # antd's theme algorithm derives a pair and nothing here gates
+                # it. Measured: `Tag color="green"` rendered 3.37:1 in the light
+                # theme.
+                r'color="(?:red|volcano|orange|gold|yellow|lime|green|cyan|blue|'
+                r'geekblue|purple|magenta|grey|gray|pink|sky|amber|preset)"',
+                r'variant="(?:filled|outlined|solid|borderless|link|text)"\s+color=',
             ):
                 if re.search(pattern, line):
                     offenders.append(f"{path.name}:{lineno}: {line.strip()[:60]}")

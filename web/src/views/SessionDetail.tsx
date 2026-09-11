@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Segmented, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Segmented, Table, Tooltip, Typography } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import {
   api,
@@ -8,7 +8,15 @@ import {
   type SessionDetail as Detail,
   type TranscriptMessage,
 } from "../api";
-import { Bullets, CliBadge, CopyButton, InterruptionBanner, SectionCard, StatusTag } from "../components";
+import {
+  Bullets,
+  CliBadge,
+  CopyButton,
+  InterruptionBanner,
+  SectionCard,
+  StatusChip,
+  StatusTag,
+} from "../components";
 import { Markdown } from "../Markdown";
 import { BudgetGauge, TokenBars, TurnTimeline, type ChartLabels } from "../charts";
 import { formatNum, useT } from "../i18n";
@@ -787,14 +795,12 @@ export default function SessionDetail({
                       render: (v: string | null, r) =>
                         r.error ? (
                           <Tooltip title={r.error}>
-                            <Tag color="red" className="mr-0!">
-                              {v ?? "error"}
-                            </Tag>
+                            <StatusChip tone="err">{v ?? "error"}</StatusChip>
                           </Tooltip>
                         ) : (
-                          <Tag color={v === "completed" ? "green" : undefined} className="mr-0!">
+                          <StatusChip tone={v === "completed" ? "ok" : "neutral"}>
                             {v ?? "—"}
-                          </Tag>
+                          </StatusChip>
                         ),
                     },
                     {
@@ -813,9 +819,7 @@ export default function SessionDetail({
                         v == null || v === 0 ? (
                           <span className="ah-faint">{v ?? "—"}</span>
                         ) : (
-                          <Tag color="red" className="mr-0!">
-                            {v}
-                          </Tag>
+                          <StatusChip tone="err">{v}</StatusChip>
                         ),
                     },
                     {
@@ -960,9 +964,9 @@ export default function SessionDetail({
               )}
               {meta.permission && (
                 <Descriptions.Item label={t("permission")}>
-                  <Tag color={meta.permission === "yolo" ? "red" : "blue"} className="mr-0 font-mono!">
+                  <StatusChip tone={meta.permission === "yolo" ? "warn" : "accent"}>
                     {meta.permission}
-                  </Tag>
+                  </StatusChip>
                 </Descriptions.Item>
               )}
               {meta.parent_session_id && (

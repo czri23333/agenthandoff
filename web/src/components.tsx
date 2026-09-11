@@ -187,3 +187,21 @@ export function Metric({ label, value }: { label: string; value: number | null |
     </span>
   );
 }
+/**
+ * A status word in a tokenised tonal chip.
+ *
+ * Replaces antd's `Tag color="green"`, whose pair the theme algorithm derives
+ * and nothing gates: measured at **3.37:1** in the light theme (`read`,
+ * `rgb(56,158,13)` on `rgb(246,255,237)`), under the 4.5:1 this project
+ * requires. Every tone below is a container the contrast test already gates
+ * against `text1`, so the failure cannot come back unnoticed.
+ */
+export function StatusChip({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "ok" | "accent" | "warn" | "err";
+  children: React.ReactNode;
+}) {
+  return <span className={`ah-tag ah-tag--${tone}`}>{children}</span>;
+}

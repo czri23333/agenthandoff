@@ -370,6 +370,11 @@ function Gallery() {
       <div className="ah-docked-toolbar" id="g-ah-docked-toolbar" />
       <div className="ah-docked-toolbar ah-detailbar" id="g-ah-detailbar" />
       <div className="ah-shell" id="g-ah-shell" />
+      <span className="ah-tag ah-tag--neutral" id="g-ah-tag-neutral">neutral</span>
+      <span className="ah-tag ah-tag--ok" id="g-ah-tag-ok">ok</span>
+      <span className="ah-tag ah-tag--accent" id="g-ah-tag-accent">accent</span>
+      <span className="ah-tag ah-tag--warn" id="g-ah-tag-warn">warn</span>
+      <span className="ah-tag ah-tag--err" id="g-ah-tag-err">err</span>
       <button className="ah-row" id="g-ah-row">row</button>
       <button className="ah-row" id="g-ah-row-sel" aria-selected="true">row sel</button>
       <span className="ah-loading" id="g-ah-loading" />

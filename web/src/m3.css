@@ -2076,3 +2076,52 @@
 :root .ant-alert-error .ant-alert-icon {
   color: var(--ah-err);
 }
+/* ── Status tag ─────────────────────────────────────────────────────────────
+   antd's `Tag color="green"` is a *stringly-typed preset* whose pair antd's
+   theme algorithm derives, and nothing in this repo gates it. Measured on the
+   built page: `read` renders `rgb(56,158,13)` on `rgb(246,255,237)` in the light
+   theme — **3.37:1**, under the 4.5:1 this project requires of every text pair.
+   The same tag passes in the dark theme, which is exactly why a spot check
+   misses it.
+
+   These are the four tones the app actually needs, each a container that
+   `tests/test_tokens_contrast.py` already gates against `text1`. Not a Material
+   component — M3 publishes no tag — so it is our composition, and it reads as
+   one: a low-emphasis chip, not a saturated preset. */
+.ah-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ah-c-chip-height);
+  padding-inline: var(--ah-c-spacing-steps-sm);
+  border-radius: var(--ah-c-chip-variant-assist-shape);
+  font-size: var(--ah-c-chip-type-role-size);
+  line-height: var(--ah-c-chip-type-role-line);
+  letter-spacing: var(--ah-c-chip-type-role-tracking);
+  font-weight: var(--ah-c-chip-type-role-weight);
+  white-space: nowrap;
+}
+
+.ah-tag--neutral {
+  background: var(--ah-surface-2);
+  color: var(--ah-text-2);
+}
+
+.ah-tag--ok {
+  background: var(--ah-ok-container);
+  color: var(--ah-text-1);
+}
+
+.ah-tag--accent {
+  background: var(--ah-accent-container);
+  color: var(--ah-text-1);
+}
+
+.ah-tag--warn {
+  background: var(--ah-warn-container);
+  color: var(--ah-text-1);
+}
+
+.ah-tag--err {
+  background: var(--ah-err-container);
+  color: var(--ah-text-1);
+}

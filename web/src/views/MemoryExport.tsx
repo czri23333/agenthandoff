@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Segmented, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Alert, Button, Segmented, Switch, Table, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, DownloadOutlined, ReloadOutlined } from "@ant-design/icons";
 import { api, type MemoryExportData, type MemoryReport } from "../api";
+import { StatusChip } from "../components";
 import { useT, type Lang } from "../i18n";
 
 /**
@@ -25,14 +26,16 @@ import { useT, type Lang } from "../i18n";
 
 const CATEGORIES = ["instructions", "identity", "career", "projects", "preferences"] as const;
 
-/** Status colours reuse the doctor palette: read is ok, everything the scan
- *  could not read keeps a warning tone — a missing store is news, not noise. */
-const STATUS_TONE: Record<string, string> = {
-  read: "green",
-  "config-noted": "blue",
-  missing: "default",
-  unreadable: "orange",
-  oversized: "orange",
+/** Status tone: read is ok, everything the scan could not read keeps a warning
+ *  tone — a missing store is news, not noise. These were antd preset names
+ *  (`green`, `blue`, `orange`), whose pairs the theme algorithm derives and
+ *  nothing gates; `read` measured **3.37:1** in the light theme. */
+const STATUS_TONE: Record<string, "neutral" | "ok" | "accent" | "warn" | "err"> = {
+  read: "ok",
+  "config-noted": "accent",
+  missing: "neutral",
+  unreadable: "warn",
+  oversized: "warn",
 };
 
 function download(name: string, text: string) {
@@ -202,7 +205,7 @@ export default function MemoryExport() {
                     title: "status",
                     dataIndex: "status",
                     width: 130,
-                    render: (v: string) => <Tag color={STATUS_TONE[v] ?? "default"}>{v}</Tag>,
+                    render: (v: string) => <StatusChip tone={STATUS_TONE[v]}>{v}</StatusChip>,
                   },
                   { title: "entries", dataIndex: "entries", width: 80 },
                   {
