@@ -48,8 +48,8 @@ re-derive every judgement.
 | tracking applies to every role | CJK-authored prose keeps `letter-spacing: normal` | tracking is a Latin typography device; the roles' numbers are sub-pixel Latin optimisations |
 | M3 publishes no `disabled` opacity | `container 12%` / `content 38%`, labelled ours in `tokens.json` | a disabled control has to look disabled; the value is recorded as ours rather than dressed as Google's |
 | `label-small` at 11px | 11px only beside a mono family | 11px CJK is illegible; the role is marked `mono_only` and the floor test enforces the pairing |
-| the focus ring grows its corner with the host: `calc($end-end + $outward-offset)` | an `outline`, which follows the host's own radius exactly | an outline never affects layout and composes with whatever shadow the host already has, which is why material-web draws its ring as a *sibling element*. CSS cannot read a host's radius into an outline, so the ring's corner is 2px tighter than the published one on a rounded rect. Measured on the chip: ring radius 12px against a published 14px. A `md-focus-ring`-style overlay would close it; nothing in the cockpit is ambiguous at that difference |
-| the focus *state layer* is part of the focus state (12% whenever a control holds focus) | it is on `:focus-visible`, so a pointer click focuses a control without the layer | keyboard-only focus is the case that has to be legible, and widening it to `:focus` would double the layer on every component that already draws its own (`md-tab`-style `::before`, the Select chip). Recorded rather than silent: the ring and the layer are split across two pseudo-classes on purpose |
+| the focus ring is a sibling element with its own geometry (`md-focus-ring`, `inset: -2px`, `border-radius = host + outward-offset`) | one `outline` with `outline-offset: 2px` | an outline never affects layout, composes with whatever shadow the host has, and — measured — Chromium grows its corner radius by the offset exactly as the published geometry does. Side by side at 4×: ours 9675 ink pixels, the published structure 9672, `IoU` **0.9985**, **15** differing pixels along the curves. The single-element form is the same ring with one less node |
+| the focus *state layer* is part of the focus state (12% whenever a control holds focus) | for most controls it is on `:focus-visible`, so a pointer click focuses one without the layer | narrower than the published behaviour, and narrower than the first version of this note claimed: a text input matches `:focus-visible` on a pointer click all by itself, so the search field and the Select chip do get their layer on click (`:focus-within` and `.ant-select-focused` respectively, both measured). What is keyboard-only is the rest. Widening it to `:focus` would double the layer on every component that draws its own, so it is recorded rather than changed |
 | a Select's focus indicator is the control's own outline | the ring is drawn on the chip around the input, via `:has(:focus-visible)` | antd sets `outline: none` on the inner input, and that input measures 132x30 inside a 176x50 chip — so the ring landed on a node with no visible box while the outline never rendered at all. `:has()` moves both the ring and the layer to the box the reader sees and stays keyboard-only, because a pointer click focuses the input without matching `:focus-visible` |
 | a dense text field is 40dp in Material's own spec pages | built from the same three published numbers (`8 + 24 + 8`), labelled ours | the *token* files publish only the 56dp geometry; the derivation is shown so it can be checked rather than trusted |
 | the filled field's focus indicator is 3px (`tokens/_md-comp-filled-field.scss`) | 3px | material-web's own pinned `versions/v0_192/_md-comp-filled-text-field.scss` still says 2px; the current field token set is the newer document and we follow it, but the disagreement is real and recorded here |
@@ -174,6 +174,17 @@ Select's inner input — delegate the ring to the chip that draws their box, whi
 is why the gate treats "no ring here, a ring on an ancestor" as a pass rather
 than a failure.
 
+The sweep has two channels now, and the second one exists because the first
+could not see what a keyboard user sees. The synthetic pass calls
+`element.focus()` over 98 nodes; the keyboard pass presses <kbd>Tab</kbd> through
+each route (and through an open dropdown, which is the only way a menu item
+exists at all). The last run: **540 nodes examined, 406 of them by keyboard, 26
+skipped as "focusable but with no box" — those are judged by the keyboard pass
+instead — 44 delegating their ring to a larger box, 0 defects.** The three
+mutations above were each re-introduced on purpose, one at a time, and the gate
+reported antd's ring on the segmented item, antd's ring on the menu items and
+the slider's second indicator before it was reverted.
+
 `prefers-reduced-motion: reduce` skips the pulse without losing the ring, which
 the existing block's `animation-duration: 0.001ms !important` is not obviously
 enough to guarantee — so it was measured rather than assumed. Same element, same
@@ -182,19 +193,36 @@ focus call: with `no-preference` the two animations are running (`150ms` and
 250ms on its way to 3; with `reduce` the element reports **no** animations and
 `3px` of `secondary` at a `2px` offset immediately.
 
-Three things this replaced, all measured first:
+Four things this replaced, all measured first:
 
 1. `2px solid var(--ah-accent)` — our thickness and our role.
 2. `border-radius: 4px` on `:focus-visible`, which rewrote the radius of four
    elements (`.ah-searchbar__input`, two `.ant-select-input`s, and the slider
    handle, whose ring should be a circle) the moment they took focus.
 3. antd's `--ant-color-primary-border`, the colour its algorithm derives, which
-   was `rgb(194, 189, 201)` **in both themes** and equalled no token. Its rule is
+   equalled no token in either theme — `rgb(194, 189, 201)` in light, and a
+   *different* derived grey in each dark surface (`rgb(76, 70, 91)` on a menu
+   item, `rgb(29, 27, 32)`-adjacent values elsewhere; an earlier version of this
+   note said "the same in both themes", which the review falsified). Its rule is
    `:where(.hash).ant-btn:not(:disabled):focus-visible` — `:where()` contributes
    nothing, but the three remaining class/pseudo-class levels make it (0,3,0),
    above a bare `:focus-visible`. The selector arms above match that specificity
    and sit later in the document; the Select's own halo rule is (0,4,0), which is
    why its arm is written as a chip rule rather than a component hint.
+4. Three places a keyboard user can reach and the first version of the gate could
+   not see, all found by the independent review: a **dropdown menu item**, whose
+   ring was antd's (its rule is
+   `.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible`,
+   (0,4,0)); a **segmented control**, where our ring was computed on a `0x0`
+   `opacity: 0` input that cannot be seen while antd's grey showed on the 52×38
+   item — and where antd only marks the item focused for a *real* key focus, so
+   the sweep has to press <kbd>Tab</kbd> to see it; and a **slider handle**, which
+   showed our round ring and antd's square one at the same time because antd
+   paints its indicator on the handle's `::after`. All three are fixed and all
+   three are now in the gate: it opens the menu with the keyboard, walks each
+   route with <kbd>Tab</kbd>, resolves a focusable node to the box the reader
+   sees, and reads pseudo-element indicators by `outline-style` (antd's
+   transitions in from `0px`, so a width check reads zero at t=0).
 
 `scripts/audit_component_rules.py --focus` is the check, and it refuses an empty
 sweep. Its decision logic (`focus_defects`) is a plain function so

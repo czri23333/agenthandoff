@@ -514,18 +514,32 @@ button:disabled {
       official ring the only one on screen; `scripts/audit_component_rules.py
       --focus` fails if a new antd family arrives without an arm.
 
-   3. The last arm. A Select's focusable node is its inner input, but its visible
-      box is the element around it: antd sets `outline: none` on that input (so
-      the ring was never drawn) and the input measures 132x30 inside a 176x50
-      chip, so its inset layer reads as a pill inside a pill. `:has()` moves both
-      the ring and the layer to the box the reader sees, and stays keyboard-only,
-      because a mouse click focuses the input without matching `:focus-visible`. */
+   3. The `:has()` arms. A focusable node is often not the box the reader sees: a
+      Select's input measures 132x30 inside a 176x50 chip, a search bar's input
+      280x24 at radius 0 inside a 340x56 pill, and antd's segmented item input is
+      0x0 with `opacity: 0` — the ring was drawn on it and never appeared, while
+      antd's own grey ring showed on the 52x38 item. `:has()` moves both the ring
+      and the layer to the box the reader sees, and stays keyboard-only, because
+      a pointer click focuses an input without matching `:focus-visible` for the
+      controls here that are not text fields.
+
+   4. The `(0,4,0)` arms. antd writes its focus rules with `:where()`, but that
+      only removes the *hash* class from the count: its dropdown item rule is
+      `.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible`,
+      which is (0,4,0), and its Select halo is the same. Measured on a real Tab
+      walk into an open menu: `rgb(194, 189, 201)` — antd's derived colour, on a
+      menu item, while our ring was computed on nothing. The two long arms below
+      match that specificity and sit later in the document; the segmented arm is
+      (0,2,0) against antd's (0,2,0), which is also enough. */
 :focus-visible,
 .ant-btn:focus-visible:not(:disabled),
 .ant-switch:focus-visible:not(:disabled),
 .ant-segmented:focus-visible:not(:disabled),
 .ant-slider-handle:focus-visible:not(:disabled),
-.ant-select.ah-select-chip:has(:focus-visible) {
+.ant-select.ah-select-chip:has(:focus-visible),
+.ah-searchbar:has(:focus-visible),
+.ant-segmented .ant-segmented-item-focused,
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible {
   outline: var(--ah-c-focus-ring-width) solid var(--ah-c-focus-ring-color);
   outline-offset: var(--ah-c-focus-ring-outward-offset);
   animation-name: ah-focus-grow, ah-focus-shrink;
@@ -535,6 +549,20 @@ button:disabled {
   animation-timing-function: var(--ah-c-focus-ring-easing);
   box-shadow: inset 0 0 0 9999px
     color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-focus), transparent);
+}
+
+/* The nodes that keep the behaviour and give up the paint. Each is focusable and
+   is not the box the reader sees — antd's segmented input is 0x0 and `opacity: 0`,
+   and the text fields here sit inside a pill that is larger and rounder than they
+   are — so their ring and layer are drawn by the `:has()` arms above. Without
+   this, the segmented item showed *two* rings (ours on a 0x0 box, antd's on the
+   item) and the search bar showed a square-cornered rectangle inside its pill. */
+.ant-segmented-item-input:focus-visible,
+.ah-searchbar input:focus-visible,
+.ant-select.ah-select-chip .ant-select-input:focus-visible {
+  outline: none;
+  animation: none;
+  box-shadow: none;
 }
 
 @keyframes ah-focus-grow {

@@ -1460,6 +1460,25 @@
   );
 }
 
+/* antd answers a hovered or focused handle by painting *another* indicator on the
+   handle's own `::after`:
+   `....ant-slider .ant-slider-handle:hover:not(.ant-slider-handle-disabled)::after,
+   ...:focus...::after { outline: 6px solid var(--ant-slider-handle-active-outline-color);
+   box-shadow: 0 0 0 var(--ant-slider-handle-line-width-hover) var(--ant-slider-handle-active-color) }`
+   — measured as `rgb(103, 80, 164) 0 0 0 2.5px` plus `6px solid rgba(103, 80, 164, 0.2)`
+   in light, `rgb(208, 188, 255)` / `rgba(180, 163, 220, 0.2)` in dark, in *both*
+   themes derived by antd's algorithm. That rule is (0,4,0) — `:where()` only
+   removes the hash class from the count — so it beat this sheet's (0,3,0)
+   `box-shadow: none`, and the handle showed a square-cornered ring and a round one
+   at the same time. M3E answers hover and focus by growing the handle (4dp → 6dp),
+   which the rule above already spends, so the second indicator goes. */
+:root .ant-slider .ant-slider-handle:hover::after,
+:root .ant-slider .ant-slider-handle:focus::after,
+:root .ant-slider .ant-slider-handle:focus-visible::after {
+  outline: none;
+  box-shadow: none;
+}
+
 /* The value indicator (the label that rides above a dragged handle). */
 .ah-slider-value {
   padding-inline: var(--ah-c-spacing-steps-sm);
@@ -2036,14 +2055,10 @@
 }
 
 /* The input keeps the behaviour — keyboard, IME, a11y — and gives up the paint,
-   which belongs to the chip whose box the reader actually sees. Without this the
-   12% layer lands twice: once on the chip's box and once on the 132x30 input
-   inside it. */
-:root .ant-select.ah-select-chip .ant-select-input:focus-visible {
-  outline: none;
-  animation: none;
-  box-shadow: none;
-}
+   which belongs to the chip whose box the reader actually sees. The rule that
+   does that lives in `index.css` beside the focus ring, together with the two
+   other focusable-but-invisible nodes (antd's segmented input and a text field
+   inside a pill), so there is one place that decides who paints a ring. */
 
 /* The toggle in the toolbar is a filter chip, not a button: `⚠ needs reply 8`
    is a yes/no filter over the list, which is what FilterChipTokens is for. */

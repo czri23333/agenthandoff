@@ -47,6 +47,11 @@ WEB = REPO / "web"
 # 14; the cap is here so one pathological page cannot turn the sweep into a
 # minute of focus/blur round trips.
 FOCUS_LIMIT = 60
+# How many Tab presses per route the keyboard pass makes. The dashboard has 16
+# focusable elements; the cap also covers the ones a synthetic sweep cannot
+# reach, and stops one pathological page from turning the gate into a minute of
+# key presses.
+FOCUS_TAB_STEPS = 45
 
 
 def free_port() -> int:
@@ -672,16 +677,117 @@ def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
 #     ancestor — a Select's focusable node is its inner input while the visible
 #     box is the chip around it, so "no ring here" is correct exactly when an
 #     ancestor draws one;
+#   * the node that draws the ring is a node the reader can see. antd's segmented
+#     input is 0x0 with `opacity: 0`: our ring computed correctly on it and was
+#     invisible, while antd's grey ring showed on the item around it. A focusable
+#     node with no box is only acceptable when the box it sits in draws the ring;
+#   * there is no *second* indicator. antd paints one on the slider handle's
+#     `::after` (`outline: 6px solid`, `box-shadow: 0 0 0 2.5px`), which a check
+#     that only reads the element's own `outline` cannot see;
 #   * the producer is not empty: the sweep must have examined elements, and the
 #     theme must actually have been applied. An empty sweep is a false green.
+FOCUS_SELECTOR = (
+    'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+)
+FOCUS_OVERLAY_SELECTOR = ".ant-dropdown-menu-item"
+
+# The synthetic pass calls `element.focus()`, which is not the same event a
+# keyboard produces: antd adds `ant-segmented-item-focused` only for a real key
+# focus, so the segmented control *passes* a synthetic sweep while the reader
+# sees antd's ring. These two functions are the second channel — `Tab` is pressed
+# from Python and this measures whatever now holds focus, without focusing it.
+FOCUS_ACTIVE_JS = r"""
+() => {
+  const el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) return null;
+  const root = getComputedStyle(document.documentElement);
+  const expect = root.getPropertyValue('--ah-secondary').trim();
+  const settle = (e) => e.getAnimations()
+    .filter(a => (a.animationName || '').startsWith('ah-focus'))
+    .forEach(a => { try { a.finish(); } catch (err) {} });
+  const hasBox = (e) => {
+    const b = e.getBoundingClientRect();
+    return b.width > 0 && b.height > 0;
+  };
+  const ringOf = (e) => {
+    const c = getComputedStyle(e);
+    return { w: c.outlineWidth, s: c.outlineStyle, c: c.outlineColor, o: c.outlineOffset };
+  };
+  const pseudoRings = (e) => {
+    const bad = [];
+    for (const p of ['::before', '::after']) {
+      const q = getComputedStyle(e, p);
+      if (!q) continue;
+      // Style, not width: antd's slider indicator transitions in from 0px, and at
+      // t=0 the width is still 0 while the style is already `solid`. Reading the
+      // width here is how the first version of this check missed it.
+      const outline = q.outlineStyle !== 'none';
+      let spread = false;
+      if (q.boxShadow && q.boxShadow !== 'none') {
+        for (const part of q.boxShadow.split(/,(?![^()]*\))/)) {
+          if (part.includes('inset')) continue;
+          if (/rgba\(0,\s*0,\s*0,\s*0\)/.test(part)) continue;
+          const lens = (part.match(/-?[\d.]+px/g) || []).map(parseFloat);
+          const spreadPx = lens.length >= 4 ? lens[3] : 0;
+          if (spreadPx > 0) spread = true;
+        }
+      }
+      if (outline || spread) {
+        bad.push(p + (outline ? " outline" : "") + (spread ? " ring" : ""));
+      }
+    }
+    return bad;
+  };
+  let target = el;
+  for (let i = 0; i < 4 && !hasBox(target) && target.parentElement; i++) {
+    target = target.parentElement;
+  }
+  // Read the choreography *before* settling it: `finish()` on a fill-mode-none
+  // animation removes it from `getAnimations()`, so reading afterwards reports
+  // "no animation" for every element and the check fails on all of them.
+  const animations = el.getAnimations()
+    .filter(a => (a.animationName || '').startsWith('ah-focus'))
+    .map(a => a.animationName);
+  settle(el);
+  settle(target);
+  let effective = ringOf(target);
+  let delegated = target !== el;
+  if (effective.s === 'none' || effective.w === '0px') {
+    let p = target.parentElement;
+    for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+      settle(p);
+      const c = ringOf(p);
+      if (c.s !== 'none' && c.w !== '0px') { effective = c; delegated = true; break; }
+    }
+  }
+  const cs = getComputedStyle(el);
+  return {
+    tag: el.tagName,
+    cls: String(el.className).slice(0, 60),
+    width: effective.w,
+    colour: effective.c,
+    offset: effective.o,
+    delegated,
+    invisible: !hasBox(el) || cs.opacity === '0',
+    targetCls: String(target.className || '').slice(0, 48),
+    secondIndicators: [...pseudoRings(el), ...(target === el ? [] : pseudoRings(target))],
+    animations,
+    expect,
+  };
+}
+"""
+
 FOCUS_JS = r"""
-(limit) => {
-  const sel = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+([sel, limit]) => {
+  // `width > 0` used to be a filter here, and that is exactly what hid the
+  // segmented defect: the node that receives focus is 0x0 and invisible, so it
+  // was never examined, and the ring antd drew on the item around it was never
+  // compared against ours. Only `display: none` and `visibility: hidden` are
+  // skipped now; a zero-sized focusable is *reported*, not dropped.
   const els = [...document.querySelectorAll(sel)]
     .filter(e => {
       const cs = getComputedStyle(e);
-      return cs.display !== 'none' && cs.visibility !== 'hidden'
-        && e.getBoundingClientRect().width > 0;
+      return cs.display !== 'none' && cs.visibility !== 'hidden';
     })
     .slice(0, limit);
   const root = getComputedStyle(document.documentElement);
@@ -689,6 +795,41 @@ FOCUS_JS = r"""
   const settle = (e) => e.getAnimations()
     .filter(a => (a.animationName || '').startsWith('ah-focus'))
     .forEach(a => { try { a.finish(); } catch (err) {} });
+  const hasBox = (e) => {
+    const b = e.getBoundingClientRect();
+    return b.width > 0 && b.height > 0;
+  };
+  const ringOf = (e) => {
+    const c = getComputedStyle(e);
+    return { w: c.outlineWidth, s: c.outlineStyle, c: c.outlineColor, o: c.outlineOffset };
+  };
+  // A shadow that is not inset, has a non-zero spread and is not transparent is
+  // a ring: that is the shape antd draws on a slider handle's `::after`.
+  const pseudoRings = (e) => {
+    const bad = [];
+    for (const p of ['::before', '::after']) {
+      const q = getComputedStyle(e, p);
+      if (!q) continue;
+      // Style, not width: antd's slider indicator transitions in from 0px, and at
+      // t=0 the width is still 0 while the style is already `solid`. Reading the
+      // width here is how the first version of this check missed it.
+      const outline = q.outlineStyle !== 'none';
+      let spread = false;
+      if (q.boxShadow && q.boxShadow !== 'none') {
+        for (const part of q.boxShadow.split(/,(?![^()]*\))/)) {
+          if (part.includes('inset')) continue;
+          if (/rgba\(0,\s*0,\s*0,\s*0\)/.test(part)) continue;
+          const lens = (part.match(/-?[\d.]+px/g) || []).map(parseFloat);
+          const spreadPx = lens.length >= 4 ? lens[3] : 0;
+          if (spreadPx > 0) spread = true;
+        }
+      }
+      if (outline || spread) {
+        bad.push(p + (outline ? " outline" : "") + (spread ? " ring" : ""));
+      }
+    }
+    return bad;
+  };
   const rows = [];
   for (const el of els) {
     const before = getComputedStyle(el);
@@ -700,32 +841,45 @@ FOCUS_JS = r"""
       return { name: a.animationName, duration: Math.round(t.duration), delay: Math.round(t.delay) };
     });
     anims.forEach(a => { try { a.finish(); } catch (err) {} });
-    const cs = getComputedStyle(el);
-    const own = { w: cs.outlineWidth, s: cs.outlineStyle, c: cs.outlineColor, o: cs.outlineOffset };
+    // The box the reader sees: the element itself, or the nearest ancestor that
+    // has a box at all.
+    let target = el;
+    for (let i = 0; i < 4 && !hasBox(target) && target.parentElement; i++) {
+      target = target.parentElement;
+    }
+    settle(el);
+    settle(target);
+    const own = ringOf(el);
+    let effective = ringOf(target);
     let delegate = null;
-    if (own.s === 'none' || own.w === '0px') {
-      let p = el.parentElement;
+    if (effective.s === 'none' || effective.w === '0px') {
+      let p = target.parentElement;
       for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
         settle(p);
-        const c = getComputedStyle(p);
-        if (c.outlineStyle !== 'none' && c.outlineWidth !== '0px') {
-          delegate = { cls: String(p.className).slice(0, 48), w: c.outlineWidth, c: c.outlineColor, o: c.outlineOffset };
+        const c = ringOf(p);
+        if (c.s !== 'none' && c.w !== '0px') {
+          delegate = { cls: String(p.className).slice(0, 48), ring: c };
+          effective = c;
           break;
         }
       }
     }
-    const eff = delegate ? { w: delegate.w, c: delegate.c, o: delegate.o } : { w: own.w, c: own.c, o: own.o };
+    const second = [...pseudoRings(el), ...(target === el ? [] : pseudoRings(target))];
+    const cs = getComputedStyle(el);
     el.blur();
     rows.push({
       tag: el.tagName,
       cls: String(el.className).slice(0, 60),
       radiusBefore,
       radiusAfter: cs.borderTopLeftRadius,
-      width: eff.w,
-      colour: eff.c,
-      offset: eff.o,
+      width: effective.w,
+      colour: effective.c,
+      offset: effective.o,
       delegated: delegate !== null,
       delegateCls: delegate ? delegate.cls : null,
+      targetCls: String(target.className || "").slice(0, 48),
+      invisible: !hasBox(el) || cs.opacity === "0",
+      secondIndicators: second,
       animations: timings,
     });
   }
@@ -755,18 +909,35 @@ def focus_defects(rows: list[dict], expected: str | dict[str, str]) -> list[str]
         theme = r.get("theme", "")
         want = _rgb(expected[theme] if isinstance(expected, dict) else expected)
         where = f'{r.get("theme", "")}{r.get("route", "")} {r["cls"] or r["tag"]}'.strip()
+        # A synthetic `focus()` cannot reproduce every antd state (the segmented
+        # item marks itself focused only for a real key focus), so an element with
+        # no box is not judged here — the keyboard pass judges it, and the empty
+        # producer check below refuses a run where that pass examined nothing.
+        if r.get("invisible") and r.get("pass") == "synthetic":
+            continue
         if r["width"] != "3px" or r["colour"] != want or r["offset"] != "2px":
             out.append(
                 f"{where}: ring is {r['width']} {r['colour']} at {r['offset']}, "
                 f"want 3px {want} at 2px"
             )
-        if r["radiusBefore"] != r["radiusAfter"]:
+        if "radiusBefore" in r and r["radiusBefore"] != r.get("radiusAfter"):
             out.append(
                 f"{where}: border-radius changed on focus "
                 f"({r['radiusBefore']} -> {r['radiusAfter']})"
             )
         if not r["delegated"] and not r["animations"]:
             out.append(f"{where}: focused without the focus-ring choreography")
+        if r.get("invisible") and not r["delegated"]:
+            out.append(
+                f"{where}: the focused node has no visible box and nothing "
+                "around it draws the ring"
+            )
+        if r.get("secondIndicators"):
+            out.append(
+                f"{where}: a second focus indicator is painted by "
+                + ", ".join(r["secondIndicators"])
+                + f" (the box is {r.get('targetCls') or 'itself'})"
+            )
     return out
 
 
@@ -776,7 +947,13 @@ def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
     Playwright's page comes in from `main`, because the import lives there — the
     tool reports a missing browser instead of failing to import.
     """
-    out: dict = {"rows": [], "examined": 0, "expect": {}, "themes": {}}
+    out: dict = {
+        "rows": [],
+        "examined": 0,
+        "keyboard": 0,
+        "expect": {},
+        "themes": {},
+    }
     for theme in ("light", "dark"):
         # `localStorage` and then a *real* reload. `goto(url + '#/x')` from `url`
         # is a same-document navigation, so the mode is never re-read and both
@@ -806,13 +983,63 @@ def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
         for route in routes:
             page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
             page.wait_for_timeout(1500)
-            found = page.evaluate(FOCUS_JS, FOCUS_LIMIT)
+            found = page.evaluate(FOCUS_JS, [FOCUS_SELECTOR, FOCUS_LIMIT])
             out["examined"] += found["count"]
             out["expect"][theme] = found["expect"]
             for row in found["rows"]:
                 row["theme"] = theme
                 row["route"] = route
+                row["pass"] = "synthetic"
             out["rows"].extend(found["rows"])
+            # The same route again, this time walked with the Tab key: antd's
+            # segmented control only marks itself focused for a real key focus,
+            # so the synthetic pass cannot see the ring the reader sees.
+            page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+            page.wait_for_timeout(1000)
+            page.evaluate("() => { if (document.body) document.body.focus(); }")
+            for _ in range(FOCUS_TAB_STEPS):
+                page.keyboard.press("Tab")
+                row = page.evaluate(FOCUS_ACTIVE_JS)
+                if not row:
+                    continue
+                row["theme"] = theme
+                row["route"] = route + " (Tab)"
+                row["pass"] = "keyboard"
+                out["examined"] += 1
+                out["keyboard"] += 1
+                out["expect"].setdefault(theme, row.get("expect", ""))
+                out["rows"].append(row)
+        # One overlay pass per theme. A menu only exists while it is open, and
+        # its items are reachable by keyboard (Tab to an icon button, Enter, then
+        # Tab again) while the plain walk sees nothing — which is how antd's ring
+        # on a dropdown item stayed invisible to this gate.
+        page.goto(url.rstrip("/") + "/" + routes[0], wait_until="domcontentloaded")
+        page.wait_for_timeout(1200)
+        opened = False
+        for _ in range(24):
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(60)
+            if "ah-iconbtn" in page.evaluate(
+                "() => String((document.activeElement || {}).className || '')"
+            ):
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(450)
+                opened = True
+                break
+        if opened:
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(300)
+            found = page.evaluate(
+                FOCUS_JS, [FOCUS_OVERLAY_SELECTOR, FOCUS_LIMIT]
+            )
+            out["examined"] += found["count"]
+            for row in found["rows"]:
+                row["theme"] = theme
+                row["route"] = routes[0] + " (menu open)"
+                row["pass"] = "synthetic"
+            out["rows"].extend(found["rows"])
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
     return out
 
 
@@ -973,6 +1200,14 @@ def main() -> int:
             f"focus sweep examined only {focus['examined']} elements; "
             "an empty sweep is not a pass"
         )
+    if args.focus and focus["keyboard"] < 20:
+        # The synthetic pass cannot judge a focusable node with no box (antd's
+        # segmented input), so those rows are skipped rather than passed — which
+        # means a run whose keyboard pass measured nothing is not a pass either.
+        focus_failures.append(
+            f"the Tab pass measured only {focus['keyboard']} elements; the nodes "
+            "a synthetic focus cannot judge were therefore never judged"
+        )
     print(
         json.dumps(
             {
@@ -989,6 +1224,12 @@ def main() -> int:
                 "focus_sweep": {
                     "enabled": args.focus,
                     "elements_examined": focus["examined"],
+                    "examined_by_keyboard": focus["keyboard"],
+                    "skipped_synthetic_without_a_box": sum(
+                        1
+                        for r in focus["rows"]
+                        if r.get("invisible") and r.get("pass") == "synthetic"
+                    ),
                     "expected_ring": focus["expect"],
                     "themes_applied": focus["themes"],
                     "delegated_rings": sum(

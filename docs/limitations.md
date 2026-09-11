@@ -114,16 +114,17 @@ sampled away.
 14. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
 15. **The focus sweep is synthetic and single-browser.** `--focus` calls
-    `element.focus()` on every focusable element in five routes × two themes and
-    reads the computed ring (98 elements, 0 defects on the current build), so it
-    proves the *style* and not the journey: real <kbd>Tab</kbd> order, focus
-    trapping inside the dialog, and what a screen reader announces are not
-    covered, and no ring has been seen on a second browser or a HiDPI display with
-    different rounding. Two published details are knowingly looser than
-    material-web: the ring's corner follows the host radius instead of growing by
-    the 2px outward offset (an `outline` cannot read a host's radius — recorded in
-    `docs/theming.md`), and the focus *layer* is tied to `:focus-visible` rather
-    than `:focus`, so a pointer click focuses a control without the 12%.
+    `element.focus()` on every focusable element and then presses <kbd>Tab</kbd>
+    through the same five routes × two themes, reading the computed ring (540
+    nodes, 0 defects on the current build). It proves the style, and the review
+    showed how much it missed when it *only* called `focus()` — antd's ring on a
+    dropdown item, on a segmented item, and a second indicator on the slider —
+    so both channels are now part of the check. What is still uncovered: focus
+    trapping inside a dialog (this build renders none), what a screen reader
+    announces, no ring has been seen on a second browser or a HiDPI display with
+    different rounding, and the `:focus`/`:focus-visible` split means the 12%
+    layer is keyboard-only for components that are not text fields (measured: a
+    text input does match `:focus-visible` on a pointer click; a button does not).
     `prefers-reduced-motion` was measured on one element (no animations, `3px`
     immediately, against the running pair and a `5px` mid-flight sample with
     motion allowed) rather than across the sweep, which does not run in a

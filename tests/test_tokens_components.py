@@ -780,6 +780,64 @@ def test_the_focus_gate_separates_a_ring_from_a_derived_colour():
     ]
 
 
+def test_the_focus_gate_covers_the_three_ways_it_was_blind():
+    """The review falsified "the ring is the only one on screen" three times.
+
+    Each of these was live and each one passed the previous version of the gate:
+    an invisible focusable node (antd's `0x0` segmented input, whose ring was
+    computed and never seen), a visible box whose ring belongs to antd (a
+    dropdown menu item), and a *second* indicator painted on a pseudo-element
+    (the slider handle's `::after`). The third one is why the outline check reads
+    `outline-style` and not `outline-width`: antd's indicator transitions in from
+    `0px`, and at t=0 the width is 0 while the style is already `solid`.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_5", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    def row(**kw):
+        base = {
+            "tag": "INPUT", "cls": "ant-segmented-item-input", "theme": "light",
+            "route": "#/ (Tab)", "width": "3px", "colour": "rgb(98, 91, 113)",
+            "offset": "2px", "delegated": False,
+            "animations": [{"name": "ah-focus-grow", "duration": 150, "delay": 0}],
+        }
+        base.update(kw)
+        return base
+
+    # A synthetic pass cannot judge a node with no box: it is skipped, not passed.
+    assert (
+        audit.focus_defects([row(invisible=True, **{"pass": "synthetic"})], "#625b71")
+        == []
+    )
+    # The keyboard pass can, and does.
+    defects = audit.focus_defects(
+        [row(invisible=True, delegated=False, **{"pass": "keyboard"})], "#625b71"
+    )
+    assert len(defects) == 1 and "no visible box" in defects[0]
+
+    # antd's grey on the visible box is a failure whichever pass saw it.
+    defects = audit.focus_defects(
+        [row(colour="rgb(194, 189, 201)", offset="1px", **{"pass": "keyboard"})],
+        "#625b71",
+    )
+    assert len(defects) == 1 and "want 3px rgb(98, 91, 113) at 2px" in defects[0]
+
+    # A second indicator is a failure even when the ring itself is correct.
+    defects = audit.focus_defects(
+        [row(secondIndicators=["::after outline"], targetCls="ant-slider-handle")],
+        "#625b71",
+    )
+    assert len(defects) == 1 and "second focus indicator" in defects[0]
+
+    # And the gate refuses a run whose keyboard pass measured nothing, because
+    # the skipped rows above would otherwise never be judged at all.
+    assert audit.FOCUS_TAB_STEPS > 0
+
+
 def test_the_percentage_gate_can_fail():
     """Positive control for the guard above."""
 

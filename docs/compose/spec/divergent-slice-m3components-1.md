@@ -36,8 +36,8 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | Claim | Measured |
 |---|---|
 | token consumption, at runtime | injected `446` = referenced `446`, **0** read-but-never-injected, **0** injected-but-never-read |
-| rule reachability, at runtime | of 293 rules that read a component token, **234 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
-| keyboard focus, swept | `--focus` over **5 routes × 2 themes = 98 focusable elements**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, **4** whose ring is drawn by the chip around them. Before: antd's `rgb(194,189,201)` — the same in both themes, and no token equals it — on 17 of 49; a `border-radius: 4px` rewritten on 4; and a 12% layer that never landed on our own buttons |
+| rule reachability, at runtime | of 296 rules that read a component token, **235 match an element** in a gallery mounting every antd family and every `.ah-*` class; the rest are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or one of 3 components the gallery knowingly does not mount. Before the review's finding: 34 matched |
+| keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | focus under `prefers-reduced-motion` | the pulse is skipped and the ring is not: with motion allowed the element reports two running animations (`150ms`, `450ms` after a `150ms` delay) and `5px` mid-flight; with `reduce` it reports **no** animations and `3px` of `secondary` at a `2px` offset immediately |
 | hover, with a real pointer | 5 routes × 2 themes, every button, link, row, tab, chip and select-chip: **0** elements change `background-color` on hover — the 8% layer is the only hover mechanism — and the published press morphs still run (an icon button sampled mid-flight at `47.96px` between its full corner and its pressed corner) |
 | the rendered product, swept | across five routes: **2 font weights, 4 sizes, 7 radii, 15 colours** distinct, **none of them off-token**, and every weight is 400 or 500 |
@@ -145,6 +145,13 @@ by a look:
    `scripts/audit_component_rules.py --focus`. 98 elements, both themes, 0
    defects; then made to fail for real by pointing the ring at `primary`, which
    it reported as `rgb(103,80,164)` against `rgb(98,91,113)`.
+   The independent review then falsified "everywhere, and the only one on screen"
+   in three keyboard-reachable places (a dropdown item, a segmented control whose
+   focus node is a 0×0 invisible input, and a slider handle with a second
+   indicator on its `::after`), and corrected two disclosures. All three are
+   fixed, the gate grew a keyboard channel and an overlay pass so it can see
+   them, and each was re-introduced on purpose to watch it fail. The round ends
+   at 540 nodes examined and 0 defects.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -161,10 +168,46 @@ an explicit `executable_path`, since the wheel's expected rev 1234 is absent).
 **Nothing on this branch has run on a GitHub runner** — the workflow triggers on
 `pull_request` or on `push` to `main`, and this branch has no pull request.
 
-**Independent verification.** The first review subagent was orphaned by a process
-restart and produced **no result** — it verified nothing. The second ran to
-completion and is recorded here in full, because it found more than the author
-did.
+**Independent verification (round 7).** A read-only reviewer was pointed at the
+focus work and told to falsify it. Its verdict: **partly falsified.** It confirmed
+the six token values against files it fetched itself (five first-hand; the
+`easing-emphasized` curve line was truncated in its fetch, so it says so), and it
+confirmed the ring on 108 nodes walked with <kbd>Tab</kbd> — and then broke the
+claim "everywhere, and the only one on screen" three times:
+
+1. **A dropdown menu item.** Reached by keyboard (Tab to an icon button, Enter,
+   Tab), its ring was antd's: `rgb(194,189,201)` at offset 1px in light,
+   `rgb(76,70,91)` in dark, with zero pixels of `secondary` in either. The rule
+   is `.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible` —
+   (0,4,0), because `:where()` only removes the hash class from the count.
+2. **A segmented control.** Focus lands on `.ant-segmented-item-input`, which is
+   **0×0 with `opacity: 0`**: our ring computed on it and was invisible, and the
+   visible 52×38 item carried antd's grey. Worse for the gate, antd only adds
+   `ant-segmented-item-focused` for a *real* key focus, so a sweep built on
+   `element.focus()` passes it.
+3. **The slider handle** showed two indicators at once — ours round, antd's
+   square (`outline: 6px solid`, `box-shadow: 0 0 0 2.5px`, both derived) on the
+   handle's `::after`, which nothing that reads only the element's own `outline`
+   can see.
+
+It also falsified two of the author's disclosures, and both corrections are in
+`docs/theming.md`: the ring's corner is **not** 2px tighter than the published
+geometry (Chromium grows an outline's radius by its offset; re-measured here as
+`IoU` **0.9985**, 15 differing pixels against material-web's sibling-element
+structure), and the 12% focus layer is **not** missing on every pointer click (a
+text input matches `:focus-visible` on a click by itself).
+
+All three defects are fixed, all three are covered by the gate above, and each
+was re-introduced on purpose afterwards to watch the gate fail: renaming the
+segmented arm produced `ring is 3px rgb(194,189,201) at 1px` in light and
+`rgb(76,70,91)` in dark; renaming the menu arm did the same on the menu items;
+removing the slider rule produced `a second focus indicator is painted by
+::after outline`.
+
+**Independent verification (rounds 1–6).** The first review subagent was orphaned
+by a process restart and produced **no result** — it verified nothing. The second
+ran to completion and is recorded here in full, because it found more than the
+author did.
 
 *What it confirmed by its own measurement, not by reading our files:* the
 consumption arithmetic (375 = 375 read from the live injected `<style>` and the
