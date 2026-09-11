@@ -50,7 +50,15 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | tooltip | `inverse-surface` on `inverse-on-surface`, 4px corner, body-small — verified in **both** themes |
 | FAB / icon button | `56×56` `corner-large` on `primary-container` with the level-3 recipe / `40×40` `corner-full` |
 | first paint | **0/8** white cold captures, 8/8 at the exact `rgb(20,18,24)` (was 7/8 white) |
-| narrow widths | six widths (1600/1280/1100/900/760/430px): document scroll width == viewport at every one, **0** overlapping header controls, **0** controls outside the viewport, title stays 22px and the bar wraps 64 → 107 → 153px |
+| narrow widths | six widths (1600/1280/1100/900/760/430px): document scroll width == viewport at every one, **0** header controls whose own centre hit-tests to something else, **0** outside the viewport, title stays 22px and the bar wraps 69 → 115 → 161px |
+
+The width check is a **hit test**, not a bounding-box intersection, and the first
+version of it was wrong: it reported two overlaps at 900px that were a tab
+scrolled out of the tab row's `overflow-x: auto` strip — clipped, invisible and
+unclickable — and two more at 760/430px that were a `display: none` responsive
+label with a zero-area box. Both are now skipped by construction. What the
+usability bug this check exists for actually was is the *hit test* going to the
+wrong control, so that is what is measured.
 
 **Journey log.** (1) The audit that opened this slice measured the shipped
 controls and found antd's anatomy everywhere: a 32px button at `border-radius:

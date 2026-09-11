@@ -547,3 +547,56 @@ def test_stylesheet_has_no_literal_colours():
 def test_stylesheet_has_no_bare_durations_or_curves():
     offenders = _duration_offenders(_code())
     assert not offenders, "m3.css writes its own curves: " + ", ".join(offenders[:10])
+
+
+def test_no_rule_multiplies_a_derived_percentage_by_another():
+    """The bug class behind the invisible dialog scrim.
+
+    `theme.ts` emits a fraction as a **percentage** (`0.32` → `32%`), because the
+    only things that spend one are `color-mix` and `opacity`. A rule that then
+    writes `calc(var(--…-opacity) * 100%)` is multiplying percentage by
+    percentage, which is not a valid calc type: the declaration is invalid at
+    computed-value time, every candidate for that property is discarded, and the
+    element silently paints nothing. Static CSS checks cannot see it (both sides
+    are names), and the browser-side rule audit in the gallery is what found it —
+    but the *shape* of the mistake is greppable, so it is grepped here too.
+    """
+    # A line-level check, not a `[^)]*` one: the offending expression contains a
+    # nested `var(...)`, so a character class that stops at the first `)` cannot
+    # reach the `*`. Two shapes are caught — multiplying anything by `100%`, and
+    # putting a token named `…opacity`/`…percent` inside a `calc()` at all, since
+    # that token is already a percentage.
+    offenders = [
+        f"line {lineno}: {line.strip()[:80]}"
+        for lineno, line in enumerate(_code().splitlines(), 1)
+        if "calc(" in line
+        and (
+            re.search(r"\*\s*100%\s*\)", line)
+            or re.search(r"calc\(.*--ah-c-[a-z0-9-]*(opacity|percent)", line)
+        )
+    ]
+    assert not offenders, (
+        "a percentage token is being multiplied by a percentage again:\n  "
+        + "\n  ".join(offenders[:5])
+    )
+
+
+def test_the_percentage_gate_can_fail():
+    """Positive control for the guard above."""
+
+    def offending(line: str) -> bool:
+        return "calc(" in line and (
+            re.search(r"\*\s*100%\s*\)", line) is not None
+            or re.search(r"calc\(.*--ah-c-[a-z0-9-]*(opacity|percent)", line) is not None
+        )
+
+    assert offending(
+        "background: color-mix(in srgb, var(--ah-x) "
+        "calc(var(--ah-c-y-opacity) * 100%), transparent);"
+    )
+    assert offending("width: calc(var(--ah-c-z-opacity) * 2);")
+    assert offending("height: calc(100% * 100%);")
+    assert not offending(
+        "background: color-mix(in srgb, var(--ah-c-y-role) var(--ah-c-y-opacity), transparent);"
+    )
+    assert not offending("padding-inline-end: calc(var(--ah-c-a) + var(--ah-c-b));")
