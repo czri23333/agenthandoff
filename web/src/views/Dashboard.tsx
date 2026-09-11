@@ -484,7 +484,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
           )}
           <span className="ah-md-hide ah-faint flex items-center gap-1.5">
             <span
-              className="freshness-dot h-1.5 w-1.5 rounded-full"
+              className="freshness-dot h-1.5 w-1.5 rounded-[var(--ah-shape-full)]"
               style={{ opacity: refreshing ? 0.5 : 1 }}
             />
             {refreshing

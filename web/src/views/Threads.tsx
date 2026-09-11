@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Empty, Slider, Spin, Typography } from "antd";
+import { Button, Empty, Slider, Typography } from "antd";
 import { api, type ThreadGroup } from "../api";
 import { useT } from "../i18n";
 
@@ -50,7 +50,11 @@ export default function Threads() {
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {threads === null && (
           <div className="flex items-center gap-2 p-6">
-            <Spin />
+            {/* LoadingIndicatorTokens, not antd's four-dot `Spin`: the dots draw
+                `colorPrimary` through antd's derivative chain, which resolves to
+                `rgb(180,163,220)` — a colour in no token table — where M3E's
+                indicator is a 38dp shape in `primary`. */}
+            <span className="ah-loading ah-loading--uncontained" aria-hidden="true" />
             <span className="ah-meta">{t("clustering")}</span>
           </div>
         )}
