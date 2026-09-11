@@ -61,6 +61,12 @@ OUT_ROOT = REPO / "tests" / "fixtures" / "sanitized"
 SEED = 20260831
 MAX_TEXT = 300  # length class, not the words: a fixture is not an archive
 SESSIONS_PER_CLI = 3
+# A store whose transcripts are simply large gets fewer sessions rather than a
+# fixture over the per-cli byte cap — the alternative is either a fixture that
+# fails the audit or a global cap raised for everyone. `workbuddy` is the case
+# that forced it: 3 of its sessions carry 198 files and 5,366 source messages,
+# and the sample came to 4.35 MB against a 4 MB budget.
+SESSIONS_PER_CLI_OVERRIDE: dict[str, int] = {"workbuddy": 2}
 MAX_RECORDS = 200  # a fixture is a SAMPLE of a session, and says so
 CANDIDATE_POOL = 60  # ranking 451 sessions means 451 full parses
 HEAD_RECORDS = 60  # opening metadata, then a stride, then the newest record
@@ -746,8 +752,9 @@ def pick_sessions(parser) -> tuple[list[str], int]:
     for meta in metas[:CANDIDATE_POOL]:
         note_project_path(meta.cwd or "")
     ranked = sorted(metas[:CANDIDATE_POOL], key=_source_bytes, reverse=True)
+    want = SESSIONS_PER_CLI_OVERRIDE.get(parser.cli, SESSIONS_PER_CLI)
     scored: list[tuple[int, str]] = []
-    for meta in ranked[: SESSIONS_PER_CLI * 4]:
+    for meta in ranked[: want * 4]:
         try:
             raw = parser.load(meta.session_id)
         except (OSError, ValueError):
@@ -757,11 +764,11 @@ def pick_sessions(parser) -> tuple[list[str], int]:
         substance = len(raw.messages) + len(raw.files_touched) // 2
         scored.append((substance, meta.session_id))
     scored.sort(reverse=True)
-    chosen = [sid for _score, sid in scored[:SESSIONS_PER_CLI]]
+    chosen = [sid for _score, sid in scored[:want]]
     if not chosen:
         # Best effort beats silence: a thin store still gets a fixture, and the
         # audit - not the selector - decides whether it is meaningful.
-        chosen = [meta.session_id for meta in ranked[:SESSIONS_PER_CLI]]
+        chosen = [meta.session_id for meta in ranked[:want]]
     source_messages = 0
     for sid in chosen:
         try:

@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-09",
+  "generated": "2026-09-11",
   "rows": [
     {
       "cli": "zcode",
@@ -115,7 +115,7 @@
     },
     {
       "cli": "qoder-ide",
-      "store": "unknown",
+      "store": "Electron leveldb",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -145,18 +145,20 @@
     },
     {
       "cli": "workbuddy",
-      "store": "unknown",
+      "store": "JSONL dir + SQLite title index",
       "reader": true,
-      "fixtures": 0,
-      "fixture_sessions": 0,
-      "fixture_messages": 0,
-      "fixture_ok": false,
+      "fixtures": 23,
+      "fixture_sessions": 14,
+      "fixture_messages": 586,
+      "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,
-      "conformance": false,
+      "conformance": true,
       "empty_store": false,
-      "status": "unverified",
-      "notes": []
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
     },
     {
       "cli": "dsh",
@@ -209,7 +211,7 @@
     },
     {
       "cli": "opencode",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -224,7 +226,7 @@
     },
     {
       "cli": "qoderwake",
-      "store": "unknown",
+      "store": "SQLite daemon store + shared JSONL",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -239,7 +241,7 @@
     },
     {
       "cli": "qoderwake-cn",
-      "store": "unknown",
+      "store": "SQLite daemon store + shared JSONL",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -254,7 +256,7 @@
     },
     {
       "cli": "qoderwork-app",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 1,
@@ -269,7 +271,7 @@
     },
     {
       "cli": "qoderwork-cn-app",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 2,
@@ -284,7 +286,7 @@
     },
     {
       "cli": "qwenwork-app",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -299,7 +301,7 @@
     },
     {
       "cli": "cherrystudio",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 3,

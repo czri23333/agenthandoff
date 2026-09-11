@@ -57,15 +57,27 @@ sampled away.
 4. **Single-binary cockpit is unverified.** `docs/portable-single-exe.md` is a
    build recipe that has never been executed (`dist/` does not exist, PyInstaller
    is not installed here). Treat it as a proposal.
-5. **`claude` parser has never parsed Claude Code data.** Written against
+5. **Two readers list sessions their fixture cannot be built from.** QoderWake
+   keeps team-group chats in SQLite under `~/.qoderwake` and the worker
+   *transcripts* in the shared qoder store (`~/.qoder/projects`, `~/.qoder-cn/…`)
+   — two stores, one reader. `handoff doctor` reports both halves and the parser
+   reads both, but `scripts/sanitize_fixtures.py` mirrors one tree rooted at the
+   parser's `root`, so it finds no files for the transcripts and skips the CLI as
+   "nothing selectable". On the machine this was written on `qoderwake-cn` lists
+   11 sessions from 132 shared transcript files and **has no fixture**, which is
+   why it is still `unverified` rather than proven. Fixing it means teaching the
+   fixture writer to mirror two stores with the right relative shape — and a
+   fixture the parser cannot load would be worse than none, because it would look
+   proven while testing nothing.
+6. **`claude` parser has never parsed Claude Code data.** Written against
    documented JSONL shapes; the family parser is shared by five CLIs that *are*
    proven, so it probably works — "probably" is what this list exists to expose.
-6. **Cockpit performance is measured in one place only.** Search went 15.3 s →
+7. **Cockpit performance is measured in one place only.** Search went 15.3 s →
    7 ms (warm, in-process) / 0.39 s (fresh process, warm disk cache) on the
    maintainer's machine. The 450-row session list takes several seconds to paint
    (observed while measuring layout at six widths), and that wait has not been
    profiled into stages: cold listing, `detail` generation, first paint.
-7. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
+8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change
    page without hitting the theme switch), a session title column squeezed to
    zero width at 430px, an 8-column usage table that leaked past the viewport,
@@ -73,29 +85,29 @@ sampled away.
    usage table scrolls inside its card, the timeline's 72 bins fall to ~4px each,
    and the sweep ran in a Chromium webview with same-origin iframes — not on a
    real phone or a touch browser.
-8. **Collaboration is file-based, not live.** `publish / claim / release` now
+9. **Collaboration is file-based, not live.** `publish / claim / release` now
    carry a lease (holder, deadline, exclusive claim write, 409 on conflict) so two
    agents cannot work the same handoff unknowingly. There is no push channel: the
    cockpit polls every 30 s, and two agents cannot exchange messages - only
    bundles. "Alternating on one task" works; "watching each other work" does not.
-9. **The brief is still a summary; the raw layer is beside it, not in it.**
+10. **The brief is still a summary; the raw layer is beside it, not in it.**
     `capture --full --raw` carries the vendor's original storage verbatim
     (hash-verifiable, extractable), but the *brief* the next agent reads is a
     rendered summary of that storage — it does not inline the tool calls or
     system rows. A successor that needs the unfiltered truth must ask for the
     raw archive, not rely on the brief.
-10. **No editor-side integration.** No VS Code/Cursor extension, no skill/slash
+11. **No editor-side integration.** No VS Code/Cursor extension, no skill/slash
     command; `handoff` is CLI-plus-local-web.
-11. **Write-back is deliberately absent.** We never inject into another CLI's
+12. **Write-back is deliberately absent.** We never inject into another CLI's
     store (Constitution: read-only). That rules out "resume inside the target
     agent natively", which some competing tools do offer. A trade, not an
     oversight — but a functional limit from a user's point of view.
-12. **Everything rests on one user, one OS family, one toolchain.** CI covers
+13. **Everything rests on one user, one OS family, one toolchain.** CI covers
     3 OSes × 3 Pythons for code paths that are unit-testable, and the fixtures
     make that part reproducible — but the store *shapes* were sampled from a
     single machine, and a locale, filesystem or permission model unlike this one
     is still untested ground.
-13. **Not published on PyPI** (the badge was removed for that reason); install
+14. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
 
 ## How to check any of this yourself

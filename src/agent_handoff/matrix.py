@@ -44,13 +44,22 @@ STORE_KINDS: dict[str, str] = {
     "claude": "JSONL dir",
     "codebuddy": "JSONL dir",
     "codebuddy-cn": "JSONL dir",
+    "workbuddy": "JSONL dir + SQLite title index",
     "qoderwork": "JSONL dir",
     "qoderwork-cn": "JSONL dir",
     "qodercn-ide": "JSONL dir",
+    "qoder-ide": "Electron leveldb",
     "qwenwork": "JSONL dir",
     "dsh": "zstd JSONL dir",
     "kimi": "state.json + wire.jsonl",
     "codex": "JSONL rollouts",
+    "opencode": "SQLite (read-only URI)",
+    "qoderwake": "SQLite daemon store + shared JSONL",
+    "qoderwake-cn": "SQLite daemon store + shared JSONL",
+    "qoderwork-app": "SQLite (read-only URI)",
+    "qoderwork-cn-app": "SQLite (read-only URI)",
+    "qwenwork-app": "SQLite (read-only URI)",
+    "cherrystudio": "SQLite (read-only URI)",
 }
 
 # Parsers whose format handling is knowingly incomplete upstream of us.
