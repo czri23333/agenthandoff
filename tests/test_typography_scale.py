@@ -34,7 +34,21 @@ STYLESHEETS = ("index.css", "m3.css")
 
 
 def css() -> str:
-    return "\n".join((WEB / name).read_text(encoding="utf-8") for name in STYLESHEETS)
+    """Both stylesheets, block comments blanked.
+
+    The scans below look for declarations, and a comment that *quotes* one is not
+    a declaration. This file already shipped one false positive of that shape
+    (the weight check flagging a sentence that named the weight it forbids).
+    """
+    return "\n".join(
+        re.sub(
+            r"/\*.*?\*/",
+            lambda m: "\n" * m.group(0).count("\n"),
+            (WEB / name).read_text(encoding="utf-8"),
+            flags=re.S,
+        )
+        for name in STYLESHEETS
+    )
 
 
 def css_with_line_numbers() -> list[tuple[str, int, str]]:
@@ -156,6 +170,23 @@ def test_jsx_uses_only_official_sizes():
     assert not offenders, "off-scale sizes in JSX:\n  " + "\n  ".join(offenders[:10])
 
 
+def style_lines() -> list[tuple[str, int, str]]:
+    """The two stylesheets, with block comments blanked and line numbers kept.
+
+    A gate that scans prose reports prose. `m3.css` documents *why* antd's `th`
+    weight had to be overridden, and the sentence names the value it forbids —
+    which the weight check then flagged as a declaration. Newlines are preserved
+    so the reported line numbers still point at the real file.
+    """
+    out: list[tuple[str, int, str]] = []
+    for name in STYLESHEETS:
+        text = (WEB / name).read_text(encoding="utf-8")
+        blanked = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+        for lineno, line in enumerate(blanked.splitlines(), 1):
+            out.append((name, lineno, line))
+    return out
+
+
 def test_no_weight_heavier_than_m3s_medium():
     """M3 publishes regular (400) and medium (500) — nothing else.
 
@@ -165,14 +196,23 @@ def test_no_weight_heavier_than_m3s_medium():
     a different way.
     """
     offenders: list[str] = []
-    for path in [*[WEB / name for name in STYLESHEETS], *sorted(WEB.rglob("*.tsx"))]:
-        text = path.read_text(encoding="utf-8")
-        for lineno, line in enumerate(text.splitlines(), 1):
+    for name, lineno, line in style_lines():
+        for match in re.finditer(r"font-weight:\s*([^;}\n]+)", line):
+            value = match.group(1).strip()
+            # A weight may be the number M3 publishes or a reference to a role
+            # that carries one; the component layer's own `--ah-c-<path>-weight`
+            # expands to `--ah-type-<role>-weight`.
+            named = re.fullmatch(
+                r"var\(--ah-(?:type-[a-z-]+-weight|c-[A-Za-z0-9-]+-weight)\)", value
+            )
+            if value not in {"400", "500"} and not named:
+                offenders.append(f"{name}:{lineno}: font-weight {value}")
+        for match in re.finditer(r"font-(?:semibold|bold|extrabold|black)\b", line):
+            offenders.append(f"{name}:{lineno}: utility {match.group(0)}")
+    for path in sorted(WEB.rglob("*.tsx")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for match in re.finditer(r"font-weight:\s*([^;}\n]+)", line):
                 value = match.group(1).strip()
-                # A weight may be the number M3 publishes or a reference to a
-                # role that carries one; the component layer's own
-                # `--ah-c-<path>-weight` expands to `--ah-type-<role>-weight`.
                 named = re.fullmatch(
                     r"var\(--ah-(?:type-[a-z-]+-weight|c-[A-Za-z0-9-]+-weight)\)", value
                 )

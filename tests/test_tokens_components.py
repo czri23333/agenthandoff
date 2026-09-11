@@ -624,6 +624,36 @@ def test_the_rule_audit_classifier_separates_dead_from_unverified():
     assert defects == []
 
 
+def test_the_audit_catches_a_weight_m3_does_not_publish():
+    """The one that was actually live: antd draws `th` at 600.
+
+    Our own gates scan our own sources, so antd's runtime stylesheet is invisible
+    to them — the computed value is the only place this exists. It is a closed
+    set, so it is checkable, and this is the check.
+    """
+    module = importlib.util.spec_from_file_location(
+        "audit_component_rules_2", REPO / "scripts" / "audit_component_rules.py"
+    )
+    assert module and module.loader
+    audit = importlib.util.module_from_spec(module)
+    module.loader.exec_module(audit)
+
+    weights, sizes = audit.off_scale(
+        {
+            "weights": {"400 :: div": 10, "500 :: span": 4, "600 :: th.ant-table-cell": 5},
+            "sizes": {"14px :: div": 10, "11px :: span": 3, "13.5px :: div": 2},
+        }
+    )
+    assert weights == ["600 at th.ant-table-cell (x5)"]
+    assert sizes == ["13.5px at div (x2)"]
+
+    # …and the scale itself passes.
+    weights, sizes = audit.off_scale(
+        {"weights": {"400 :: div": 1, "500 :: span": 1}, "sizes": {"12px :: a": 1, "22px :: h1": 1}}
+    )
+    assert weights == [] and sizes == []
+
+
 def test_the_percentage_gate_can_fail():
     """Positive control for the guard above."""
 

@@ -1839,6 +1839,22 @@
 .ah-navrail__header {
   padding-block: var(--ah-c-spacing-steps-xs);
 }
+/* ── Table header weight ─────────────────────────────────────────────────────
+   antd draws `th` at `font-weight: 600`. M3 publishes no 600 — its heaviest
+   text weight is 500 — and the repo's own contract says so, but
+   `test_no_weight_heavier_than_m3s_medium` scans *our* sources and antd's rule
+   lives in antd's runtime stylesheet, so nothing saw it. A computed-value sweep
+   of the rendered page did: `th.ant-table-cell` at 600, five times, on two
+   views. That sweep is now part of `scripts/audit_component_rules.py`. */
+:root .ant-table-thead > tr > th {
+  font-weight: var(--ah-type-label-large-weight);
+}
+
+/* antd's inner track of a switch is a 100px pill; ours is the token. */
+:root .ant-switch .ant-switch-inner {
+  border-radius: var(--ah-c-switch-track-shape);
+}
+
 /* A `Select` wearing a filter chip. M3 has no select *control*; the thing that
    filters a list is a chip, so the toolbar's two dropdowns take
    ChipsTokens/FilterChipTokens geometry — 32dp, corner-medium at rest and

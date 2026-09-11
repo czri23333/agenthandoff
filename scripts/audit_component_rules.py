@@ -138,6 +138,42 @@ AUDIT_JS = """
 }
 """
 
+# Two contracts that only a rendered page can check, because the values come
+# from antd's own runtime stylesheet rather than from ours:
+#
+#   * M3 publishes weights 400 and 500 and nothing heavier. `th` was drawing 600.
+#   * every rendered text size is one of Google's roles (11/12/14/16/22/24).
+#
+# `tests/test_typography_scale.py` enforces both over *our* sources; this
+# enforces them over the computed result, which is where a vendor default can
+# hide. It found the 600 on the first run.
+OFFICIAL_SIZES = {11, 12, 14, 16, 22, 24}
+M3_WEIGHTS = {400, 500}
+
+SWEEP_JS = """
+() => {
+  const bad = { weights: {}, sizes: {} };
+  const bump = (bucket, value, where) => {
+    const key = `${value} :: ${where}`;
+    bucket[key] = (bucket[key] || 0) + 1;
+  };
+  for (const el of document.querySelectorAll('body *')) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+    const cs = getComputedStyle(el);
+    // Skip empty boxes: a container with no text cannot render a weight wrongly.
+    const hasText = [...el.childNodes].some(
+      (n) => n.nodeType === 3 && (n.textContent || '').trim().length > 0
+    );
+    if (!hasText) continue;
+    const where = el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0];
+    bump('weights', cs.fontWeight, where);
+    bump('sizes', cs.fontSize, where);
+  }
+  return bad;
+}
+"""
+
 
 def gallery_sources() -> dict[str, str]:
     return {
@@ -443,6 +479,39 @@ def chromium_path(pw) -> str | None:
     return str(found[-1]) if found else None
 
 
+def off_scale(sweep: dict) -> tuple[list[str], list[str]]:
+    """The computed values that break an M3 contract with a closed set.
+
+    M3 publishes weights 400 and 500 and nothing heavier, and a fixed set of
+    text sizes. Both are closed sets, so a rendered page can be *checked* against
+    them rather than eyeballed — and both were broken by antd's own stylesheet
+    rather than by ours, which is why the source-scanning gates in
+    `tests/test_typography_scale.py` could not see it.
+    """
+    def split(bucket: dict) -> list[tuple[str, str, int]]:
+        out = []
+        for key, count in bucket.items():
+            value, _, where = key.partition(" :: ")
+            out.append((value, where, count))
+        return out
+
+    weights = sorted(
+        f"{value} at {where} (x{count})"
+        for value, where, count in split(sweep.get("weights", {}))
+        if int(float(value)) not in M3_WEIGHTS
+    )
+    sizes = sorted(
+        f"{value} at {where} (x{count})"
+        for value, where, count in split(sweep.get("sizes", {}))
+        # Compared as a float against the float form of the scale, not rounded:
+        # `round(13.5)` is 14, and 14 is on the scale, so rounding let a
+        # half-pixel size through — which is exactly the kind of value the check
+        # exists to find.
+        if float(value.rstrip("px")) not in {float(size) for size in OFFICIAL_SIZES}
+    )
+    return weights, sizes
+
+
 def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
     """Split the audit into defects, unverified and fine.
 
@@ -520,6 +589,7 @@ def main() -> int:
             return 2
 
         rows: list[dict] = []
+        sweep: dict[str, dict[str, int]] = {"weights": {}, "sizes": {}}
         with sync_playwright() as pw:
             executable = chromium_path(pw)
             browser = pw.chromium.launch(
@@ -545,6 +615,10 @@ def main() -> int:
                             pass
                         page.wait_for_timeout(700)
                 rows.extend(page.evaluate(AUDIT_JS, scope))
+                found = page.evaluate(SWEEP_JS)
+                for bucket, entries in found.items():
+                    for key, count in entries.items():
+                        sweep[bucket][key] = sweep[bucket].get(key, 0) + count
             browser.close()
     finally:
         kill_tree(preview)
@@ -560,6 +634,7 @@ def main() -> int:
     rows = list(best.values())
     defects, unverified, _ = reachable(rows)
     matched = sum(1 for r in rows if r["matched"] > 0)
+    off_weight, off_size = off_scale(sweep)
     print(
         json.dumps(
             {
@@ -567,15 +642,21 @@ def main() -> int:
                 "matched": matched,
                 "defects": defects,
                 "unverified": unverified,
+                "off_scale_font_weights": off_weight,
+                "off_scale_font_sizes": off_size,
             },
             indent=2,
         )
     )
-    if defects:
+    if defects or off_weight or off_size:
+        for label, items in (("dead rules", defects), ("weights", off_weight), ("sizes", off_size)):
+            for item in items:
+                print(f"  {label}: {item}")
         print(f"\n{len(defects)} rule(s) read component tokens and reach nothing.")
         return 1
     print(f"\nno dead rules. {matched}/{len(rows)} reach an element; "
-          f"{len(unverified)} are unverified (see the reasons above).")
+          f"{len(unverified)} are unverified (see the reasons above). "
+          "Every rendered weight is 400 or 500 and every size is an M3 role.")
     return 0
 
 
