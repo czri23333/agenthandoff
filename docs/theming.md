@@ -55,6 +55,8 @@ re-derive every judgement.
 | a button's shape is its container's | a bare `.ah-btn` means the *filled* button, and antd's `default` is the *outlined* one | antd's variant classes are the owner of container colour; an earlier draft painted every antd button from the shared geometry rule and shipped an outlined button with a primary container. The rule now sets geometry only |
 | a list row lifts on hover (as the m3eofficial report claimed) | it morphs instead: `extra-small → medium`, elevation stays 0 | `ListTokens.kt` gives a list item level 0 at rest and level 4 only while *dragged*. The previous slice raised a hovered row to level 1 by analogy with M3E cards; that was wrong, and the row is now the correction |
 | `.ah-chip` is a chip | it is a CLI identity *label*: no press state, no morph, deliberately | it answers no interaction because it has none. M3's interactive families are `.ah-mchip` (`--assist` / `--filter` / `--input`) and are separate components with separate tokens |
+| `FabMediumTokens.ContainerShape` | **ours**: `corner-large` (16px) | Google's file has that line commented out (`// TODO: uncomment when ShapeKeyTokens.CornerLargeIncreased is available`) and no published token set gives `corner-large-increased` a dp value. M3E's intent is 20dp; 16 is our inference, marked `shapeOurs` in `tokens.json` rather than presented as Google's |
+| one number, one operator | the opacity token *is* the percentage, and no rule multiplies it again | `color-mix(… var(--ah-c-dialog-scrim-opacity) …)`. The first draft wrote `calc(var(… ) * 100%)`, i.e. percentage × percentage, which is not a valid calc type: the declaration was invalid at computed-value time and the dialog painted **no scrim at all**. A fallback would not have rescued it — an invalid substituted value discards every candidate for that property |
 
 `tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
 
@@ -265,8 +267,17 @@ model, aria, Table virtualisation — and keeps any property it exposes as a
 from `switch.track.height`, `Table.cellPaddingBlock` from the spacing scale, and
 so on). `m3.css` owns what antd has no token for: the press shape morph, the
 state-layer composition, the chip families, the list-item morph, the floating
-label, the progress stop. There is no property with two owners, and no property
-with none.
+label, the progress stop.
+
+That paragraph used to end "there is no property with two owners, and no property
+with none", and an independent review measured it false: `height` and
+`padding-inline` on a button are set by the antd *token* and by `m3.css`, and the
+one that wins is the higher-specificity rule rather than the token. The honest
+version is that the two agree because both read the same token file — which is a
+checkable statement, and not the same claim. The same review caught the
+consequence: the documented `size="large"` → M3 *medium* (56px) mapping had never
+worked, because `:root .ant-btn.ant-btn` outranks antd's own `.ant-btn-lg`. Both
+are fixed, and the second is now measured rather than asserted.
 
 Where antd's own stylesheet is the obstacle rather than the owner, the override
 is deliberate and commented: `:root .ant-btn.ant-btn` is (0,3,0) against antd's
@@ -304,6 +315,25 @@ and the loaded CSSOM, which is the only way to catch a divergence between the tw
 implementations of the transform. Both found real defects on the way in: three
 keys were written `icon_colour` where the CSS read `icon-color`, and a probe run
 showed an outlined antd button painted with the filled container.
+
+It is necessary and it is not sufficient, and an independent review made that
+concrete: **a rule can read every token it names and still apply to nothing.**
+`.ant-tooltip-inner` is a v5 class name — v6 renders `.ant-tooltip-container` —
+so the rule was dead CSS that satisfied the gate perfectly. The review then found
+four more of the same shape (`.ant-modal-content`, `.ant-progress-bg`/`-inner`,
+`.ant-checkbox-inner`, `.ant-radio-inner`, `.ant-message-notice-content`), one of
+which was live: **a white snackbar with black text over the dark page**, because
+v6 renders `message` as `.ant-message-notice`.
+
+The response is a third check, and it needs a browser: a gallery project outside
+the repo that mounts every antd family *and* every `.ah-*` class, built against
+this worktree's own `theme.ts` and `index.css` through a directory junction, plus
+a probe that walks the CSSOM and asks, of every rule that reads a `--ah-c-*`
+property, whether its selector matches at least one element. Measured after the
+fix: **152 of 222** rules match in the gallery, and the 70 that do not are state
+(`:hover`, `:active`, `:disabled`, `:focus-*`), animation-only (`-thumb`,
+`-zoom-leave`) or a component the gallery does not mount (`-btn-link`,
+`-divider-vertical`). A class name antd does not emit is not on that list.
 
 Two more gates: the values themselves are an independent hand transcription of
 Google's files (so a generator typo fails instead of regenerating a wrong file

@@ -116,7 +116,11 @@ export default function Inbox() {
           dataSource={items ?? []}
           renderItem={(it) => (
             <List.Item
-              className="ah-row mb-1.5! flex! items-center gap-3 px-3! py-2.5!"
+              /* `px-3!` used to be here, and an `!important` utility beats the
+                 unlayered `.ah-row` rule — so this one row kept 12px leading
+                 space while every other list item took ListTokens' 16. The
+                 row's horizontal spacing belongs to `.ah-row` now. */
+              className="ah-row mb-1.5! flex! items-center gap-3 py-2.5!"
               actions={actionsFor(it)}
             >
               <List.Item.Meta

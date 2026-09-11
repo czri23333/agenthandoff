@@ -375,8 +375,19 @@ body {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
   /* ListTokens.ItemContainerShape at rest, and the M3E morph: the row widens to
-     corner-medium on hover and corner-large once it is pressed or selected. */
+     corner-medium on hover and corner-large once it is pressed or selected.
+
+     The row *is* a list item, so it takes the list item's measurements as well
+     as its corners — 16px leading and trailing space and a 12px gap between the
+     leading slot and the label (ListTokens.ItemLeadingSpace/-TrailingSpace).
+     An independent review pointed out that the one-line Two-line/Three-line
+     heights and the three type roles lived only in `.ah-li`, which no view in
+     this app emits, so "T4 is done" was a claim about a stylesheet rather than
+     about the product. The corners were already the real rows; these are too. */
   border-radius: var(--ah-c-list-item-shape-rest);
+  padding-inline: var(--ah-c-list-item-leading-space) var(--ah-c-list-item-trailing-space);
+  gap: var(--ah-c-list-item-gap);
+  min-height: var(--ah-c-list-item-height-one-line);
   /* `filter`, `color`, `opacity` and `box-shadow` are here too because many rows
      *are* <button>s: a class shorthand (0,1,0) outranks the element-level
      pressable rule below (0,0,1), and leaving a property out of this list makes

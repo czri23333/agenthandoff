@@ -429,7 +429,15 @@ COMPONENTS: dict[str, dict] = {
         "sizes": {
             "small": {"size": 40, "shape": "@shape:md", "icon": 24},
             "regular": {"size": 56, "shape": "@shape:lg", "icon": 24},
-            "medium": {"size": 80, "shape": "@shape:lg", "icon": 28},
+            # 80dp has no published corner: FabMediumTokens.kt leaves
+            # `ContainerShape` commented out behind
+            # `// TODO: uncomment when ShapeKeyTokens.CornerLargeIncreased is
+            # available`, and no token set publishes a dp value for
+            # `corner-large-increased` (material-web v0_192's shape file stops at
+            # corner-large 16px). 16 is therefore OUR choice — M3E's intent is
+            # 20dp — and it is labelled here and in docs/theming.md rather than
+            # presented as Google's.
+            "medium": {"size": 80, "shape": "@shape:lg", "icon": 28, "shapeOurs": True},
             "large": {"size": 96, "shape": "@shape:xl", "icon": 32},
         },
         "container": "@role:primary-container",

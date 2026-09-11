@@ -120,8 +120,13 @@ def test_fab_sizes_are_googles_four():
     sizes = {k: v["size"] for k, v in C["fab"]["sizes"].items()}
     assert sizes == {"small": 40, "regular": 56, "medium": 80, "large": 96}
     shapes = {k: v["shape"] for k, v in C["fab"]["sizes"].items()}
-    # 40 takes corner-medium, 56 and 80 corner-large, 96 corner-extra-large.
+    # 40 takes corner-medium, 56 corner-large, 96 corner-extra-large.
     assert shapes == {"small": 12, "regular": 16, "medium": 16, "large": 28}
+    # …and 80's is OURS: FabMediumTokens.kt leaves ContainerShape commented out
+    # behind a TODO because `corner-large-increased` has no published dp value.
+    # The marker is what stops that inference from being read as Google's.
+    assert C["fab"]["sizes"]["medium"].get("shapeOurs") is True
+    assert "shapeOurs" not in C["fab"]["sizes"]["regular"]
 
 
 def test_chip_is_32px_with_an_18px_icon_on_a_48px_touch_target():
@@ -331,6 +336,13 @@ def _injected_of(component: dict) -> set[str]:
         name = "--ah-c-" + "-".join(_kebab(part) for part in path.split("."))
         if value is None:
             continue
+        # `bool` before `int`: `isinstance(True, int)` is true in Python, so a
+        # boolean leaf (the `shapeOurs` marker on the 80dp FAB) would otherwise
+        # be reported as a published length while `theme.ts` — where `typeof
+        # true === "boolean"` — emits nothing. An independent review found this
+        # divergence by mutation; the marker now exercises it on every run.
+        if isinstance(value, bool):
+            continue
         if isinstance(value, (int, float)):
             out.add(name)
             continue
@@ -387,21 +399,41 @@ def test_the_gate_can_fail():
     del mutated["button"]["sizes"]["small"]["smuggled"]
     del mutated["switch"]["track"]["width"]
     assert _referenced() - _injected_of(mutated) == {"--ah-c-switch-track-width"}
+    # (e) a boolean leaf is a marker, not a length: both sides must skip it
+    assert _injected_of({"fam": {"flag": True}}) == set()
+    assert "--ah-c-fab-sizes-medium-shape-ours" not in _injected()
 
 
 def test_the_literal_gate_can_fail():
-    """Positive control for the three literal scanners."""
+    """Positive control for the three literal scanners.
+
+    The cases below the first four are the ones an independent review's mutation
+    run *found missing*: uppercase units, units other than px/rem/em, and named
+    colours beyond the six words the first draft listed. They are here so the
+    widening cannot be quietly reverted.
+    """
     assert _length_offenders("padding: 13px;") == ["line 1: 13px"]
+    assert _length_offenders("padding: 13PX;") == ["line 1: 13PX"]
+    assert _length_offenders("width: 13vh;") == ["line 1: 13vh"]
+    assert _length_offenders("margin: 13pt;") == ["line 1: 13pt"]
     assert _colour_offenders("color: #fff;") == ["line 1: #fff"]
     assert _colour_offenders("color: white;") == ["line 1: white"]
+    assert _colour_offenders("color: White;") == ["line 1: White"]
+    assert _colour_offenders("color: gold;") == ["line 1: gold"]
+    assert _colour_offenders("color: rebeccapurple;") == ["line 1: rebeccapurple"]
+    assert _colour_offenders("color: oklch(0.5 0 0);") == ["line 1: oklch("]
     assert _duration_offenders("transition: color cubic-bezier(0.2, 0, 0, 1);") == [
         "line 1: cubic-bezier("
     ]
+    assert _duration_offenders("transition: color steps(4);") == ["line 1: steps("]
     # …and that it does not fire on the two shapes the sheet legitimately needs:
     # a media-query breakpoint and the state-layer spread.
     assert _length_offenders("@media (min-width: 1200px) {") == []
     assert _length_offenders("box-shadow: inset 0 0 0 9999px var(--ah-primary);") == []
     assert _colour_offenders("box-shadow: 0 0 0 0 transparent;") == []
+    # A property whose *name* contains a colour word is not a colour.
+    assert _colour_offenders("white-space: nowrap; background: currentColor;") == []
+    assert _colour_offenders("color: var(--ah-c-tooltip-content);") == []
 
 
 # ── 3. No rule writes its own geometry ──────────────────────────────────────
@@ -422,8 +454,17 @@ def _length_offenders(css: str) -> list[str]:
         # opinion about how wide a window has to be before a side column appears.
         if line.lstrip().startswith("@media"):
             continue
-        for match in re.finditer(r"(?<![\w-])(\d+(?:\.\d+)?)(px|rem|em|ms|s)\b", line):
-            if match.group(0) not in ALLOWED_LENGTHS:
+        # `IGNORECASE` and the full unit list are both from an independent review
+        # that mutation-tested this gate: `13PX`, `13vh` and `13pt` all passed it,
+        # so the gate was enforcing "no px in lower case" rather than "no
+        # lengths". The unit set is CSS's own, minus the ones that cannot appear
+        # here (`deg`, `s` for angles) but plus everything a length can be.
+        for match in re.finditer(
+            r"(?<![\w-])(\d+(?:\.\d+)?)(px|rem|em|ex|ch|vh|vw|vmin|vmax|cm|mm|in|pt|pc|q|fr|ms|s)\b",
+            line,
+            re.IGNORECASE,
+        ):
+            if match.group(0).lower() not in {a.lower() for a in ALLOWED_LENGTHS}:
                 out.append(f"line {lineno}: {match.group(0)}")
     return out
 
@@ -432,22 +473,63 @@ def _colour_offenders(css: str) -> list[str]:
     out: list[str] = []
     for lineno, line in enumerate(css.splitlines(), 1):
         for match in re.finditer(
-            r"#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|oklab)\(", line
+            r"#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|oklab|color|lab|lch)\(",
+            line,
+            re.IGNORECASE,
         ):
             out.append(f"line {lineno}: {match.group(0)}")
-        # `white-space` and `black-*` are properties, not colours, so the keyword
-        # rule has to refuse a hyphen on either side.
+        # Every CSS named colour, not a hand-written handful. A review mutation
+        # showed `gold` and `rebeccapurple` sailing past the old six-word list;
+        # `CSS_NAMED_COLOURS` below is the full keyword set, and the rule refuses
+        # a hyphen on either side so `white-space` is still a property.
+        for match in re.finditer(r"(?<![\w-])([a-zA-Z]+)(?![\w-])", line):
+            if match.group(1).lower() in CSS_NAMED_COLOURS:
+                out.append(f"line {lineno}: {match.group(1)}")
+        # `currentColor` and `transparent` are the two keywords this sheet is
+        # allowed to name: one is "whatever ink this element already has", the
+        # other is "no paint".
         for match in re.finditer(
-            r"(?<![\w-])(?:white|black|red|blue|green|gray|grey)(?![\w-])", line
+            r"(?<![\w-])(currentcolor|transparent)(?![\w-])", line, re.IGNORECASE
         ):
-            out.append(f"line {lineno}: {match.group(0)}")
+            if match.group(1).lower() not in {c.lower() for c in ALLOWED_COLOURS}:
+                out.append(f"line {lineno}: {match.group(1)}")
     return out
+
+
+# Every CSS named colour, including the ones a reviewer's mutation found missing.
+# `transparent` and `currentcolor` are deliberately absent: they are in
+# ALLOWED_COLOURS and are the two the sheet may name.
+_NAMED_COLOUR_WORDS = (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque black "
+    "blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse "
+    "chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan "
+    "darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta "
+    "darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen "
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet "
+    "deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite "
+    "forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green "
+    "greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender "
+    "lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan "
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink "
+    "lightsalmon lightseagreen lightskyblue lightslategray lightslategrey "
+    "lightsteelblue lightyellow lime limegreen linen magenta maroon "
+    "mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen "
+    "mediumslateblue mediumspringgreen mediumturquoise mediumvioletred "
+    "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive "
+    "olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise "
+    "palevioletred papayawhip peachpuff peru pink plum powderblue purple "
+    "rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown "
+    "seagreen seashell sienna silver skyblue slateblue slategray slategrey "
+    "snow springgreen steelblue tan teal thistle tomato turquoise violet "
+    "wheat white whitesmoke yellow yellowgreen"
+)
+CSS_NAMED_COLOURS = frozenset(_NAMED_COLOUR_WORDS.split())
 
 
 def _duration_offenders(css: str) -> list[str]:
     out: list[str] = []
     for lineno, line in enumerate(css.splitlines(), 1):
-        for match in re.finditer(r"cubic-bezier\(", line):
+        for match in re.finditer(r"cubic-bezier\(|steps\(", line, re.IGNORECASE):
             out.append(f"line {lineno}: {match.group(0)}")
     return out
 

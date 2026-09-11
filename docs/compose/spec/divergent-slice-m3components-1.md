@@ -33,7 +33,9 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 
 | Claim | Measured |
 |---|---|
-| token consumption, at runtime | injected `367`…`375` = referenced `375`, **0** read-but-never-injected, **0** injected-but-never-read |
+| token consumption, at runtime | injected `375` = referenced `375`, **0** read-but-never-injected, **0** injected-but-never-read |
+| rule reachability, at runtime | of 222 rules that read a component token, **152 match an element** in a gallery mounting every antd family and every `.ah-*` class; the 70 that do not are `:hover`/`:active`/`:disabled`/`:focus-*`, animation-only, or unmounted. Before the review's finding: 34 matched |
+| the dialog scrim | `rgba(0,0,0,0)` before (a `calc(percent * percent)`, invalid at computed-value time, discarding every candidate); the token alone after |
 | top app bar | `64px`, `rgb(33,31,38)`, 16px inline padding; title **22px / 28px / weight 400** (`title-large`, `AppBarSmallTokens.TitleFont`) |
 | filled button | `40px`, radius `9999px`, `min-width 64px`, padding `16px`, `14px/20px/500`, `rgb(208,188,255)` on `rgb(56,30,114)`, no shadow; transitions `0.16s, 0.24s, …` from the springs |
 | …hovered / pressed | 8% layer; then radius **`8px`** (`ButtonSmallTokens.PressedContainerShape`) + 12% layer + level 0, `transform: none` |
@@ -48,6 +50,7 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | tooltip | `inverse-surface` on `inverse-on-surface`, 4px corner, body-small — verified in **both** themes |
 | FAB / icon button | `56×56` `corner-large` on `primary-container` with the level-3 recipe / `40×40` `corner-full` |
 | first paint | **0/8** white cold captures, 8/8 at the exact `rgb(20,18,24)` (was 7/8 white) |
+| narrow widths | six widths (1600/1280/1100/900/760/430px): document scroll width == viewport at every one, **0** overlapping header controls, **0** controls outside the viewport, title stays 22px and the bar wraps 64 → 107 → 153px |
 
 **Journey log.** (1) The audit that opened this slice measured the shipped
 controls and found antd's anatomy everywhere: a 32px button at `border-radius:
@@ -96,8 +99,75 @@ an explicit `executable_path`, since the wheel's expected rev 1234 is absent).
 `pull_request` or on `push` to `main`, and this branch has no pull request.
 
 **Independent verification.** The first review subagent was orphaned by a process
-restart and produced **no result** — it verified nothing. The second is recorded
-below.
+restart and produced **no result** — it verified nothing. The second ran to
+completion and is recorded here in full, because it found more than the author
+did.
+
+*What it confirmed by its own measurement, not by reading our files:* the
+consumption arithmetic (375 = 375 read from the live injected `<style>` and the
+CSSOM, on all five views); the token numbers family by family against 53 files it
+fetched itself — buttons, icon buttons, FABs, chips, list items, text fields,
+switch, checkbox, radio, segmented, dialog, scrim, progress, tooltip, badge,
+divider, snackbar, app bar, navigation, slider — with every value matching but
+one; the row morph (`4px` → `12px` + 8% → `16px` + 12%, `transform: none`); the
+button morph (after a warm-up click, because a fresh page's *first* synthetic
+`mousedown` does not set `:active` — its first two attempts were invalid and it
+said so); `firstpaint.css` in six OS × stored-theme combinations, with the
+media-query branch and the in-app theme switch; and that `--check` fails when one
+hex in that file is mutated.
+
+*What it falsified, and what changed because of it.*
+
+1. **The token-consumption gate is necessary and not sufficient.** A rule can
+   read every token it names and apply to nothing. `.ant-tooltip-inner` was a v5
+   name; v6 renders `.ant-tooltip-container`. Four more of the same shape existed
+   (`.ant-modal-content`, `.ant-progress-bg`/`-inner`, `.ant-checkbox-inner`,
+   `.ant-radio-inner`, `.ant-message-notice-content`) and **one was live: the
+   snackbar rendered as a white box with black text over the dark surface**,
+   because v6's `message` is `.ant-message-notice`. All five are retargeted
+   against antd's real markup, and the check that finds this class of defect is
+   now written down: a gallery outside the repo that mounts every antd family
+   *and* every `.ah-*` class against this worktree's own theme and stylesheet,
+   and a probe that asks of every `--ah-c-*`-reading rule whether it matches an
+   element. 152 of 222 match; the 70 that do not are state, animation-only, or a
+   component the gallery does not mount. The tooltip is re-measured as
+   `inverse-surface` on `inverse-on-surface`, 4px corner, body-small, in both
+   themes.
+2. **The dialog scrim computed to nothing.** `calc(var(--…-opacity) * 100%)` is
+   percentage × percentage — not a valid calc type — so the declaration was
+   invalid at computed-value time and the mask painted `rgba(0,0,0,0)`. The
+   number was Google's; the CSS that spent it was not. Fixed to the token alone,
+   and the deviation register now records why a fallback declaration would not
+   have helped.
+3. **The 80dp FAB's corner is not Google's.** `FabMediumTokens.kt` has
+   `ContainerShape` commented out behind a TODO, and no published token set gives
+   `corner-large-increased` a dp value. 16px is our inference and is now marked
+   `shapeOurs` in `tokens.json`, asserted by the test, and in the register.
+4. **Two of the three literal gates were enforcing less than they said.**
+   Mutation showed `13PX`, `13vh`, `13pt`, `gold`, `White` and `rebeccapurple`
+   all passing. The scanners are now case-insensitive, carry CSS's full length
+   unit set, and match against the complete named-colour keyword set rather than
+   six words — with every one of those mutations added to the positive control.
+5. **`"no property with two owners"` was false**, and the documented
+   `size="large"` → 56px mapping had never worked, because `:root .ant-btn.ant-btn`
+   outranks antd's own `.ant-btn-lg`. The rule now exists and the claim in
+   `docs/theming.md` is rewritten to what is actually checkable.
+6. **A boolean token leaf** made the Python test and `theme.ts` disagree
+   (`isinstance(True, int)` in Python). The test now skips booleans, and the
+   `shapeOurs` marker from (3) exercises that path on every run.
+7. **The list-item anatomy was a claim about a stylesheet, not about the
+   product.** The heights, the leading icon and the three type roles lived under
+   `.ah-li`, which no view emits; the app's rows are `.ah-row`. `.ah-row` now
+   takes ListTokens' 16px leading and trailing space and its 12px gap as well as
+   the corners — and one `!important` Tailwind class in `Inbox.tsx` was removed,
+   because it had been silently holding that row at 12px while every other row
+   moved.
+
+*What it could not verify:* `Modal.confirm`'s inner rules beyond the two the
+gallery now mounts, the exit animation's class, any colour but first paint in the
+light theme, the 28px pressed switch handle, and any component whose only
+instance needs an interaction it did not trigger. Those are named here rather
+than folded into the claims above.
 
 ## [S1] Problem
 

@@ -147,8 +147,7 @@
 
 /* Variants. A variant changes container, content and — for the outlined one —
    the outline width that OutlinedButtonTokens carries per size. */
-.ah-btn--tonal,
-:root .ant-btn-primary.ah-btn--tonal {
+.ah-btn--tonal {
   background: var(--ah-c-button-variant-tonal-container);
   color: var(--ah-c-button-variant-tonal-content);
   --ah-state-layer-color: var(--ah-c-button-variant-tonal-content);
@@ -219,6 +218,17 @@
    rectangle in an M3 toolbar. */
 :root .ant-btn-sm {
   height: var(--ah-c-button-sizes-small-height);
+  font-size: var(--ah-c-button-type-role-size);
+}
+
+/* The other half of that mapping, and it did NOT exist until an independent
+   review measured a `size="large"` button at 40px: `:root .ant-btn.ant-btn`
+   (0,3,0) beats antd's own `.ant-btn-lg` rule, so `controlHeightLG` in
+   `antdConfig` was never reached. The app renders no `size="large"` button, so
+   nothing was visibly wrong — the documented mapping was simply false. */
+:root .ant-btn-lg {
+  height: var(--ah-c-button-sizes-medium-height);
+  padding-inline: var(--ah-c-button-sizes-medium-leading) var(--ah-c-button-sizes-medium-trailing);
   font-size: var(--ah-c-button-type-role-size);
 }
 
@@ -667,7 +677,11 @@
    CheckboxTokens: an 18px container at a 2px radius inside a 40px state layer.
    RadioButtonTokens: a 20px icon inside the same 40px layer. */
 
-:root .ant-checkbox .ant-checkbox-inner {
+/* antd v6 draws the box on the `.ant-checkbox` span and puts a native
+   `<input class="ant-checkbox-input">` inside it — `.ant-checkbox-inner` is the
+   v5 name. CheckboxTokens' 18px container, 2px radius and 2px outline land on
+   the span; the input stays the accessible element the browser owns. */
+:root .ant-checkbox {
   width: var(--ah-c-checkbox-size);
   height: var(--ah-c-checkbox-size);
   border: var(--ah-c-checkbox-outline-width) solid var(--ah-c-checkbox-unselected-outline);
@@ -675,12 +689,17 @@
   background: transparent;
 }
 
-:root .ant-checkbox-checked .ant-checkbox-inner {
+:root .ant-checkbox-checked {
   border-color: var(--ah-c-checkbox-selected-container);
   background: var(--ah-c-checkbox-selected-container);
 }
 
-:root .ant-checkbox-checked .ant-checkbox-inner::after {
+:root .ant-checkbox-input {
+  width: var(--ah-c-checkbox-size);
+  height: var(--ah-c-checkbox-size);
+}
+
+:root .ant-checkbox-checked::after {
   border-color: var(--ah-c-checkbox-selected-icon);
 }
 
@@ -690,18 +709,26 @@
   border-radius: var(--ah-c-checkbox-state-layer);
 }
 
-:root .ant-radio .ant-radio-inner {
+/* Same v6 rename as the checkbox: the ring is the `.ant-radio` span, the native
+   `<input class="ant-radio-input">` is the control. RadioButtonTokens' 20px
+   icon and 40px state layer. */
+:root .ant-radio {
   width: var(--ah-c-radio-size);
   height: var(--ah-c-radio-size);
   border-color: var(--ah-c-radio-unselected-icon);
   background: transparent;
 }
 
-:root .ant-radio-checked .ant-radio-inner {
+:root .ant-radio-input {
+  width: var(--ah-c-radio-size);
+  height: var(--ah-c-radio-size);
+}
+
+:root .ant-radio-checked {
   border-color: var(--ah-c-radio-selected-icon);
 }
 
-:root .ant-radio-checked .ant-radio-inner::after {
+:root .ant-radio-checked::after {
   background: var(--ah-c-radio-selected-icon);
 }
 
@@ -754,7 +781,12 @@
    on primary; ScrimTokens gives the scrim its colour and 0.32 opacity. The
    enter and exit are M3E springs. */
 
-:root .ant-modal .ant-modal-content {
+/* antd v6's panel is `.ant-modal-container`; `.ant-modal-content` is the v5
+   name, and a rule against it is CSS that reads its tokens and never applies.
+   Confirmed against a gallery that mounts the whole component set: every rule in
+   this file that writes an `.ant-*` selector is checked against a real element
+   by `ah_probe_rules.py`, which reports the ones that match nothing. */
+:root .ant-modal .ant-modal-container {
   border-radius: var(--ah-c-dialog-shape);
   background: var(--ah-c-dialog-container);
   box-shadow: var(--ah-c-dialog-elevation);
@@ -775,7 +807,19 @@
 }
 
 :root .ant-modal-root .ant-modal-mask {
-  background: color-mix(in srgb, var(--ah-c-dialog-scrim-role) calc(var(--ah-c-dialog-scrim-opacity) * 100%), transparent);
+  /* The opacity token is already a `%` (`theme.ts` emits fractions as
+     percentages, because the only things that spend one are `color-mix` and
+     `opacity`). Multiplying it by `100%` a second time produced
+     `calc(32% * 100%)` — percentage × percentage is not a valid calc type, so
+     the declaration was invalid *at computed-value time*, the property fell back
+     to its initial value, and the dialog painted **no scrim at all**. A
+     fallback declaration would not have saved it either: the invalid-value rule
+     discards every candidate for that property. */
+  background: color-mix(
+    in srgb,
+    var(--ah-c-dialog-scrim-role) var(--ah-c-dialog-scrim-opacity),
+    transparent
+  );
 }
 
 @keyframes ah-dialog-in {
@@ -789,7 +833,7 @@
   }
 }
 
-:root .ant-modal .ant-modal-content {
+:root .ant-modal .ant-modal-container {
   animation: ah-dialog-in var(--ah-c-dialog-enter-duration) var(--ah-c-dialog-enter-easing) both;
 }
 
@@ -832,13 +876,23 @@
   background: var(--ah-c-progress-stop);
 }
 
-:root .ant-progress .ant-progress-bg,
-:root .ant-progress .ant-progress-inner {
+/* v6 draws a line indicator as `.ant-progress-rail` (the track) with
+   `.ant-progress-track` inside it; `-bg`/`-inner` were the v5 names. The rail
+   also carries `height` as an *inline* style — there is no antd token for it —
+   so the 4px has to win with `!important`. The alternative is an 8px bar in an
+   M3 product, which is not a trade this sheet is willing to make quietly. */
+:root .ant-progress .ant-progress-rail,
+:root .ant-progress .ant-progress-track {
   border-radius: var(--ah-c-progress-shape);
   background: var(--ah-c-progress-track);
 }
 
-:root .ant-progress .ant-progress-bg {
+:root .ant-progress .ant-progress-rail {
+  height: var(--ah-c-progress-linear-height) !important;
+}
+
+:root .ant-progress .ant-progress-track {
+  height: var(--ah-c-progress-linear-height) !important;
   background: var(--ah-c-progress-active);
 }
 
@@ -892,8 +946,13 @@
 }
 
 /* A snackbar (antd's `message`): inverse-surface at corner-extra-small and
-   elevation 3, 48px on one line. */
-:root .ant-message .ant-message-notice-content {
+   elevation 3, 48px on one line. v6 renders `.ant-message-notice` with an
+   optional `.ant-message-notice-title`/`-wrapper` inside it; the v5
+   `.ant-message-notice-content` does not exist, and a rule against it left a
+   **white box with black text over the dark surface** — the one dead rule in
+   this file a user could see. Found by clicking the app's own copy button in a
+   browser, not by any gate. */
+:root .ant-message .ant-message-notice {
   min-height: var(--ah-c-snackbar-single-line);
   display: inline-flex;
   align-items: center;
@@ -905,7 +964,8 @@
   line-height: var(--ah-c-snackbar-type-role-line);
 }
 
-:root .ant-message .ant-message-notice-content .ant-message-custom-content {
+:root .ant-message .ant-message-notice-title,
+:root .ant-message .ant-message-notice-wrapper {
   color: inherit;
 }
 
@@ -1166,7 +1226,7 @@
 }
 
 /* CheckboxTokens.IconSize and the 40px state layer both land on antd's box. */
-:root .ant-checkbox .ant-checkbox-inner::after {
+:root .ant-checkbox::after {
   width: var(--ah-c-checkbox-icon);
   height: var(--ah-c-checkbox-icon);
 }
@@ -1181,12 +1241,12 @@
   height: var(--ah-c-radio-state-layer);
 }
 
-:root .ant-checkbox-disabled .ant-checkbox-inner,
-:root .ant-radio-disabled .ant-radio-inner {
+:root .ant-checkbox-disabled,
+:root .ant-radio-disabled {
   opacity: var(--ah-c-checkbox-disabled-opacity);
 }
 
-:root .ant-radio-disabled .ant-radio-inner {
+:root .ant-radio-disabled {
   opacity: var(--ah-c-radio-disabled-opacity);
 }
 
@@ -1227,8 +1287,8 @@
   }
 }
 
-:root .ant-zoom-leave .ant-modal-content,
-:root .ant-modal-wrap:has(.ant-modal[style*="display: none"]) .ant-modal-content {
+:root .ant-zoom-leave .ant-modal-container,
+:root .ant-modal-wrap:has(.ant-modal[style*="display: none"]) .ant-modal-container {
   animation: ah-dialog-out var(--ah-c-dialog-exit-duration) var(--ah-c-dialog-exit-easing) both;
 }
 
@@ -1377,11 +1437,11 @@
   font-weight: var(--ah-c-snackbar-action-type-role-weight);
 }
 
-:root .ant-message .ant-message-notice-content .anticon {
+:root .ant-message .ant-message-notice .anticon {
   font-size: var(--ah-c-snackbar-icon-size);
 }
 
-:root .ant-message .ant-message-notice-content .ant-message-custom-content {
+:root .ant-message .ant-message-notice-title {
   letter-spacing: var(--ah-c-snackbar-type-role-tracking);
   font-weight: var(--ah-c-snackbar-type-role-weight);
 }
