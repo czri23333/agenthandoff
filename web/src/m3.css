@@ -1025,7 +1025,22 @@
    4dp spacing scale so the page cannot invent a 10px gutter. */
 
 .ah-appbar {
-  min-height: var(--ah-c-app-bar-small-height);
+  height: var(--ah-c-app-bar-small-height);
+  padding-block: 0;
+}
+
+/* The official small app bar is one 64dp row, and that is what the height above
+   is. This bar also carries the search field, two Selects and the display menu,
+   which M3 would put in a docked toolbar under it; below ~1200px they cannot fit
+   on one row, so the bar wraps and grows. The deviation is real and measured
+   rather than papered over: at 1440px it is exactly 64, at 1024 it is two rows.
+   The alternative — clipping controls — is worse than a taller bar. */
+@media (max-width: 1199px) {
+  .ah-appbar {
+    height: auto;
+    min-height: var(--ah-c-app-bar-small-height);
+    padding-block: var(--ah-c-spacing-steps-sm);
+  }
 }
 
 /* ── Search bar (docked) ─────────────────────────────────────────────────────

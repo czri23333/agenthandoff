@@ -214,6 +214,14 @@ that the run prints. `--app-only` exists for a machine that cannot afford the
 gallery's Vite build, and its report says the gallery checks were not measured
 rather than implying they passed.
 
+One more measured deviation, on the shell rather than a control: the top app bar
+is the official 64dp (`AppBarSmallTokens.ContainerHeight`) at 1200px and wider,
+and 65px below that, where its search field, two Selects and display menu wrap to
+a second row. M3's answer is a docked toolbar under the bar
+(`DockedToolbarTokens`, 64dp with 16dp leading and trailing space); the cockpit
+keeps one bar until the layout is redesigned, and the number is measured in both
+states rather than described as "about 64".
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to

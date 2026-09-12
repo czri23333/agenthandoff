@@ -563,6 +563,22 @@ and anything that does not match stays a defect.
 | the pager fix | no off-token colour remains on the pager in either theme |
 | `--app-only` is honest | the summary prints `gallery skipped (--app-only): rule reachability and the disabled sweep were NOT measured this run` and the JSON carries `gallery_skipped: true`; it cannot be mistaken for a green gallery run |
 
+### Round 21 鈥?the top app bar is the official 64dp where it can be
+
+The shell's own chrome had never been measured against the layout families it
+claims. It was: `min-height: 64px` plus Tailwind's `!h-auto !py-2.5 !flex-wrap`,
+which rendered **69px** at every width 鈥?a number that is in no token.
+
+| Claim | Measured |
+|---|---|
+| before | header **69px** at 1440 (padding `10px 16px`, content-driven) |
+| after | **64px** at 1440, 1280 and 1200 鈥?exactly `AppBarSmallTokens.ContainerHeight` 鈥?and **65px** at 1024 and 900, where the bar's search field, two Selects and display menu cannot fit on one row |
+| the narrow case is a recorded deviation, not a silent one | M3 would put those controls in a *docked toolbar* under the app bar (`DockedToolbarTokens`: 64dp, 16dp leading/trailing, 4鈥?2dp spacing); this cockpit keeps them in the bar and lets it wrap below 1200px. The rule says so in `m3.css`, and `docs/theming.md`'s register carries the row |
+
+The bar's own padding is `16px` (the spacing scale's `lg`) and its title is
+title-large, both already token-driven; what was wrong was the height, and the
+fix is one declaration plus the removal of two Tailwind overrides.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
