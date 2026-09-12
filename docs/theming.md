@@ -34,6 +34,34 @@ the token table.
 | a control's geometry | an official per-component token, *referenced* (never restated) from `tokens.json`'s `component` block and spent only as a `--ah-c-*` custom property |
 | interaction geometry | the M3E shape morph where the component publishes one: a button tightens to `corner-small`/`medium`/`large` while held, a list item widens `extra-small` → `medium` → `large` across rest/hover/selected |
 
+### Where the colour values come from, and how that is checked
+
+The 49 roles are **not** values somebody mixed to taste. They are Google's
+baseline, in two layers, and both layers are now compared against Google's own
+files by `tests/test_official_palette.py`:
+
+| Layer | Where it lives | What it is | Checked against |
+|---|---|---|---|
+| role → rung | `M3_ROLE_REFS` in `gen_tokens.py` | `primary` is `primary40`, `background` is `neutral98` | `tokens/versions/v0_192/_md-sys-color.scss` — `values-light()` / `values-dark()`, 49 roles each |
+| rung → colour | `M3_TONES` in `gen_tokens.py` | `primary40` is `#6750a4`, `neutral98` is `#fef7ff` | `tokens/versions/v0_192/_md-ref-palette.scss` — 89 rungs |
+
+Measured on 2026-09-12 against copies fetched first-hand from
+`material-components/material-web`: **0 differences** in either layer, in either
+theme. The only names present upstream and absent here are the reference file's
+two utility entries, `black` and `white`.
+
+Both files are vendored under `tests/fixtures/m3spec/` (Apache-2.0, Google's
+headers intact) with their sha256 pinned in the test, because a gate that needs
+the network is a gate that fails on a train. Re-vendoring is a deliberate act:
+replace the files, update the hashes, and the two comparison tests either pass
+against the new version or name every role that moved.
+
+This layer is where a transcription slip would hide: rung names are arbitrary
+(`neutral96` and `neutral98` differ by two hex digits, `neutral87` does not
+exist), so a typo produces a plausible colour rather than an error. Proved able
+to fail by mutating both layers — `primary40` → `#6750a5` and the role
+`primary` → `primary50` — and each was reported by name.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to
@@ -42,7 +70,7 @@ re-derive every judgement.
 | Official | Ours | Why |
 |---|---|---|
 | Roboto (`md-ref-typeface` plain/brand) | the system stack | local-first: no webfont means no network at startup and no FOUT |
-| HCT palette generation from a seed | the *shipped* palette is hand-authored sRGB and AA-gated; a **user** seed is derived at runtime by Google's own library | generating the default would re-brand every colour, and the baseline is a published artefact rather than one seed's output — `#6750a4` is the baseline's *primary*, not its seed. So the default stays authored and the derivation is opt-in, per reader, in the 2021 spec the baseline was published under |
+| HCT palette generation from a seed | the *shipped* palette is the published M3 baseline, transcribed and then **checked byte-for-byte** against Google's own files; a **user** seed is derived at runtime by Google's own library | generating the default would re-brand every colour, and the baseline is a published artefact rather than one seed's output — `#6750a4` is the baseline's *primary*, not its seed. So the default stays the published palette and the derivation is opt-in, per reader, in the 2021 spec the baseline was published under |
 | native springs (Compose `SpringSpec`) | `linear()` sampling of the official damping/stiffness pair, `cubic-bezier` fallback | CSS has no spring primitive; the sampling is deterministic and regenerates with the tokens |
 | white elevation *overlay* on dark surfaces | the MDC-Web black shadow in both themes | that is what material-web compiles to CSS for the web; our dark surfaces already step lighter (surface0→2), which serves the same purpose |
 | tracking applies to every role | CJK-authored prose keeps `letter-spacing: normal` | tracking is a Latin typography device; the roles' numbers are sub-pixel Latin optimisations |

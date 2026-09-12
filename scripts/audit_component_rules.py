@@ -1165,7 +1165,12 @@ def disabled_defects(
                 f"{where}: opacity {measured:.2f}, want {expected:.2f} — a blanket "
                 "fade takes the focus ring and every child with it"
             )
-        if spec and expected == 1.0:
+        if row.get("forced"):
+            # Forced colours replace the ink with system colours on purpose, so a
+            # composed `on-surface` is exactly what must *not* be expected here.
+            # The opacity, focus and pointer checks above still apply.
+            pass
+        elif spec and expected == 1.0:
             # The *composed* treatment: every translucent colour the control
             # paints has to be the theme's `on-surface` at the published opacity.
             # That is the check the light pass exists for — light's ink is dark
@@ -1218,7 +1223,9 @@ def disabled_defects(
     return out
 
 
-def run_disabled_sweep(page, url: str, theme: str = "dark") -> dict:
+def run_disabled_sweep(
+    page, url: str, theme: str = "dark", forced: bool = False
+) -> dict:
     """Every disabled control on the gallery page, with and without a pointer.
 
     Per palette: the disabled look composites `on-surface`, and light's ink is
@@ -1226,6 +1233,8 @@ def run_disabled_sweep(page, url: str, theme: str = "dark") -> dict:
     other. The gallery used to be dark-only and this sweep inherited that.
     """
     page.goto(f"{url}?theme={theme}", wait_until="domcontentloaded")
+    if forced:
+        page.emulate_media(forced_colors="active")
     page.wait_for_timeout(1500)
     found = page.evaluate(DISABLED_JS, DISABLED_SELECTOR)
     on_surface = found.get("onSurface", "")
@@ -1276,8 +1285,9 @@ def run_disabled_sweep(page, url: str, theme: str = "dark") -> dict:
                 page.mouse.move(5, 5)
         rows.append(
             {
-                "label": f'{theme} {row["tag"]}.{row["cls"][:30]}',
+                "label": f'{"forced " if forced else ""}{theme} {row["tag"]}.{row["cls"][:30]}',
                 "tag": row["tag"],
+                "forced": forced,
                 "on_surface": on_surface,
                 "opacity": row["opacity"],
                 "focusable": row["focusable"],
@@ -1286,6 +1296,8 @@ def run_disabled_sweep(page, url: str, theme: str = "dark") -> dict:
                 "press": {**rest, **(press or {})} if press else None,
             }
         )
+    if forced:
+        page.emulate_media(forced_colors="none")
     return {"rows": rows, "examined": len(rows)}
 
 
@@ -1455,6 +1467,7 @@ FOCUS_ACTIVE_JS = r"""
     width: effective.w,
     colour: effective.c,
     offset: effective.o,
+    style: effective.s,
     delegated,
     invisible: !hasBox(el) || cs.opacity === '0',
     targetCls: String(target.className || '').slice(0, 48),
@@ -1573,6 +1586,7 @@ FOCUS_JS = r"""
       width: effective.w,
       colour: effective.c,
       offset: effective.o,
+      style: effective.s,
       delegated: delegate !== null,
       delegateCls: delegate ? delegate.cls : null,
       targetCls: String(target.className || "").slice(0, 48),
@@ -1604,15 +1618,46 @@ def focus_defects(rows: list[dict], expected: str | dict[str, str]) -> list[str]
         if r.get("tag") == "THEME":
             out.append(f"{r['cls']}: the requested theme was not applied")
             continue
+        # A synthetic `focus()` cannot reproduce every antd state (the segmented
+        # item marks itself focused only for a real key focus), so an element with
+        # no box is not judged from that pass — the keyboard pass judges it. This
+        # has to come *before* the forced-colours branch too: that branch was
+        # written above it once and immediately reported the 0x0 segmented input
+        # as "nothing around it draws the ring".
+        if r.get("invisible") and r.get("pass") == "synthetic":
+            continue
+        if r.get("forced"):
+            # `forced-colors: active` replaces every colour with a system one, so
+            # the ring cannot be compared against `--ah-secondary` — the
+            # requirement becomes "there is still a ring". Measured on the app:
+            # it is the UA's `Highlight` at 3px and a 2px offset, because the ring
+            # is an `outline` and forced colours keep outlines (they only force
+            # the colour). This pass is what proves that per *element*, including
+            # the ones whose ring is delegated to an ancestor.
+            # The *style* has to be part of the string: `"3px rgb(...)"` has no
+            # keyword for `_outline_is_visible` to find, so the first version of
+            # this branch reported "no visible focus ring" for every element in
+            # the mode — a check that had forgotten what an outline is made of.
+            outline = f'{r.get("style", "")} {r.get("width", "")} {r.get("colour", "")}'
+            where = f'{r.get("theme", "")}{r.get("route", "")} {r["cls"] or r["tag"]}'.strip()
+            if not _outline_is_visible(str(outline)):
+                out.append(f"{where}: no visible focus ring in forced-colors")
+            if r.get("radiusBefore") not in (None, "") and r.get("radiusBefore") != r.get(
+                "radiusAfter"
+            ):
+                out.append(
+                    f"{where}: border-radius changed on focus "
+                    f"({r['radiusBefore']} -> {r['radiusAfter']})"
+                )
+            if r.get("invisible") and not r.get("delegated"):
+                out.append(
+                    f"{where}: the focused node has no visible box and nothing "
+                    "around it draws the ring"
+                )
+            continue
         theme = r.get("theme", "")
         want = _rgb(expected[theme] if isinstance(expected, dict) else expected)
         where = f'{r.get("theme", "")}{r.get("route", "")} {r["cls"] or r["tag"]}'.strip()
-        # A synthetic `focus()` cannot reproduce every antd state (the segmented
-        # item marks itself focused only for a real key focus), so an element with
-        # no box is not judged here — the keyboard pass judges it, and the empty
-        # producer check below refuses a run where that pass examined nothing.
-        if r.get("invisible") and r.get("pass") == "synthetic":
-            continue
         if r["width"] != "3px" or r["colour"] != want or r["offset"] != "2px":
             out.append(
                 f"{where}: ring is {r['width']} {r['colour']} at {r['offset']}, "
@@ -1702,7 +1747,9 @@ def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int
     return out, examined
 
 
-def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
+def run_focus_sweep(
+    page, url: str, routes: list[str], forced: bool = False
+) -> dict:
     """Focus every focusable element on every route, in both themes.
 
     Playwright's page comes in from `main`, because the import lives there — the
@@ -1733,6 +1780,12 @@ def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
         "expect": {},
         "themes": {},
     }
+    if forced:
+        # The ring is an `outline`, and forced colours keep outlines while
+        # replacing their colour — so the *requirement* stays "there is a ring",
+        # and this pass is what proves it element by element instead of assuming
+        # it. The judgement in `focus_defects` switches on the same flag.
+        page.emulate_media(forced_colors="active")
     for theme in ("light", "dark"):
         # `localStorage` and then a *real* reload. `goto(url + '#/x')` from `url`
         # is a same-document navigation, so the mode is never re-read and both
@@ -1819,6 +1872,12 @@ def run_focus_sweep(page, url: str, routes: list[str]) -> dict:
             out["rows"].extend(found["rows"])
             page.keyboard.press("Escape")
             page.wait_for_timeout(200)
+    if forced:
+        page.emulate_media(forced_colors="none")
+    # One flag for every row this call produced, rather than tagging at three
+    # separate collection sites.
+    for row in out["rows"]:
+        row["forced"] = forced
     return out
 
 
@@ -1973,6 +2032,14 @@ def main() -> int:
                     found = run_disabled_sweep(page, base, theme)
                     disabled["rows"].extend(found["rows"])
                     disabled["examined"] += found["examined"]
+                # Then the same variants in high-contrast mode: a disabled control
+                # must not become interactive because the platform replaced the
+                # palette, and the forced outline the pointer feedback uses must
+                # not appear on something the reader cannot use.
+                for theme in ("dark", "light"):
+                    found = run_disabled_sweep(page, base, theme, forced=True)
+                    disabled["rows"].extend(found["rows"])
+                    disabled["examined"] += found["examined"]
 
             # The running cockpit, if one was named. `domcontentloaded` rather
             # than `networkidle`: the app polls, so the network never goes idle.
@@ -2005,6 +2072,14 @@ def main() -> int:
                     overlap_examined += seen
                 if args.focus:
                     focus.update(run_focus_sweep(page, url, args.route or ["#/"]))
+                    forced_focus = run_focus_sweep(
+                        page, url, args.route or ["#/"], forced=True
+                    )
+                    focus["rows"].extend(forced_focus["rows"])
+                    focus["examined"] += forced_focus["examined"]
+                    focus["keyboard"] += forced_focus["keyboard"]
+                    for theme, value in forced_focus["expect"].items():
+                        focus["expect"].setdefault(theme, value)
                 for route in (args.route or ["#/"]):
                     page.goto(url, wait_until="domcontentloaded")
                     page.wait_for_selector("#ah-tokens", state="attached")

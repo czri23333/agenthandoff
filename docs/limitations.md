@@ -195,6 +195,19 @@ sampled away.
     theme, no macOS "increase contrast", and no forced-colors run on the *gallery*
     (which the disabled sweep uses).
 
+21. **The palette gate proves agreement with a pinned copy, not with upstream.**
+    `tests/test_official_palette.py` compares our role→rung map and our rung
+    colours against the two v0_192 files vendored under `tests/fixtures/m3spec/`,
+    with their sha256 pinned. That proves the transcription is faithful to those
+    bytes; it does **not** prove those bytes are still what upstream publishes
+    today — the files were fetched on 2026-09-12 and nothing re-fetches them. The
+    library's own arithmetic is a separate matter: `themeFromSourceColor` from the
+    same repository produces the 2025 spec and differs from the 2021 baseline on
+    20 of 29 comparable roles, which is why the runtime seed pins `specVersion`
+    explicitly rather than taking the default. The comparison also covers the
+    *colour* layer only; the geometry, type and motion layers are checked by their
+    own tests against the values the generator cites.
+
 ## How to check any of this yourself
 
 ```bash
