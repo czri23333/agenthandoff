@@ -954,6 +954,113 @@ def _px(value: object) -> float | None:
         return None
 
 
+def run_dialog_sweep(page, base: str, theme: str) -> dict:
+    """Open a confirm dialog, then close it, reading both springs while they run.
+
+    The enter animation is easy to catch; the exit one only exists for the ~360ms
+    between the click and antd unmounting the node, so it is read 60ms in. A
+    dialog that simply disappears never reaches this code path at all, which is
+    the defect this is here to catch.
+    """
+
+    page.goto(f"{base}?confirm=1&theme={theme}", wait_until="domcontentloaded")
+    page.wait_for_selector(".ant-modal-container", state="attached", timeout=8000)
+    page.wait_for_timeout(700)
+    tokens = page.evaluate(
+        """() => {
+      const s = getComputedStyle(document.documentElement);
+      return {
+        enterDuration: s.getPropertyValue('--ah-c-dialog-enter-duration').trim(),
+        enterEasing: s.getPropertyValue('--ah-c-dialog-enter-easing').trim(),
+        exitDuration: s.getPropertyValue('--ah-c-dialog-exit-duration').trim(),
+        exitEasing: s.getPropertyValue('--ah-c-dialog-exit-easing').trim(),
+      };
+    }"""
+    )
+    enter = page.evaluate(
+        """() => {
+      const el = document.querySelector('.ant-modal-container');
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return {name: cs.animationName, duration: cs.animationDuration,
+              timing: cs.animationTimingFunction};
+    }"""
+    )
+    ok = page.query_selector(".ant-modal-confirm-btns .ant-btn-primary")
+    if ok is None:
+        ok = page.query_selector(".ant-btn-primary")
+    if ok is not None:
+        ok.click()
+    page.wait_for_timeout(60)
+    leave = page.evaluate(
+        """() => {
+      const el = document.querySelector('.ant-modal-container');
+      if (!el) return {name: null, duration: null, timing: null, gone: true};
+      const cs = getComputedStyle(el);
+      return {name: cs.animationName, duration: cs.animationDuration,
+              timing: cs.animationTimingFunction, gone: false};
+    }"""
+    )
+    return {
+        "rows": [
+            {
+                "label": "dialog",
+                "theme": theme,
+                "tokens": tokens,
+                "enter": enter,
+                "exit": leave,
+            }
+        ]
+    }
+
+
+def dialog_defects(rows: list[dict]) -> list[str]:
+    """Both springs: the published curve, the published duration, actually running."""
+
+    defects: list[str] = []
+    for row in rows:
+        where = f"dialog ({row['theme']})"
+        tokens = row.get("tokens") or {}
+        for phase, name, duration_key, easing_key in (
+            ("enter", "ah-dialog-in", "enterDuration", "enterEasing"),
+            ("exit", "ah-dialog-out", "exitDuration", "exitEasing"),
+        ):
+            seen = row.get(phase) or {}
+            if seen.get("name") != name:
+                defects.append(
+                    f"{where}: the {phase} animation is {seen.get('name')!r}, so the "
+                    f"dialog does not play {name}"
+                )
+                continue
+            expected = _seconds(str(tokens.get(duration_key, "")))
+            measured = _seconds(str(seen.get("duration", "")))
+            if expected is not None and measured != expected:
+                defects.append(
+                    f"{where}: the {phase} takes {seen.get('duration')}, but "
+                    f"the token says {tokens.get(duration_key)}"
+                )
+            token_values = _curve_values(str(tokens.get(easing_key, "")))
+            computed = _curve_values(str(seen.get("timing", "")))
+            if not token_values:
+                defects.append(f"{where}: {easing_key} is not a sampled curve")
+            elif not computed:
+                # Saying "could not be read" here would read like a limitation of
+                # the check. It is not: the animation is on a curve that is not a
+                # token, which is the defect.
+                defects.append(
+                    f"{where}: the {phase} runs on {str(seen.get('timing'))[:60]!r}, "
+                    f"not the sampled {easing_key} [{', '.join(str(v) for v in token_values[:4])}...]"
+                )
+            elif [round(v, 3) for v in computed[:8]] != [
+                round(v, 3) for v in token_values[:8]
+            ]:
+                defects.append(
+                    f"{where}: the {phase} runs on {str(seen.get('timing'))[:60]!r}, "
+                    f"not {easing_key} {[round(v, 3) for v in token_values[:4]]}"
+                )
+    return defects
+
+
 ECLIPSED: tuple[dict[str, str], ...] = (
     {
         "label": "dropdown menu item type",
@@ -2780,10 +2887,13 @@ def main() -> int:
             # way to cover the families.
             disabled: dict = {"rows": [], "examined": 0}
             morph: dict = {"rows": []}
+            dialogs: dict = {"rows": []}
             if args.morph and not args.app_only:
                 for theme in ("light", "dark"):
                     found_morph = run_morph_sweep(page, base, theme)
                     morph["rows"].extend(found_morph["rows"])
+                    found_dialog = run_dialog_sweep(page, base, theme)
+                    dialogs["rows"].extend(found_dialog["rows"])
             if args.disabled and not args.app_only:
                 for theme in ("dark", "light"):
                     found = run_disabled_sweep(page, base, theme)
@@ -2903,6 +3013,8 @@ def main() -> int:
     state_failures = state_defects(states["rows"]) if args.states else []
     eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
     morph_failures = morph_defects(morph["rows"]) if args.morph else []
+    if args.morph:
+        morph_failures = [*morph_failures, *dialog_defects(dialogs["rows"])]
     eclipse_read = len(
         {r["label"] for r in eclipses["rows"] if r.get("computed") is not None}
     )
@@ -3002,6 +3114,16 @@ def main() -> int:
                         for r in morph["rows"]
                         if not r.get("missing")
                     ],
+                    "dialogs": [
+                        {
+                            "theme": r["theme"],
+                            "enter": (r.get("enter") or {}).get("name"),
+                            "enter_duration": (r.get("enter") or {}).get("duration"),
+                            "exit": (r.get("exit") or {}).get("name"),
+                            "exit_duration": (r.get("exit") or {}).get("duration"),
+                        }
+                        for r in dialogs["rows"]
+                    ],
                 },
                 "focus_sweep": {
                     "enabled": args.focus,
@@ -3098,7 +3220,8 @@ def main() -> int:
             f"Morph: {len(measured)} readings across {len(MORPH)} families and "
             f"{len({r['theme'] for r in morph['rows']})} themes; every corner at "
             "rest, while held and after release equals the shape token it names, "
-            "and every move runs on the M3E spatial curve."
+            "and every move runs on the M3E spatial curve. Dialog enter and exit "
+            f"were read while running in {len(dialogs['rows'])} theme(s)."
         )
     if app_allowed:
         print(

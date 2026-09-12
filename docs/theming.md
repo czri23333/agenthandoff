@@ -240,6 +240,14 @@ morph rather than a generic corner animation. Proved able to fail: putting `ease
 on that transition makes the sweep name the family and print the expected
 samples.
 
+The dialog's motion is measured the same way: `.ant-modal-container` runs
+`ah-dialog-in` for **0.44s** on the sampled `--ah-c-dialog-enter-easing`, and 60ms
+after the OK button it runs `ah-dialog-out` for **0.36s** on
+`--ah-c-dialog-exit-easing` 鈥?read *inside* the animation, because antd unmounts
+the node at about 240ms and a check that waits for the exit would find nothing to
+compare. antd's own zoom classes are present in the DOM and compute
+`animation-name: none`, so the two systems are not fighting over the panel.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to

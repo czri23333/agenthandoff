@@ -630,6 +630,25 @@ third attempt takes the index of `border-radius` from `transition-property` and
 splits at paren depth 0. The computed duration also arrives as `0.24s` where the
 token says `240ms`, so the comparison is in seconds.
 
+### Round 24 鈥?the dialog's two springs are read while they run
+
+`DialogTokens` publishes both halves of a dialog's motion 鈥?enter on the
+expressive default spatial spring, exit on the fast one 鈥?and the stylesheet has
+claimed both since this slice started. The claim is now a measurement, taken at
+the one moment each animation exists.
+
+| Claim | Measured (confirm dialog, gallery, both themes) |
+|---|---|
+| enter | `.ant-modal-container` runs `ah-dialog-in` for **0.44s** with the sampled `linear()` of `--ah-c-dialog-enter-easing` |
+| exit | 60ms after the OK button, the same node runs `ah-dialog-out` for **0.36s** with `--ah-c-dialog-exit-easing`'s samples; antd unmounts it at about 240ms, which is why the read happens *inside* the animation rather than after it |
+| antd's own zoom is not competing | `.ant-modal` and `.ant-modal-wrap` compute `animation-name: none` in both themes 鈥?the zoom classes are present in the DOM but nothing animates on them |
+| it can fail | replacing the exit curve with `ease` made it report, in both themes: `dialog (light): the exit runs on 'ease', not the sampled exitEasing [0.0, 0.075, 0.249, 0.458...]` |
+
+One wording fix came out of that proof: the first version said "the exit curve
+could not be read", which sounds like a limitation of the check. It is not 鈥?a
+dialog that leaves on `ease` is the defect 鈥?so the message now names the curve
+it actually found.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
