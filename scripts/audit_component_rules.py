@@ -673,6 +673,287 @@ def _rgb(value: str) -> str:
 # views are the doctor's and the memory export's.
 LIST_ROUTES: tuple[str, ...] = ("#/", "#/inbox", "#/threads", "#/memory", "#/doctor")
 
+# ── The M3E press morph ──────────────────────────────────────────────────────
+#
+# M3E buttons and chips answer a press with *geometry*: the corner goes from the
+# resting rung to the pressed one and back, on a spatial spring. The stylesheet
+# says so in seven places and `--states` has been recording the radius on every
+# press since it was written 鈥?without ever asserting it. This is that assertion:
+# the resting radius, the radius while held (or hovered, for a list item) and the
+# radius after release all have to equal the token the component names, and the
+# transition has to run on the published curve rather than the browser default.
+MORPH: tuple[dict[str, str], ...] = (
+    {
+        "label": "small button",
+        "selector": ".ah-btn:not(.ah-btn--medium):not(.ah-btn--large)",
+        "rest": "--ah-c-button-sizes-small-shape",
+        "moved": "--ah-c-button-sizes-small-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "medium button",
+        "selector": ".ah-btn--medium",
+        "rest": "--ah-c-button-sizes-medium-shape",
+        "moved": "--ah-c-button-sizes-medium-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "large button",
+        "selector": ".ah-btn--large",
+        "rest": "--ah-c-button-sizes-large-shape",
+        "moved": "--ah-c-button-sizes-large-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "icon button",
+        "selector": ".ah-iconbtn",
+        "rest": "--ah-c-icon-button-small-shape",
+        "moved": "--ah-c-icon-button-small-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "assist chip",
+        "selector": ".ah-mchip--assist",
+        "rest": "--ah-c-chip-variant-assist-shape",
+        "moved": "--ah-c-chip-variant-assist-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "filter chip",
+        "selector": ".ah-mchip--filter",
+        "rest": "--ah-c-chip-variant-filter-shape",
+        "moved": "--ah-c-chip-variant-filter-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "input chip",
+        "selector": ".ah-mchip--input",
+        "rest": "--ah-c-chip-variant-input-shape",
+        "moved": "--ah-c-chip-variant-input-shape-pressed",
+        "how": "press",
+    },
+    {
+        "label": "list item",
+        "selector": ".ah-li",
+        "rest": "--ah-c-list-item-shape-rest",
+        "moved": "--ah-c-list-item-shape-hover",
+        "how": "hover",
+    },
+)
+MORPH_CURVE = "--ah-ease-fast-spatial"
+MORPH_DURATION = "--ah-dur-fast-spatial"
+
+
+def run_morph_sweep(page, url: str, theme: str) -> dict:
+    """Press (or hover) each morphing family and read its corner at every step."""
+
+    page.goto(f"{url}?theme={theme}", wait_until="domcontentloaded")
+    page.wait_for_selector("#ah-tokens", state="attached")
+    page.wait_for_timeout(1400)
+    rows: list[dict] = []
+    for entry in MORPH:
+        element = page.query_selector(entry["selector"])
+        if element is None:
+            rows.append({"label": entry["label"], "theme": theme, "missing": True})
+            continue
+        element.scroll_into_view_if_needed(timeout=2000)
+        box = element.bounding_box()
+        if not box or box["width"] < 6 or box["height"] < 6:
+            rows.append({"label": entry["label"], "theme": theme, "missing": True})
+            continue
+        tokens = page.evaluate(
+            "(names) => { const s = getComputedStyle(document.documentElement);"
+            " const out = {}; for (const n of names) out[n] = s.getPropertyValue(n).trim();"
+            " return out; }",
+            [entry["rest"], entry["moved"], MORPH_CURVE, MORPH_DURATION],
+        )
+        page.evaluate("(el) => { window.__morphEl = el; }", element)
+        page.mouse.move(5, 5)
+        page.wait_for_timeout(40)
+        row = {
+            "label": entry["label"],
+            "theme": theme,
+            "rest_token": tokens[entry["rest"]],
+            "moved_token": tokens[entry["moved"]],
+            "curve_token": tokens[MORPH_CURVE],
+            "duration_token": tokens[MORPH_DURATION],
+            "rest": morph_corner(page),
+            "transition": morph_transition(page),
+        }
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        if entry["how"] == "press":
+            page.mouse.down()
+        page.wait_for_timeout(260)
+        row["moved"] = morph_corner(page)
+        if entry["how"] == "press":
+            page.mouse.up()
+        page.mouse.move(5, 5)
+        page.wait_for_timeout(600)
+        row["after"] = morph_corner(page)
+        rows.append(row)
+    return {"rows": rows}
+
+
+def morph_corner(page) -> str:
+    """The corner, after every finite animation on the element has been settled.
+
+    Settling first is what makes this a measurement rather than a race: a
+    transition read 40ms in is a point *on* the curve, not the value the token
+    names.
+    """
+
+    return page.evaluate(
+        """() => {
+      const el = window.__morphEl;
+      if (!el) return null;
+      el.getAnimations({subtree: true}).forEach((a) => {
+        const t = a.effect && a.effect.getComputedTiming();
+        if (!t || t.iterations === Infinity) return;
+        try { a.finish(); } catch (err) {}
+      });
+      return getComputedStyle(el).borderTopLeftRadius;
+    }"""
+    )
+
+
+def morph_transition(page) -> str:
+    """The timing function and duration that the browser applies to `border-radius`.
+
+    Not `transition` read as one string: a button transitions seven properties,
+    the first of which is `box-shadow` on the *effects* curve, so a substring
+    search finds the wrong spring and reports every morph as off-curve. The
+    computed `transition-property`/`-timing-function`/`-duration` lists are
+    index-aligned, so the corner's own entry is the one to compare.
+    """
+
+    return page.evaluate(
+        """() => {
+      const el = window.__morphEl;
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      // A comma-separated CSS list, split at depth 0: `linear(0 0%, .5 50%)`
+      // contains commas of its own, and splitting naively hands back half a
+      // curve ("0.065 4.2%") which then never matches the token.
+      const split = (text) => {
+        const out = [];
+        let depth = 0;
+        let current = '';
+        for (const ch of text) {
+          if (ch === '(') depth += 1;
+          if (ch === ')') depth -= 1;
+          if (ch === ',' && depth === 0) { out.push(current.trim()); current = ''; continue; }
+          current += ch;
+        }
+        if (current.trim()) out.push(current.trim());
+        return out;
+      };
+      const props = split(cs.transitionProperty);
+      const timing = split(cs.transitionTimingFunction);
+      const duration = split(cs.transitionDuration);
+      const index = props.indexOf('border-radius');
+      if (index < 0) return {timing: '', duration: '', property: null};
+      return {
+        property: 'border-radius',
+        timing: timing[index] || '',
+        duration: duration[index] || '',
+      };
+    }"""
+    )
+
+
+def _curve_values(text: str) -> list[float] | None:
+    """The sample values of a `linear()` easing, in order.
+
+    Percentages are dropped rather than compared: Chrome rewrites an implicit
+    first stop (`linear(0, 0.056 4.2%, ...)`) as an explicit one (`linear(0 0%,
+    0.056 4.2%, ...)`), so two spellings of one curve differ as text. The values
+    themselves are what the curve *is*.
+    """
+
+    if not isinstance(text, str) or "linear(" not in text:
+        return None
+    inner = text[text.index("linear(") + len("linear(") :]
+    inner = inner.split(")", 1)[0]
+    values: list[float] = []
+    for stop in inner.split(","):
+        numbers = re.findall(r"[-+]?[0-9]*\.?[0-9]+", stop)
+        if numbers:
+            values.append(float(numbers[0]))
+    return values or None
+
+
+def morph_defects(rows: list[dict]) -> list[str]:
+    """Every corner has to be the token it names, and the move has to be on curve."""
+
+    defects: list[str] = []
+    for row in rows:
+        where = f"{row['label']} ({row['theme']})"
+        if row.get("missing"):
+            defects.append(f"{where}: nothing matches the selector")
+            continue
+        for step, token in (
+            ("rest", "rest_token"),
+            ("moved", "moved_token"),
+            ("after", "rest_token"),
+        ):
+            got, want = _px(row.get(step)), _px(row.get(token))
+            if got is None or want is None or abs(got - want) > 0.01:
+                defects.append(
+                    f"{where}: the corner {step} the press is {row.get(step)}, "
+                    f"but the token {row.get(token)} says {row.get(token) and row[token]}"
+                )
+        transition = row.get("transition") or {}
+        token_values = _curve_values(str(row.get("curve_token", "")))
+        computed_values = _curve_values(str(transition.get("timing", "")))
+        if not token_values:
+            defects.append(f"{where}: {MORPH_CURVE} is not defined")
+        elif transition.get("property") != "border-radius":
+            defects.append(
+                f"{where}: nothing transitions the corner, so there is no morph to "
+                "be on a curve"
+            )
+        elif not computed_values or [
+            round(value, 3) for value in computed_values[:12]
+        ] != [round(value, 3) for value in token_values[:12]]:
+            defects.append(
+                f"{where}: the corner runs on {str(transition.get('timing'))[:70]!r}, "
+                f"not the {MORPH_CURVE} samples "
+                f"{[round(v, 3) for v in token_values[:6]]}"
+            )
+        expected_duration = _seconds(str(row.get("duration_token", "")))
+        measured_duration = _seconds(str(transition.get("duration", "")))
+        if expected_duration is not None and measured_duration != expected_duration:
+            defects.append(
+                f"{where}: the corner takes {transition.get('duration')}, but "
+                f"{MORPH_DURATION} is {row.get('duration_token')}"
+            )
+    return defects
+
+
+def _seconds(text: str) -> float | None:
+    """`'240ms'` and `'0.24s'` are the same duration; compare them as seconds."""
+
+    text = text.strip()
+    for suffix, scale in (("ms", 0.001), ("s", 1.0)):
+        if text.endswith(suffix):
+            try:
+                return round(float(text[: -len(suffix)]) * scale, 6)
+            except ValueError:
+                return None
+    return None
+
+
+def _px(value: object) -> float | None:
+    """`'12px'` -> 12.0, `'9999px'` -> 9999.0, anything else -> None."""
+
+    if not isinstance(value, str) or not value.endswith("px"):
+        return None
+    try:
+        return float(value[:-2])
+    except ValueError:
+        return None
+
+
 ECLIPSED: tuple[dict[str, str], ...] = (
     {
         "label": "dropdown menu item type",
@@ -2353,6 +2634,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--morph",
+        action="store_true",
+        help=(
+            "also press (or hover) every family that publishes a pressed shape "
+            "and check the corner at rest, while held and after release against "
+            "the token it names - and that the move runs on the M3E spatial curve"
+        ),
+    )
+    parser.add_argument(
         "--app-only",
         action="store_true",
         help=(
@@ -2489,6 +2779,11 @@ def main() -> int:
             # has two such controls, so measuring them on the gallery is the only
             # way to cover the families.
             disabled: dict = {"rows": [], "examined": 0}
+            morph: dict = {"rows": []}
+            if args.morph and not args.app_only:
+                for theme in ("light", "dark"):
+                    found_morph = run_morph_sweep(page, base, theme)
+                    morph["rows"].extend(found_morph["rows"])
             if args.disabled and not args.app_only:
                 for theme in ("dark", "light"):
                     found = run_disabled_sweep(page, base, theme)
@@ -2607,6 +2902,7 @@ def main() -> int:
     overlap_failures = overlaps if args.overlap else []
     state_failures = state_defects(states["rows"]) if args.states else []
     eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
+    morph_failures = morph_defects(morph["rows"]) if args.morph else []
     eclipse_read = len(
         {r["label"] for r in eclipses["rows"] if r.get("computed") is not None}
     )
@@ -2688,6 +2984,25 @@ def main() -> int:
                     ],
                     "defects": eclipse_failures,
                 },
+                "morph_sweep": {
+                    "enabled": args.morph,
+                    "rows_examined": len(morph["rows"]),
+                    "families": len(MORPH),
+                    "defects": morph_failures,
+                    "measured": [
+                        {
+                            "label": r["label"],
+                            "theme": r["theme"],
+                            "rest": r.get("rest"),
+                            "moved": r.get("moved"),
+                            "after": r.get("after"),
+                            "rest_token": r.get("rest_token"),
+                            "moved_token": r.get("moved_token"),
+                        }
+                        for r in morph["rows"]
+                        if not r.get("missing")
+                    ],
+                },
                 "focus_sweep": {
                     "enabled": args.focus,
                     "elements_examined": focus["examined"],
@@ -2725,6 +3040,7 @@ def main() -> int:
         "app radii": app_radii,
         "focus": focus_failures,
         "eclipsed rules": eclipse_failures,
+        "press morph": morph_failures,
         "overlapping controls": overlap_failures,
         "hover and press": state_failures,
         "disabled controls": disabled_failures,
@@ -2775,6 +3091,14 @@ def main() -> int:
             f"Eclipse: {eclipses['examined']} popup properties read on rendered "
             f"elements against {len(ECLIPSED)} entries; every one computes the value "
             "its token names, so no antd rule of equal shape is painting instead."
+        )
+    if args.morph:
+        measured = [r for r in morph["rows"] if not r.get("missing")]
+        print(
+            f"Morph: {len(measured)} readings across {len(MORPH)} families and "
+            f"{len({r['theme'] for r in morph['rows']})} themes; every corner at "
+            "rest, while held and after release equals the shape token it names, "
+            "and every move runs on the M3E spatial curve."
         )
     if app_allowed:
         print(

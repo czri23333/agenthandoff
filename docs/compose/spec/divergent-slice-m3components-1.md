@@ -606,6 +606,30 @@ popup it was supposed to open, and reports a surface it could not open as
 hover timed out, so this run does not know` 鈥?rather than as a defect. The
 re-run after the change: `249/309 reach an element; 0 are unverified`.
 
+### Round 23 鈥?the press morph is measured, not asserted
+
+M3E's press feedback is geometry: the corner leaves its resting rung, holds the
+pressed one and comes back, on a spatial spring. The stylesheet has said so in
+seven places since this slice started, and `--states` has been recording the
+radius on every press since it was written 鈥?without ever comparing it to the
+token it names. `scripts/audit_component_rules.py --morph` is that comparison.
+
+| Claim | Measured |
+|---|---|
+| coverage | **8 families** (small, medium and large button, icon button, assist, filter and input chip, list item) 脳 **2 themes** = **16 readings** |
+| the corners | at rest, while held (hovered, for a list item) and after release, the computed `border-top-left-radius` equals the token the component names 鈥?`--ah-c-button-sizes-*-shape` / `-shape-pressed`, `--ah-c-icon-button-small-shape(-pressed)`, `--ah-c-chip-variant-*-shape(-pressed)`, `--ah-c-list-item-shape-rest`/`-hover` |
+| the curve | the `border-radius` entry of the computed transition carries the **sampled `linear()` of `--ah-ease-fast-spatial`** (its sample values match the token's to 1e-3), and its duration is `--ah-dur-fast-spatial` (`0.24s` == `240ms`) |
+| not a vacuous pass | the sweep settles every finite animation before reading, so a value read mid-transition cannot pass; and a family whose selector matches nothing is a defect rather than a skip |
+| it can fail | replacing the corner's curve with `ease` in two rules made it report, in both themes: `list item: the corner runs on 'ease', not the --ah-ease-fast-spatial samples [0.0, 0.056, 0.18, 0.325, 0.467, 0.594]` |
+
+Two mistakes in the *check* were found by running it, and both are the kind that
+would have made it a false green: reading `transition` as one string compared the
+first property (`box-shadow`, on the **effects** curve) against the spatial one,
+and splitting a CSS list on commas cut `linear(0 0%, 0.5 50%)` in half 鈥?the
+third attempt takes the index of `border-radius` from `transition-property` and
+splits at paren depth 0. The computed duration also arrives as `0.24s` where the
+token says `240ms`, so the comparison is in seconds.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

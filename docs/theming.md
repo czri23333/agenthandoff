@@ -228,6 +228,18 @@ M3 draws a primary tab row as its own 48dp band under the app bar, and this
 cockpit keeps the tabs in the same row as the title, because a second 48dp band
 would cost that much transcript height on every screen.
 
+The press morph is measured rather than asserted now. `scripts/
+audit_component_rules.py --morph` presses (or hovers) all eight families that
+publish a second shape 鈥?three button sizes, the icon button, three chips and the
+list item 鈥?in both themes, and compares the computed corner at rest, while held
+and after release against the token the component names: **16 readings, every one
+equal**. It also compares the `border-radius` entry of the transition against
+`--ah-ease-fast-spatial`'s sampled `linear()` (sample values to 1e-3) and its
+duration against `--ah-dur-fast-spatial`, which is what makes the morph *M3E's*
+morph rather than a generic corner animation. Proved able to fail: putting `ease`
+on that transition makes the sweep name the family and print the expected
+samples.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to
