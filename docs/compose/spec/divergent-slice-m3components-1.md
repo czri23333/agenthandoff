@@ -26,7 +26,7 @@ declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **405 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+tests/` → **410 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
 --check` → 21 rows, README and `support-matrix.json` match the fixtures ·
 `conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
 `npm run build` → clean, dist rebuilt and committed.
@@ -42,6 +42,7 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | custom seed | seed `#006a6a` → light `primary #006a6a` / `surface #f4fbfa`, dark `primary #80d5d4` / `surface #0e1514`, generated at runtime by `@material/material-color-utilities` (`SchemeTonalSpot`, 2021 spec) for all 49 roles plus the cockpit's aliases; survives a reload; composes with `auto` (the OS flip still switches palettes). Lazy: with no stored seed **0** module chunks are fetched, and the library is a 129.7 KB chunk instead of +96.4 KB on the entry. AA gate: refused a seed only under a mutated 10.0 threshold (`light accent/surface-2 = 5.23:1`, seed not stored, palette unchanged) — every real seed tried passes at 5.23–5.30:1 |
 | high-contrast modes | under `forced-colors: active` the mode drops every `box-shadow` (measured: `sh: none` on hover and press), so feedback moves to a system-coloured outline — hover `solid 1px` `CanvasText`, press `solid 2px` `Highlight` inset by 2px, measured on a real pointer. The focus ring survives at `rgb(55, 0, 110) solid 3px @2px`, the tab indicator as a 3px system bar, a selected segment by its forced fill. `prefers-contrast: more` re-points `--ah-line` at `--ah-line-strong` (`#cac4d0` → `#79747e` light, `#49454f` → `#938f99` dark). `--states` repeats under forced colours: five routes × two themes × both modes = **88 controls**, 0 defects. Mutation proof: removing `.ant-btn` from that arm made it report `no visible hover feedback in forced-colors` in both themes |
 | the palette's official status | our 49 role→rung mappings and 89 rung colours were compared against copies of `tokens/versions/v0_192/_md-sys-color.scss` and `_md-ref-palette.scss` fetched first-hand: **0 differences in either layer, in either theme** (the only upstream names we do not carry are `black` and `white`). The copies are vendored under `tests/fixtures/m3spec/` with pinned sha256 and Google's Apache-2.0 headers, so the gate runs offline. Mutation proof: both layers were changed on purpose — `primary40` → `#6750a5`, role `primary` → `primary50` — and each was reported by name |
+| the other four layers | `tests/test_official_layers.py` does the same for shape, elevation, state and type against five first-hand v0_192 files: corners **12/12**, elevation **6/6** (`0/1/3/6/8/12` dp), state layers **4/4** (`0.08/0.12/0.12/0.16`), type **10/10 shared roles** (size, line, tracking and weight; rem converted at 16px) — every one zero differences. The five official roles we do not carry (`display-large/medium/small`, `headline-large/medium`) are asserted absent *by name*, so adding one is a deliberate edit. Mutation proof: one value per layer (`lg` 16→15, `level2` 3→4, `dragged` 0.16→0.17, `body-small.tracking` 0.4→0.3) and all four tests failed, naming the values — the `lg` change also moved `corner-large-top`, `-start` and `-end`, because those are composed from the scale |
 | forced colours, second pass | `--focus` and `--disabled` now also run under `forced-colors: active`: **1631 focusable elements** (up from 808) and **72 disabled variants** (up from 36), 0 defects. Two of the first failures were the *check's* own: it dropped the outline style keyword when composing the string (`"3px rgb(...)"` has nothing for the parser to match), and it demanded a composed `on-surface` in a mode whose whole purpose is to replace the ink |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
@@ -267,6 +268,17 @@ by a look:
     report the change by name. Forced colours also stopped being a claim: `--focus`
     and `--disabled` repeat under it (1631 elements, 72 variants), and the two
     failures that showed up first were in the checks rather than the app.
+15. **The same treatment for the four layers that are not colours.** Shape,
+    elevation, state and type had the same weakness the palette had: values
+    transcribed by a human, cited in comments, and never compared against the
+    file they came from. All five official v0_192 files are now vendored with
+    pinned hashes and compared value by value — corners 12/12, elevation 6/6,
+    state 4/4, type 10/10 shared roles, zero differences in each. Two conventions
+    had to be handled rather than assumed: the official typescale publishes sizes
+    and tracking in rem, and the composed corners are four-value lists where the
+    generator keeps named tuples. One absence is deliberate and asserted by name:
+    the five display/headline roles the cockpit does not use. Each layer was
+    mutated afterwards to watch the gate name the change.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -610,3 +622,9 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       `_md-sys-color.scss` and `_md-ref-palette.scss` (v0_192): 0 differences in
       both themes, both layers; mutation-proved by changing a rung and a role.
       `--focus` and `--disabled` also gained a forced-colors pass (covers: S2)
+- [x] T21: The four non-colour layers, checked the same way —
+      `tests/test_official_layers.py` compares shape (12 entries), elevation (6
+      levels), state (4 opacities) and type (10 shared roles × 4 fields) against
+      vendored, hash-pinned copies of the matching v0_192 files: zero differences
+      in each, all four mutation-proved, with the five unused official type roles
+      asserted absent by name (covers: S2; depends: T20)

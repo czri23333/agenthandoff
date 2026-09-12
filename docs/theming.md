@@ -44,11 +44,23 @@ files by `tests/test_official_palette.py`:
 |---|---|---|---|
 | role → rung | `M3_ROLE_REFS` in `gen_tokens.py` | `primary` is `primary40`, `background` is `neutral98` | `tokens/versions/v0_192/_md-sys-color.scss` — `values-light()` / `values-dark()`, 49 roles each |
 | rung → colour | `M3_TONES` in `gen_tokens.py` | `primary40` is `#6750a4`, `neutral98` is `#fef7ff` | `tokens/versions/v0_192/_md-ref-palette.scss` — 89 rungs |
+| corners | `SHAPE` + `COMPOSED_CORNERS` | `xs 4 / sm 8 / md 12 / lg 16 / xl 28 / full 9999`, plus the five composed lists | `_md-sys-shape.scss` — 12 entries, **0 differences** |
+| elevation | `ELEVATION_DP` | `0 / 1 / 3 / 6 / 8 / 12` dp | `_md-sys-elevation.scss` — 6 levels, **0 differences** |
+| state layers | `STATE` | hover `0.08`, focus `0.12`, pressed `0.12`, dragged `0.16` | `_md-sys-state.scss` — 4 opacities, **0 differences** |
+| type scale | `TYPESCALE` | 10 roles × size/line/tracking/weight | `_md-sys-typescale.scss` + `_md-ref-typeface.scss` — the 10 shared roles **0 differences**; the official file's `display-large/medium/small` and `headline-large/medium` are asserted *absent* by name rather than ignored |
 
 Measured on 2026-09-12 against copies fetched first-hand from
 `material-components/material-web`: **0 differences** in either layer, in either
 theme. The only names present upstream and absent here are the reference file's
 two utility entries, `black` and `white`.
+
+The layer checks live in `tests/test_official_layers.py`, and two conventions are
+worth knowing before reading them: the official typescale publishes sizes and
+tracking in **rem** (the comparison converts at 16px), and the composed corners
+are published as four-value lists (`28px 28px 0px 0px`) where the generator keeps
+them as named tuples it flattens — so `corner-large-top`, `-start` and `-end`
+move when the `lg` step moves, which is the point of owning the scale rather than
+the lists.
 
 Both files are vendored under `tests/fixtures/m3spec/` (Apache-2.0, Google's
 headers intact) with their sha256 pinned in the test, because a gate that needs
