@@ -260,6 +260,16 @@ register below records it, and `--morph` asserts the computed transition of both
 phases against those tokens: `0.3s` + `cubic-bezier(0.05, 0.7, 0.1, 1)` to
 appear, `0.2s` + `cubic-bezier(0.3, 0, 0.8, 0.15)` to leave, in both themes.
 
+The **tooltip** is the same story: `PlainTooltipTokens.kt` publishes no motion,
+so antd's `antZoomBigIn` (200ms on `cubic-bezier(0.08, 0.82, 0.17, 1)`) was what a
+hover showed. It now appears on `--ah-motion-duration-short4` with
+`--ah-motion-easing-emphasized-decelerate` and leaves on
+`--ah-motion-duration-short3` with `--ah-motion-easing-emphasized-accelerate`,
+keeping antd's 0.96-scale shape and its transform-origin. Both phases are read
+while they run: `ah-tooltip-in` / `ah-tooltip-out`, `0.2s` +
+`cubic-bezier(0.05, 0.7, 0.1, 1)` and `0.15s` +
+`cubic-bezier(0.3, 0, 0.8, 0.15)`, in both themes.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to
@@ -994,3 +1004,5 @@ change at all.
 `tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
 | a rule that matches is a rule that applies | a rule that matches has to *win* | antd writes its popup rules at (0,3,0) with `:where()` dropping the hash, and injects them after this bundle, so a (0,2,0) arm of ours matched, was reported as reaching an element, and lost: the display-settings menu rendered at antd's 14px/22px with antd's 8px corner. Ours is now (0,4,0) and `--eclipse` asserts the computed value on the rendered element equals the token it names |
 | `SnackbarTokens.kt` publishes no motion | the system pair `medium2` + `emphasized-decelerate` to appear and `short4` + `emphasized-accelerate` to leave | M3 names a curve for a dialog's enter and exit and none for a snackbar's, so the pair is our choice among the system tokens rather than a published one; `--morph` measures both phases against those tokens, and the register says so here rather than letting antd's `cubic-bezier(0.645, 0.045, 0.355, 1)` be the silent answer |
+| `SnackbarTokens.kt` publishes no motion | the system pair `medium2` + `emphasized-decelerate` to appear and `short4` + `emphasized-accelerate` to leave | M3 names a curve for a dialog's enter and exit and none for a snackbar's, so the pair is our choice among the system tokens rather than a published one; `--morph` measures both phases against those tokens, and the register says so here rather than letting antd's `cubic-bezier(0.645, 0.045, 0.355, 1)` be the silent answer |
+| `PlainTooltipTokens.kt` publishes no motion | `short4` + `emphasized-decelerate` to appear, `short3` + `emphasized-accelerate` to leave, on our own `ah-tooltip-in`/`ah-tooltip-out` keyframes | same class of choice as the snackbar's, and the same reason it is written down: antd's `antZoomBigIn` curve would otherwise be the reference by default, which is a decision nobody made. The 0.96-scale shape and antd's transform-origin are kept because those parts were not wrong |

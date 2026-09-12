@@ -677,6 +677,33 @@ are what makes a second snackbar slide into place rather than jump.
 | the gate reads the running phase | the appear phase is read 120ms in; the leave phase is polled for by class (`ant-message-fade-leave`) rather than by guessing antd's timer, and "never observed" is itself a defect |
 | it can fail | disabling the appear override made it report, in both themes: `snackbar (light): the appear takes 0.2s, but the token says 300ms` and `the appear runs on 'cubic-bezier(0.645, 0.045, 0.355, 1)', not enterCurve 'cubic-bezier(0.05, 0.7, 0.1, 1)'` |
 
+### Round 26 鈥?the tooltip moves on our keyframes, not on antd's zoom
+
+Same shape as round 25, one component over. The tooltip's paint has been ours
+since the slice started; its motion was antd's: hovering the gallery's anchor
+put `.ant-tooltip` on `ant-zoom-big-fast-appear` and ran
+`css-wgezi7-antZoomBigIn` for **200ms** on
+`cubic-bezier(0.08, 0.82, 0.17, 1)`. `PlainTooltipTokens.kt` publishes no motion
+either (the vendored file has no Motion/Duration/Easing entry), so there is no
+official curve to adopt 鈥?what there is, is a pair of system tokens that says
+what a tooltip is: something that arrives promptly and is dismissed sooner.
+
+| Phase | Now | Was |
+|---|---|---|
+| appear | `ah-tooltip-in` 鈥?`--ah-motion-duration-short4` (200ms) on `--ah-motion-easing-emphasized-decelerate` | `antZoomBigIn`, 200ms on `cubic-bezier(0.08, 0.82, 0.17, 1)` |
+| leave | `ah-tooltip-out` 鈥?`--ah-motion-duration-short3` (150ms) on `--ah-motion-easing-emphasized-accelerate` | the same antd curve |
+
+The two keyframes keep antd's shape (a 0.96 scale and a fade) because that part
+is not wrong 鈥?the *curve and duration* were. antd's own transform-origin is left
+alone so the bubble still grows from the anchor rather than from its middle.
+
+| Claim | Measured (both themes) |
+|---|---|
+| appear | `ah-tooltip-in`, `0.2s`, `cubic-bezier(0.05, 0.7, 0.1, 1)` |
+| leave | `ah-tooltip-out`, `0.15s`, `cubic-bezier(0.3, 0, 0.8, 0.15)` |
+| the gate reads each phase while it runs | the appear phase is polled for its class, then the anchor is left and the leave phase polled for `ant-zoom-big-fast-leave`; "never observed" is a defect, so deleting the motion cannot pass |
+| it can fail | disabling the appear override reported, in both themes: `tooltip (light): the appear runs 'css-wgezi7-antZoomBigIn' (0.2s 'cubic-bezier(0.08, 0.82, 0.17, 1)'), not ah-tooltip-in on the system tokens` |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

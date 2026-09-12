@@ -1083,6 +1083,103 @@ def run_snackbar_sweep(page, base: str, theme: str) -> dict:
     }
 
 
+def run_tooltip_sweep(page, base: str, theme: str) -> dict:
+    """Hover the tooltip anchor, then leave it, reading both animations."""
+
+    page.goto(f"{base}?theme={theme}", wait_until="domcontentloaded")
+    page.wait_for_selector("#g-tooltip", state="attached", timeout=8000)
+    page.wait_for_timeout(700)
+    tokens = page.evaluate(
+        """() => {
+      const s = getComputedStyle(document.documentElement);
+      return {
+        appear: s.getPropertyValue('--ah-motion-duration-short4').trim(),
+        appearCurve: s.getPropertyValue('--ah-motion-easing-emphasized-decelerate').trim(),
+        leave: s.getPropertyValue('--ah-motion-duration-short3').trim(),
+        leaveCurve: s.getPropertyValue('--ah-motion-easing-emphasized-accelerate').trim(),
+      };
+    }"""
+    )
+    read = """() => {
+      const tip = document.querySelector('.ant-tooltip');
+      if (!tip) return null;
+      const cs = getComputedStyle(tip);
+      return {cls: String(tip.className), name: cs.animationName,
+              duration: cs.animationDuration,
+              timing: String(cs.animationTimingFunction)};
+    }"""
+    anchor = page.query_selector("#g-tooltip")
+    if anchor is not None:
+        anchor.hover()
+    appear = None
+    for _ in range(20):
+        page.wait_for_timeout(50)
+        candidate = page.evaluate(read)
+        if candidate and candidate["name"] not in (None, "none", "") and "appear" in candidate["cls"]:
+            appear = candidate
+            break
+    page.mouse.move(5, 5)
+    leave = None
+    for _ in range(30):
+        page.wait_for_timeout(50)
+        candidate = page.evaluate(read)
+        if candidate and "leave" in candidate["cls"]:
+            leave = candidate
+            break
+    return {
+        "rows": [
+            {
+                "label": "tooltip",
+                "theme": theme,
+                "tokens": tokens,
+                "appear": appear,
+                "leave": leave,
+            }
+        ]
+    }
+
+
+def tooltip_defects(rows: list[dict]) -> list[str]:
+    """Both phases have to be our keyframes on the published system tokens."""
+
+    defects: list[str] = []
+    for row in rows:
+        where = f"tooltip ({row['theme']})"
+        tokens = row.get("tokens") or {}
+        for phase, want_name, duration_key, curve_key in (
+            ("appear", "ah-tooltip-in", "appear", "appearCurve"),
+            ("leave", "ah-tooltip-out", "leave", "leaveCurve"),
+        ):
+            seen = row.get(phase)
+            if not seen:
+                defects.append(
+                    f"{where}: the {phase} animation was never observed, so the "
+                    f"tooltip's {phase} motion is unmeasured"
+                )
+                continue
+            if seen.get("name") != want_name:
+                defects.append(
+                    f"{where}: the {phase} runs {seen.get('name')!r} "
+                    f"({seen.get('duration')} {str(seen.get('timing'))[:40]!r}), not "
+                    f"{want_name} on the system tokens"
+                )
+                continue
+            expected = _seconds(str(tokens.get(duration_key, "")))
+            measured = _seconds(str(seen.get("duration", "")))
+            if expected is not None and measured != expected:
+                defects.append(
+                    f"{where}: the {phase} takes {seen.get('duration')}, but the "
+                    f"token says {tokens.get(duration_key)}"
+                )
+            curve = str(tokens.get(curve_key, "")).strip()
+            timing = str(seen.get("timing", "")).strip()
+            if curve and " ".join(timing.split()) != " ".join(curve.split()):
+                defects.append(
+                    f"{where}: the {phase} runs on {timing!r}, not {curve_key} {curve!r}"
+                )
+    return defects
+
+
 def snackbar_defects(rows: list[dict]) -> list[str]:
     """Both phases have to run on the published system tokens, not antd's curve."""
 
@@ -3000,6 +3097,7 @@ def main() -> int:
             morph: dict = {"rows": []}
             dialogs: dict = {"rows": []}
             snacks: dict = {"rows": []}
+            tooltips: dict = {"rows": []}
             if args.morph and not args.app_only:
                 for theme in ("light", "dark"):
                     found_morph = run_morph_sweep(page, base, theme)
@@ -3008,6 +3106,8 @@ def main() -> int:
                     dialogs["rows"].extend(found_dialog["rows"])
                     found_snack = run_snackbar_sweep(page, base, theme)
                     snacks["rows"].extend(found_snack["rows"])
+                    found_tip = run_tooltip_sweep(page, base, theme)
+                    tooltips["rows"].extend(found_tip["rows"])
             if args.disabled and not args.app_only:
                 for theme in ("dark", "light"):
                     found = run_disabled_sweep(page, base, theme)
@@ -3132,6 +3232,7 @@ def main() -> int:
             *morph_failures,
             *dialog_defects(dialogs["rows"]),
             *snackbar_defects(snacks["rows"]),
+            *tooltip_defects(tooltips["rows"]),
         ]
     eclipse_read = len(
         {r["label"] for r in eclipses["rows"] if r.get("computed") is not None}
@@ -3252,6 +3353,18 @@ def main() -> int:
                         }
                         for r in snacks["rows"]
                     ],
+                    "tooltips": [
+                        {
+                            "theme": r["theme"],
+                            "appear": (r.get("appear") or {}).get("name"),
+                            "appear_duration": (r.get("appear") or {}).get("duration"),
+                            "appear_curve": (r.get("appear") or {}).get("timing"),
+                            "leave": (r.get("leave") or {}).get("name"),
+                            "leave_duration": (r.get("leave") or {}).get("duration"),
+                            "leave_curve": (r.get("leave") or {}).get("timing"),
+                        }
+                        for r in tooltips["rows"]
+                    ],
                 },
                 "focus_sweep": {
                     "enabled": args.focus,
@@ -3351,7 +3464,8 @@ def main() -> int:
             "and every move runs on the M3E spatial curve. Dialog enter and exit "
             f"were read while running in {len(dialogs['rows'])} theme(s), and so "
             f"were the snackbar's appear and leave transitions "
-            f"({len(snacks['rows'])} theme(s))."
+            f"({len(snacks['rows'])} theme(s)) and the tooltip's two animations "
+            f"({len(tooltips['rows'])} theme(s))."
         )
     if app_allowed:
         print(
