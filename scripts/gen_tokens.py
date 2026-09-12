@@ -485,7 +485,14 @@ COMPONENTS: dict[str, dict] = {
             "unselected outline 1dp outline-variant, selected container secondary-container, "
             "selected outline width 0dp) and ChipsTokens.kt — the M3E base — whose "
             "unselected corner is corner-medium, selected corner-full and pressed "
-            "corner-small, i.e. the chip answers a press with a shape morph. material-web "
+            "corner-small, i.e. the chip answers a press with a shape morph. Which of "
+            "those two files wins is not a judgement call: Chip.kt builds the morphing "
+            "chip in `Shapes.defaultChipShapes` from `ChipsTokens.UnselectedShape / "
+            "SelectedShape / PressedShape`, while `AssistChipTokens.ContainerShape` "
+            "(corner-small) is only what `AssistChipDefaults.shape` reports for the "
+            "outlined default — so all three variants here rest at corner-medium, and "
+            "`tests/test_official_components.py` pins both sides of that disagreement. "
+            "material-web "
             "chips/internal/_shared.scss supplies the 48px touch target "
             "(`margin: max(0, (48px - height) / 2)`)."
         ),
@@ -496,7 +503,7 @@ COMPONENTS: dict[str, dict] = {
         "typeRole": "@type:label-large",
         "variant": {
             "assist": {
-                "shape": "@shape:sm",
+                "shape": "@shape:md",
                 "shapePressed": "@shape:sm",
                 "container": None,
                 "content": "@role:on-surface",
@@ -511,7 +518,7 @@ COMPONENTS: dict[str, dict] = {
                 "outline": "@role:outline-variant",
             },
             "input": {
-                "shape": "@shape:sm",
+                "shape": "@shape:md",
                 "shapePressed": "@shape:sm",
                 "container": None,
                 "content": "@role:on-surface-variant",
@@ -607,7 +614,13 @@ COMPONENTS: dict[str, dict] = {
             "labelFocus": "@role:primary",
             "input": "@role:on-surface",
         },
-        "error": {"color": "@role:error", "content": "@role:on-error-container"},
+        # The error state is two different inks, and it is easy to reach for the
+        # wrong one: the *label* and the *supporting text* turn `error`, while
+        # the text the reader typed keeps its ordinary `on-surface` ink
+        # (`error-input-text-color`), which is what we paint here. `on-error-container`
+        # — the ink for text sitting on an error *container* — was what this used
+        # to say, and no Google file says it.
+        "error": {"color": "@role:error", "content": "@role:on-surface"},
         "disabled": {"container": 0.04, "content": 0.38, "outline": 0.12},
     },
     "switch": {
@@ -893,6 +906,11 @@ COMPONENTS: dict[str, dict] = {
         ),
         "height": 64,
         "container": "@role:surface-container",
+        # DockedToolbarTokens.ContainerShape is CornerNone, which is 0 and not on
+        # the shape scale — the scale's smallest rung is corner-extra-small 4.
+        # A rung for 0 would be a seventh public `--ah-shape-*`, so the zero is
+        # spent directly and `tests/test_official_components.py` records that it
+        # is Google's corner-none.
         "shape": 0,
         "leadingSpace": 16,
         "trailingSpace": 16,
@@ -927,7 +945,10 @@ COMPONENTS: dict[str, dict] = {
         "shape": "@shape:xs",
         "elevation": "@elev:level2",
         "itemShape": "@shape:xs",
-        "typeRole": "@type:label-large",
+        # The item's type is the list item's, which is where M3 puts it:
+        # ListTokens.ItemLabelTextFont is body-large, and material-web's
+        # menu-item token file delegates `label-text-font` to the same place.
+        "typeRole": "@type:body-large",
         "content": "@role:on-surface",
         "selectedContainer": "@role:secondary-container",
         "selectedContent": "@role:on-secondary-container",

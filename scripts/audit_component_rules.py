@@ -640,6 +640,137 @@ def _rgb(value: str) -> str:
     return text
 
 
+# ── Eclipsed rules ───────────────────────────────────────────────────────────
+#
+# The sweeps above ask whether *our* rule exists and whether it reaches an
+# element. They cannot ask whether it *wins*: antd writes its rules with
+# `:where(.css-hash)`, which drops the hash from the specificity count but not
+# the classes around it, and its stylesheet is injected into the head *after*
+# this bundle. So a rule of ours can match an element, be reported as reaching
+# it, and still lose — which is how the display-settings menu kept antd's
+# 14px/22px row while the token said body-large 16px/24px, and how nothing
+# failed. The check is the only one that needs to know antd's selector shape, so
+# each entry names it in full and says which token has to win.
+
+ECLIPSED: tuple[dict[str, str], ...] = (
+    {
+        "label": "dropdown menu item type",
+        "selector": ":root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
+        "against": ".ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
+        "property": "fontSize",
+        "token": "--ah-c-menu-type-role-size",
+    },
+    {
+        "label": "dropdown menu item ink",
+        "selector": ":root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
+        "against": ".ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
+        "property": "color",
+        "token": "--ah-c-menu-content",
+    },
+    {
+        "label": "dropdown menu item corner",
+        "selector": ":root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
+        "against": ".ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
+        "property": "borderRadius",
+        "token": "--ah-c-menu-item-shape",
+    },
+    {
+        "label": "dropdown menu corner",
+        "selector": ":root .ant-dropdown .ant-dropdown-menu",
+        "against": ".ant-dropdown .ant-dropdown-menu",
+        "property": "borderRadius",
+        "token": "--ah-c-menu-shape",
+    },
+    {
+        "label": "select item type",
+        "selector": ":root .ant-select-dropdown .ant-select-item",
+        "against": ".ant-select-dropdown .ant-select-item",
+        "property": "fontSize",
+        "token": "--ah-c-menu-type-role-size",
+    },
+    {
+        "label": "select item ink",
+        "selector": ":root .ant-select-dropdown .ant-select-item",
+        "against": ".ant-select-dropdown .ant-select-item",
+        "property": "color",
+        "token": "--ah-c-menu-content",
+    },
+    {
+        "label": "select popup corner",
+        "selector": ":root .ant-select-dropdown",
+        "against": ".ant-select-dropdown",
+        "property": "borderRadius",
+        "token": "--ah-c-menu-shape",
+    },
+)
+
+
+def eclipse_rows(page, items: tuple[dict[str, str], ...]) -> list[dict]:
+    """Read the computed value and the token value, on the element that renders.
+
+    The element is found with the *antd* selector (`against`), so the check
+    cannot pass by matching a wrapper of our own; the token is resolved through a
+    probe element, because a custom property holds `#1d1b20` where the computed
+    colour is `rgb(29, 27, 32)`.
+    """
+
+    return page.evaluate(
+        """(items) => {
+      const root = getComputedStyle(document.documentElement);
+      const probe = document.createElement('span');
+      probe.style.position = 'absolute';
+      document.body.appendChild(probe);
+      const rows = [];
+      for (const item of items) {
+        const el = document.querySelector(item.against);
+        const raw = root.getPropertyValue(item.token).trim();
+        // Only a colour needs resolving: `4px` handed to `style.color` is
+        // invalid, and the probe then reports the colour it inherited, which is
+        // how this comparison first reported every radius as a mismatch.
+        let token = raw;
+        if (/^(#|rgb|hsl|color\\()/i.test(raw)) {
+          probe.style.color = raw;
+          token = getComputedStyle(probe).color;
+        }
+        rows.push({
+          label: item.label,
+          selector: item.against,
+          property: item.property,
+          token_name: item.token,
+          token: token,
+          raw_token: raw,
+          computed: el ? getComputedStyle(el)[item.property] : null,
+        });
+      }
+      probe.remove();
+      return rows;
+    }""",
+        list(items),
+    )
+
+
+def eclipse_defects(rows: list[dict]) -> list[str]:
+    """Where the token and the pixels disagree, in either direction."""
+
+    defects: list[str] = []
+    for row in rows:
+        if not row.get("raw_token"):
+            defects.append(f"{row['label']}: {row['token_name']} is not defined")
+            continue
+        if row.get("computed") is None:
+            defects.append(f"{row['label']}: nothing matches {row['selector']}")
+            continue
+        got, want = row["computed"], row["token"]
+        if row["property"] in {"fontSize", "borderRadius"}:
+            got, want = f"{float(got.rstrip('px'))}px", f"{float(want.rstrip('px'))}px"
+        if _rgb(got) != _rgb(want):
+            defects.append(
+                f"{row['label']}: {row['selector']} computes {got}, "
+                f"but {row['token_name']} is {want}"
+            )
+    return defects
+
+
 def off_token(sweep: dict) -> tuple[list[str], list[str]]:
     """Colours and radii from a running app that are in no token anywhere.
 
@@ -1684,6 +1815,59 @@ def focus_defects(rows: list[dict], expected: str | dict[str, str]) -> list[str]
     return out
 
 
+def run_eclipse_sweep(page, url: str, routes: list[str]) -> dict:
+    """Open the antd popups this app mounts, then read both sides of each entry.
+
+    Two passes, because the two popups are different classes and opening one
+    closes the other: the header's display-settings trigger opens a Dropdown, and
+    the toolbar's chip opens a Select. An entry whose popup is not mounted is
+    reported by `eclipse_defects` as "nothing matches" rather than skipped 鈥?the
+    failure mode this sweep exists to catch is a rule that looks alive because
+    nothing ever checked it.
+    """
+
+    rows: list[dict] = []
+
+    def open_route(route: str) -> None:
+        """Land on the route with no popup from a previous pass still open.
+
+        The two passes cannot share a page: after the dropdown pass an open
+        overlay covers the toolbar, `Escape` does not always close it, and the
+        sweep then measures a Select that never opened 鈥?which is exactly the
+        "nothing matches" defect it reported on its first run.
+        """
+
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#ah-tokens", state="attached")
+        page.wait_for_timeout(1200)
+        page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+        page.wait_for_timeout(1500)
+
+    for route in routes:
+        dropdown = tuple(e for e in ECLIPSED if e["against"].startswith(".ant-dropdown"))
+        open_route(route)
+        trigger = page.query_selector("header button.ah-iconbtn")
+        if trigger is not None:
+            trigger.click()
+            page.wait_for_timeout(400)
+        rows.extend(eclipse_rows(page, dropdown))
+
+        select = tuple(e for e in ECLIPSED if e["against"].startswith(".ant-select"))
+        open_route(route)
+        chip = page.query_selector(".ah-select-chip, .ant-select")
+        if chip is not None:
+            try:
+                chip.click()
+                page.wait_for_selector(
+                    ".ant-select-dropdown", state="attached", timeout=4000
+                )
+            except Exception:  # noqa: BLE001 鈥?the rows below report the miss
+                pass
+            page.wait_for_timeout(400)
+        rows.extend(eclipse_rows(page, select))
+    return {"rows": rows, "examined": len(rows)}
+
+
 def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int]:
     """Controls that sit on top of one another, in both themes.
 
@@ -1929,6 +2113,15 @@ def main() -> int:
             "and no answer to the pointer"
         ),
     )
+    parser.add_argument(
+        "--eclipse",
+        action="store_true",
+        help=(
+            "also check that the rules this bundle writes for antd's popups "
+            "actually win: the computed value on the rendered element has to "
+            "equal the token it names, not antd's fallback"
+        ),
+    )
     args = parser.parse_args()
 
     if not (WEB / "node_modules").is_dir():
@@ -2054,7 +2247,12 @@ def main() -> int:
             overlaps: list[str] = []
             overlap_examined = 0
             states: dict = {"rows": [], "examined": 0}
+            eclipses: dict = {"rows": [], "examined": 0}
             for url in args.app:
+                if args.eclipse:
+                    found_eclipses = run_eclipse_sweep(page, url, args.route or ["#/"])
+                    eclipses["rows"].extend(found_eclipses["rows"])
+                    eclipses["examined"] += found_eclipses["examined"]
                 if args.states:
                     found_states = run_state_sweep(page, url, args.route or ["#/"])
                     states["rows"].extend(found_states["rows"])
@@ -2137,6 +2335,16 @@ def main() -> int:
         )
     overlap_failures = overlaps if args.overlap else []
     state_failures = state_defects(states["rows"]) if args.states else []
+    eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
+    eclipse_read = sum(1 for r in eclipses["rows"] if r.get("computed") is not None)
+    if args.eclipse and eclipse_read < len(ECLIPSED):
+        # Every entry has to be read at least once: a sweep that reports "the
+        # token won" from three of seven entries is the false green this file
+        # was written against.
+        eclipse_failures.append(
+            f"the eclipse sweep read {eclipse_read} of {len(ECLIPSED)} "
+            "entries; the ones it never reached are not evidence"
+        )
     disabled_failures = (
         disabled_defects(disabled["rows"], load_disabled_expectations())
         if args.disabled
@@ -2189,6 +2397,22 @@ def main() -> int:
                     ],
                     "defects": disabled_failures,
                 },
+                "eclipse_sweep": {
+                    "enabled": args.eclipse,
+                    "entries_examined": eclipses["examined"],
+                    "entries": len(ECLIPSED),
+                    "rows": [
+                        {
+                            "label": r["label"],
+                            "selector": r["selector"],
+                            "property": r["property"],
+                            "token": r["raw_token"],
+                            "computed": r["computed"],
+                        }
+                        for r in eclipses["rows"]
+                    ],
+                    "defects": eclipse_failures,
+                },
                 "focus_sweep": {
                     "enabled": args.focus,
                     "elements_examined": focus["examined"],
@@ -2225,6 +2449,7 @@ def main() -> int:
         "app colours": app_colors,
         "app radii": app_radii,
         "focus": focus_failures,
+        "eclipsed rules": eclipse_failures,
         "overlapping controls": overlap_failures,
         "hover and press": state_failures,
         "disabled controls": disabled_failures,
@@ -2260,6 +2485,12 @@ def main() -> int:
         print(
             f"Disabled: {disabled['examined']} gallery variants checked; none fades "
             "itself, none takes focus, none answers the pointer."
+        )
+    if args.eclipse:
+        print(
+            f"Eclipse: {eclipses['examined']} popup properties read on rendered "
+            f"elements against {len(ECLIPSED)} entries; every one computes the value "
+            "its token names, so no antd rule of equal shape is painting instead."
         )
     return 0
 

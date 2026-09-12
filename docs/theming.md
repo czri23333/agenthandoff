@@ -94,6 +94,94 @@ exist), so a typo produces a plausible colour rather than an error. Proved able
 to fail by mutating both layers — `primary40` → `#6750a5` and the role
 `primary` → `primary50` — and each was reported by name.
 
+### Where the component anatomy comes from, and how that is checked
+
+The tables above cover the *layers*. The layer under them — the anatomy of each
+control, the ~370 numbers in `COMPONENTS` — used to rest on a citation in a
+comment and nothing else: every one of those values is *plausible*, so a wrong
+one renders and looks like Material. `tests/test_official_components.py` closes
+that gap the same way the layer tests do, and it is the largest of them.
+
+| Source | What it is | How many |
+|---|---|---|
+| `tests/fixtures/m3spec/androidx/*.kt` | androidx's per-component token files (Apache-2.0, headers intact), `// VERSION:` stamps kept | 66 files |
+| `tests/fixtures/m3spec/materialweb/tokens-*.scss` | material-web's published token sets, `versions/v0_192/` and the current set where the two differ | 60 files |
+| `tests/fixtures/m3spec/materialweb/*-internal-*.scss` | the CSS that paints them, for the two values that exist only as a formula (the button's 64px minimum, the chip's 48px touch target) and the focus-ring choreography | 22 files |
+
+The vendored copies are pinned in `tests/fixtures/m3spec/PINS.tsv` (148 sha256
+rows) and the test compares the tree against it **in both directions**: a file
+that changed, a file that was added without a pin and a file that was deleted all
+fail. `scripts/fetch_m3spec.py` is how they got there — it names every URL, falls
+back to a mirror, and prints the hash it wrote — so the corpus can be re-derived
+instead of believed.
+
+On top of that sits an explicit **mapping table**: our dotted token path →
+(file, member). 341 values are compared today, and a comparison never skips
+silently:
+
+| Kind | Example | How it is compared |
+|---|---|---|
+| a dp value | `chip.height` → `ChipsTokens.Height` | parsed from `32.0.dp` |
+| a colour role | `menu.selectedContainer` → `SecondaryContainer` | normalised to the role name both sides use |
+| a shape rung | `button.sizes.small.shape` → `CornerFull` | normalised to `full`, so `@shape:full` and `corner-full` are the same fact |
+| a composed corner | `textField.filled.shape` → `corner-extra-small-top` | compared by name; `test_the_composed_corners_are_still_the_official_five` pins the five names against the shape file |
+| a type role | `menu.typeRole` → `ListTokens.ItemLabelTextFont` | normalised to `body-large` |
+| an elevation level | `dialog.elevation` → `ElevationTokens.Level3` | normalised to `level3` |
+| a Sass token | `textField.space.top` → `'top-space'` | `if($exclude-hardcoded-values, null, 16px)` parsed to 16 |
+
+Three rules keep the table from rotting, and each has been proved able to fail:
+
+* **Coverage.** Every leaf of every family that cites Google has to be in the
+  table or excused by name with a reason (`UNMAPPED_OK`), and an excuse for a
+  path that no longer exists fails too. Proof: adding `chip.iconRadius = 3` to
+  the generator without a mapping fails with
+  `AssertionError: {'chip.iconRadius': 3}`.
+* **Absence is a claim.** `button.variant.outlined.container` is `None` because
+  `OutlinedButtonTokens.kt` publishes no container colour at all; the test
+  asserts the member is still absent *and* that we still spend `None`, so
+  Google adding one cannot leave a stale excuse behind.
+* **Disagreements are pinned on both sides** (`CONFLICTS`), so a documented
+  choice cannot quietly become a description of nothing:
+
+  | Google vs Google | Ours |
+  |---|---|
+  | `AssistChipTokens.ContainerShape` is corner-small, the M3E base `ChipsTokens.UnselectedShape` is corner-medium — and `Chip.kt`'s `Shapes.defaultChipShapes`, which is what builds the morphing chip, reads the **base** file | corner-medium at rest, corner-small pressed, corner-full selected |
+  | the current field token set writes the outlined focus outline at **3px**, the pinned `v0_192` file still says **2px** | 3px, per the newer document |
+  | androidx's list item disabled label is 38%, material-web's is 30% | 38% |
+  | `MenuTokens` puts a selected row on `secondary-container`; `StandardMenuTokens` (the variant with icon buttons) puts its own on `tertiary-container` | `secondary-container`, the plain menu |
+
+What the table found on its first run, in three parts:
+
+1. **The chip answered a press with a shape its rest state contradicted.** Our
+   assist and input chips rested at 8px and morphed to 8px — a press that
+   changed nothing — because the citation named the per-variant files. `Chip.kt`
+   settles it: the expressive chip is built from the base file, so all three
+   variants now rest at 12px and morph to 8px. Vendored evidence:
+   `Chip.kt`'s `defaultChipShapes`, read by
+   `test_the_chip_shape_comes_from_the_expressive_defaults`.
+2. **An error field painted the wrong ink.** `error-input-text-color` is
+   `on-surface` — the label and the supporting text turn `error`, the text the
+   reader typed does not — and ours was `on-error-container`, the ink for text
+   on an error *container*, which no Google file says. Fixed, and now mapped
+   rather than excused.
+3. **A menu item's type was the wrong role.** M3 puts the number where it puts
+   the rest of the item's anatomy: `ListTokens.ItemLabelTextFont` is body-large,
+   not label-large.
+
+The same run exposed a fourth defect that no token comparison can see, because
+the token was right and the *pixels* were antd's: our rule for a dropdown item
+was written at (0,2,0) while antd's own is
+`:where(.css-hash).ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item` —
+(0,3,0) once `:where()` drops the hash — and antd's stylesheet is injected after
+this bundle. The menu rendered at antd's 14px/22px, 8px corner and its own ink
+while every token said otherwise, and the existing sweeps were happy because the
+rule *did* match an element. `scripts/audit_component_rules.py --eclipse` is the
+gate for that class: it opens each antd popup and asserts the computed value on
+the rendered element equals the token it names. Measured on the running app on
+2026-09-12, before and after raising our arm to (0,4,0): `14px/22px` → `16px/24px`,
+item corner `8px` → `4px`. With the fix reverted the sweep fails and names all
+three.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to
@@ -821,3 +909,8 @@ change at all.
    property nothing injects is a control with an undefined value.
 5. If the value is a colour role, `test_every_reference_resolves` proves the role
    exists, and the browser probe proves it reaches a computed value.
+| a chip's rest corner is the per-variant file's `ContainerShape` (corner-small 8px) | corner-medium 12px at rest, corner-small 8px while pressed | both files are Google's; `Chip.kt` decides which one renders. `Shapes.defaultChipShapes` builds the morphing chip from `ChipsTokens.UnselectedShape / SelectedShape / PressedShape`, and the per-variant `ContainerShape` is only what `AssistChipDefaults.shape` reports for the outlined default. Resting at 8px also made the press a no-op, which is how the inconsistency was noticed |
+| `MenuTokens` selects a row with `secondary-container`; `StandardMenuTokens` uses `tertiary-container` | `secondary-container` | we ship the plain menu, not the one with icon buttons; both values are pinned in `tests/test_official_components.py` so the choice stays visible |
+| a rule that matches is a rule that applies | a rule that matches has to *win* | antd writes its popup rules at (0,3,0) with `:where()` dropping the hash, and injects them after this bundle, so a (0,2,0) arm of ours matched, was reported as reaching an element, and lost: the display-settings menu rendered at antd's 14px/22px with antd's 8px corner. Ours is now (0,4,0) and `--eclipse` asserts the computed value on the rendered element equals the token it names |
+
+`tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:

@@ -437,6 +437,70 @@ light theme, the 28px pressed switch handle, and any component whose only
 instance needs an interaction it did not trigger. Those are named here rather
 than folded into the claims above.
 
+### Round 18 鈥?the component layer has a gate, and it found four defects
+
+**Why this round exists.** Round 17 could still say, truthfully, that the 28
+component families rested on a `_source` comment and one hand review: every value
+in them is *plausible*, so a wrong one renders and looks like Material. This
+round gives that layer the same treatment the five system layers already had.
+
+**What was built.** `scripts/fetch_m3spec.py` fetches and re-fetches the corpus
+from names URLs (with a mirror fallback); 148 files are vendored under
+`tests/fixtures/m3spec/{androidx,materialweb}/` and pinned by sha256 in
+`PINS.tsv`. `tests/test_official_components.py` carries an explicit
+path 鈫?(file, member) mapping and compares **341 values** across all 28 families,
+plus three anti-rot rules: every leaf of a Google-cited family must be mapped or
+excused by name with a reason, an excuse for a path that no longer exists fails,
+and a `None` is checked as a claim about Google's file (the variant with no
+container colour must still have no such member). Four disagreements between
+Google's own files are pinned on both sides in `CONFLICTS`, so a documented
+choice cannot become a description of nothing.
+
+**What the gate found, and what was done about it.**
+
+| Finding | Evidence | Change |
+|---|---|---|
+| the assist and input chips rested at 8px and morphed to 8px 鈥?a press that changed nothing | `Chip.kt` builds the morphing chip in `Shapes.defaultChipShapes` from `ChipsTokens.UnselectedShape / SelectedShape / PressedShape`; the per-variant `ContainerShape` is only what `AssistChipDefaults.shape` reports | all three variants now rest at corner-medium 12px, press to 8px; `Chip.kt` is vendored and the wiring is asserted |
+| an error field painted `on-error-container` where Google says `on-surface` | `_md-comp-filled-text-field.scss`: `error-input-text-color` is `on-surface`; only the label and supporting text turn `error` | `textField.error.content` 鈫?`on-surface`, mapped instead of excused |
+| a menu item's type was label-large | `ListTokens.ItemLabelTextFont` is body-large, which is where M3 puts the item's type | `menu.typeRole` 鈫?`body-large` |
+| the display-settings menu rendered at antd's 14px/22px and antd's 8px item corner while every token said otherwise | antd's rule is `:where(.css-hash).ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item` 鈥?(0,3,0) once `:where()` drops the hash 鈥?and its stylesheet is injected after this bundle, so our (0,2,0) arm matched and lost | our arm is (0,4,0); measured `14px/22px` 鈫?`16px/24px` and item corner `8px` 鈫?`4px` |
+| Markdown links kept antd's ring 鈥?`rgb(194,189,201)` at a 1px offset, both themes | antd's reset paints `a:focus-visible` at (0,1,1), one class more than the bare `:focus-visible`; the app focus sweep reported 16 defects on one route | `.ah-md a.ah-link:focus-visible` at (0,3,1); the sweep is 0 defects |
+
+The fourth and fifth are the class no token comparison can see: the token was
+right and the *pixels* were antd's, because a matching rule has to **win**.
+`scripts/audit_component_rules.py --eclipse` is the new gate 鈥?it opens each antd
+popup the cockpit mounts and asserts the computed value on the rendered element
+equals the token it names.
+
+**Verification.** `gen_tokens.py --check` 鈫?`tokens.json and firstpaint.css match
+the generator (21 CLI identities)` 路 `pytest tests/` 鈫?**425 passed, 2 skipped**
+(+11 tests) 路 `ruff check .` 鈫?clean 路 `evidence --check` 鈫?21 rows 路
+`conformance --check` 鈫?14 CLIs 路 `tsc -b` 鈫?exit 0 路 `npm run build` 鈫?clean,
+dist rebuilt and committed.
+
+| Claim | Measured |
+|---|---|
+| the vendored corpus | 148 files, **148 sha256 rows** in `PINS.tsv`, compared in both directions (changed / added / deleted all fail) |
+| the comparison | **341 values** compared, **0 differences**, 28/28 families mapped; `compared >= 150` guards a shrinking table |
+| the anti-rot rules can fail | `chip.iconRadius = 3` added without a mapping 鈫?`AssertionError: {'chip.iconRadius': 3}`; a one-byte fixture edit 鈫?the pin test names the file with both hashes 鈥?and the value test names `chip.height` `32.0 鈫?33.0`; the list disabled ink changed to 0.38 鈫?the conflict test says `now says ('num', 0.38), not ('num', 0.3)` |
+| the changed values, in the browser | gallery, both themes: chip rest **12px** for all three variants, pressed **8px** (dark `7.997px` mid-morph), selected **9999px**; error field input `rgb(29,27,32)` light / `rgb(230,224,233)` dark (= the theme's `on-surface`), label `rgb(179,38,30)` / `rgb(242,184,181)` (= `error`); app menu item **16px/24px** in both themes |
+| the rule-reachability sweep | `249/305` rules match an element, **0 unverified**, 0 dead |
+| focus / overlap / states / disabled | **822** focusable elements across 2 themes (ring `#625b71` / `#ccc2dc`, 3px @2px, 16 delegated) 路 **652** controls compared, no overlaps 路 **16** hovered+pressed with a real pointer at 8%/12% 路 **72** disabled variants, none fades, none takes focus |
+| the new eclipse gate | **7/7** popup properties equal their token; with the specificity fix reverted it fails and names three (`14.0px` vs `16.0px`, `8.0px` vs `4.0px`, and the ink) |
+
+**What this round did not verify.** The corpus is a snapshot (fetched
+2026-09-12); nothing re-fetches it, so the gate proves agreement with these bytes
+and not with upstream today 鈥?the same limit as items 21/22 of
+`docs/limitations.md`, now recorded there as item 24 along with the two families
+the product itself does not mount (`.ah-field`, `.ah-mchip`: measured in the
+audit gallery) and the fact that `--eclipse` covers the popups this app mounts
+rather than every antd family a future view might add. A composed corner is
+compared by name, not by resolving its four radii (those are checked in the shape
+layer's own test). Measurement was briefly blocked by the machine's C: volume
+reaching 0 bytes free 鈥?node died with a V8 allocation failure mid-build 鈥?so the
+browser runs were re-taken with `TEMP` and the npm cache pointed at D:; the
+numbers above are from runs that completed after that.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

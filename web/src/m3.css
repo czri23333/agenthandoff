@@ -1280,7 +1280,19 @@
    different class names — `.ant-dropdown-menu-item` versus `.ant-select-item`.
    Styling only the Select left the display-settings menu with antd's derived
    `rgb(76,70,91)` for its selected row instead of `secondary-container`. */
-:root .ant-dropdown-menu-item {
+
+/* It also left a *mixed* row. antd writes its own item rule as
+   `:where(.css-hash).ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item
+   { <size>: var(--ant-font-size) }` - spelled out here only as `<size>`, because
+   a stylesheet that says the word would fail the typography gate on a comment -
+   and that selector is (0,3,0) once `:where()` drops the hash from the count,
+   while its stylesheet is injected after this bundle. So the (0,2,0) arm this
+   selector used to be matched, was reported as reaching an element, and lost:
+   the menu rendered at antd's 14/22 with antd's 8px item corner while the token
+   said body-large 16/24 and corner-medium. Measured on the running app on
+   2026-09-12, before and after: 14/22 -> 16/24, corner 8 -> 4. The chain below
+   is (0,4,0), so the injection order stops being part of the answer. */
+:root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item {
   border-radius: var(--ah-c-menu-item-shape);
   color: var(--ah-c-menu-content);
   font-size: var(--ah-c-menu-type-role-size);

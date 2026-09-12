@@ -530,7 +530,14 @@ button:disabled {
       walk into an open menu: `rgb(194, 189, 201)` — antd's derived colour, on a
       menu item, while our ring was computed on nothing. The two long arms below
       match that specificity and sit later in the document; the segmented arm is
-      (0,2,0) against antd's (0,2,0), which is also enough. */
+      (0,2,0) against antd's (0,2,0), which is also enough.
+
+   5. The link arm. antd's reset paints `a:focus-visible` at (0,1,1), one class
+      more than the bare `:focus-visible` above, so a Markdown link - the one
+      focusable thing on a rendered message that is not an antd control - kept
+      antd's `rgb(194, 189, 201)` ring at a 1px offset in both themes.
+      `.ah-md a.ah-link:focus-visible` is (0,3,1), so it wins on specificity and
+      does not depend on which of the two stylesheets the runtime injects last. */
 :focus-visible,
 .ant-btn:focus-visible:not(:disabled),
 .ant-switch:focus-visible:not(:disabled),
@@ -538,6 +545,7 @@ button:disabled {
 .ant-slider-handle:focus-visible:not(:disabled),
 .ant-select.ah-select-chip:has(:focus-visible),
 .ah-searchbar:has(:focus-visible),
+.ah-md a.ah-link:focus-visible,
 .ant-segmented .ant-segmented-item-focused,
 .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible,
 /* antd's pagination is (0,4,0) the same way:

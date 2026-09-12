@@ -237,8 +237,28 @@ sampled away.
     against a file. Also unchecked against a file: the **component-level** token
     families (27 of them, from `ButtonSmallTokens` to `DockedToolbarTokens`). Each
     carries a `_source` naming the files it came from and an independent review
-    once compared them by hand against 53 fetched files, but there is no
-    repeatable gate doing it yet.
+    once compared them by hand against 53 fetched files. That hand review is
+    superseded now: `tests/test_official_components.py` is the repeatable gate
+    for all 28 families (341 values against 148 vendored files, pinned in
+    `tests/fixtures/m3spec/PINS.tsv`), and `scripts/fetch_m3spec.py` re-derives
+    the corpus. Item 24 records what that gate does not say.
+
+24. **The component gate proves agreement with pinned copies, and one popup is
+    checked per property rather than all of them.** It compares our ~370
+    authored values against the vendored androidx/material-web files, so it has
+    the same limit as items 21 and 22: the copies were fetched on 2026-09-12,
+    nothing re-fetches them, and a value that both we and the copy get wrong is
+    invisible. Three things it deliberately does not do. It compares a
+    *composed* corner by name rather than resolving the four radii (the radii
+    are checked in their own layer test, and the five names are pinned). It does
+    not re-check the layer values a component refers to (`@shape:lg`,
+    `@role:primary`) — those belong to their own gates, and the field's
+    `56 = 16 + 24 + 16` is the one composed number it does add up. And the
+    `--eclipse` gate reads the popups the cockpit actually mounts (a Dropdown, a
+    Select); a future view that mounts a component antd also paints would need
+    its own entry in `ECLIPSED` before anything checked that our rule wins. The
+    gallery's `.ah-field` and `.ah-mchip` families are measured in the audit
+    gallery rather than in the product, because no view mounts them yet.
 
 ## How to check any of this yourself
 

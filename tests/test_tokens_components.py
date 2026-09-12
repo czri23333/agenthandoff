@@ -142,10 +142,13 @@ def test_chip_is_32px_with_an_18px_icon_on_a_48px_touch_target():
     assert C["chip"]["touchTarget"] == 48
     assert C["chip"]["icon"] == 18
     assert C["chip"]["avatar"] == 24
-    # AssistChipTokens/FilterChipTokens/InputChipTokens carry corner-small; the
-    # M3E base chip (ChipsTokens) rounds to corner-medium and opens to full.
-    assert C["chip"]["variant"]["assist"]["shape"] == 8
-    assert C["chip"]["variant"]["filter"]["shape"] == 12
+    # All three variants rest on the M3E base corner: `Chip.kt` builds the
+    # morphing chip from ChipsTokens.UnselectedShape (corner-medium 12), and the
+    # per-variant `ContainerShape` (corner-small 8) is only the outlined
+    # defaults object's own answer. test_official_components.py pins both sides.
+    variants = ("assist", "filter", "input")
+    assert {C["chip"]["variant"][name]["shape"] for name in variants} == {12}
+    assert {C["chip"]["variant"][name]["shapePressed"] for name in variants} == {8}
     assert C["chip"]["selected"]["shape"] == 9999
     assert C["chip"]["selected"]["outlineWidth"] == 0
     assert C["chip"]["unselectedOutlineWidth"] == 1
