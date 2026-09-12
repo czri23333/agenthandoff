@@ -224,6 +224,22 @@ sampled away.
     rather than Apache-2.0 (MDC-Web), and the tests assert both headers so the
     distinction cannot be lost in a re-vendor.
 
+23. **The springs are checked; the curve built from them is ours.** The twelve
+    damping/stiffness pairs are compared against androidx's two motion token files
+    and `MotionScheme.kt` (12 pairs, 0 differences, plus each scheme referencing
+    only its own file), but everything after the pair is a conversion this repo
+    owns rather than a value Google publishes: 24 samples into a `linear()`
+    easing, a settle tolerance of 0.001, and a cubic-bezier fallback chosen from
+    the official curve set. The sampling is deterministic and regenerates with the
+    tokens, but no official artefact says "M3E fast-spatial is *this* CSS curve",
+    because M3E is not a CSS system — so the shape of the spring (overshoot for
+    spatial, critical damping for effects) is checked by its own tests rather than
+    against a file. Also unchecked against a file: the **component-level** token
+    families (27 of them, from `ButtonSmallTokens` to `DockedToolbarTokens`). Each
+    carries a `_source` naming the files it came from and an independent review
+    once compared them by hand against 53 fetched files, but there is no
+    repeatable gate doing it yet.
+
 ## How to check any of this yourself
 
 ```bash

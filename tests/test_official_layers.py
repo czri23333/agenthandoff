@@ -48,6 +48,14 @@ EXPECTED_HASHES = {
 MDC_ELEVATION = "mdc-elevation-theme.scss"
 MDC_ELEVATION_SHA = "e50ad0e52382834369d76a09ceac80644e2d9405b87050282fd19a5dea8954cf"
 
+# The M3E springs are the third source repository: androidx publishes the damping
+# and stiffness pairs, and `MotionScheme.kt` says which scheme uses which file.
+MOTION_FIXTURES = {
+    "StandardMotionTokens.kt": "4b36c30679dcc0b1ec6010e4e40c070901151b59252d9a21d0e4348511370592",
+    "ExpressiveMotionTokens.kt": "deefcefc93405c69445071b40e4d9894458bb20cff18b805192c90aea5ba6c73",
+    "MotionScheme.kt": "95fcf8d94c5885a16d82eab986ce4c1b02a8f09f59784d03a9fab168529ff270",
+}
+
 
 def _generator():
     module = importlib.util.spec_from_file_location(
@@ -78,6 +86,68 @@ def test_the_mdc_elevation_recipe_is_the_pinned_mit_file():
     assert hashlib.sha256(data).hexdigest() == MDC_ELEVATION_SHA
     assert b"Copyright 2017 Google Inc." in data
     assert b"Permission is hereby granted, free of charge" in data
+
+
+def test_the_motion_fixtures_are_the_pinned_androidx_files():
+    for name, expected in MOTION_FIXTURES.items():
+        data = (SPEC / name).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == expected, f"{name} was edited"
+        assert b"Copyright 2024 The Android Open Source Project" in data, name
+        assert b"Apache License" in data, name
+    assert b"// VERSION: v0_14_0" in (SPEC / "StandardMotionTokens.kt").read_bytes()
+
+
+def test_the_twelve_m3e_springs_match_androidx():
+    """Damping and stiffness, both schemes, all six roles each.
+
+    `MotionScheme.kt` is what makes the *names* checkable rather than assumed: it
+    has a `StandardMotionSchemeImpl` whose six specs reference
+    `StandardMotionTokens`, and an `ExpressiveMotionSchemeImpl` whose six
+    reference `ExpressiveMotionTokens`. So the test asserts the values, the 2×6
+    shape of our key set, and that neither scheme reaches for the other file's
+    constants.
+    """
+    gen = _generator()
+
+    def springs(name: str, prefix: str) -> dict[str, dict[str, float]]:
+        text = (SPEC / name).read_text(encoding="utf-8")
+        out: dict[str, dict[str, float]] = {}
+        for m in re.finditer(
+            r"const val Spring(Fast|Default|Slow)(Spatial|Effects)(Damping|Stiffness) = ([0-9.]+)f",
+            text,
+        ):
+            speed, kind, field = m.group(1), m.group(2), m.group(3)
+            key = f"{prefix}-{speed.lower()}-{kind.lower()}"
+            out.setdefault(key, {})[field.lower()] = float(m.group(4))
+        return out
+
+    official = {
+        **springs("StandardMotionTokens.kt", "standard"),
+        **springs("ExpressiveMotionTokens.kt", "expressive"),
+    }
+    ours = {
+        key: {"damping": value["damping"], "stiffness": value["stiffness"]}
+        for key, value in gen.SPRINGS.items()
+    }
+
+    assert len(official) == 12, "androidx publishes six springs per scheme"
+    assert set(ours) == set(official), sorted(set(ours) ^ set(official))
+    differences = {
+        key: (ours.get(key), official.get(key))
+        for key in set(ours) | set(official)
+        if ours.get(key) != official.get(key)
+    }
+    assert not differences, differences
+
+    scheme = (SPEC / "MotionScheme.kt").read_text(encoding="utf-8")
+    for which in ("Standard", "Expressive"):
+        impl = (
+            scheme.split(f"private object {which}MotionSchemeImpl", 1)[1]
+            .split("private object", 1)[0]
+        )
+        assert len(re.findall(r"private val \w+Spec", impl)) == 6, which
+        referenced = set(re.findall(r"(\w+)MotionTokens\.Spring", impl))
+        assert referenced == {which}, (which, referenced)
 
 
 def test_the_dp_to_shadow_recipe_matches_mdc_web():

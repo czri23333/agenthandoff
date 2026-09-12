@@ -26,7 +26,7 @@ declarations that close the screenshot anomaly (below).
 
 **Verification.** `uv run python scripts/gen_tokens.py --check` → `tokens.json
 and firstpaint.css match the generator (21 CLI identities)` · `uv run pytest
-tests/` → **412 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
+tests/` → **414 passed, 2 skipped** · `uv run ruff check .` → clean · `evidence
 --check` → 21 rows, README and `support-matrix.json` match the fixtures ·
 `conformance --check` → 14 CLIs match their baselines · `npx tsc -b` → exit 0 ·
 `npm run build` → clean, dist rebuilt and committed.
@@ -44,6 +44,7 @@ Browser-measured on the built bundle in headless Chromium (dark unless noted):
 | the palette's official status | our 49 role→rung mappings and 89 rung colours were compared against copies of `tokens/versions/v0_192/_md-sys-color.scss` and `_md-ref-palette.scss` fetched first-hand: **0 differences in either layer, in either theme** (the only upstream names we do not carry are `black` and `white`). The copies are vendored under `tests/fixtures/m3spec/` with pinned sha256 and Google's Apache-2.0 headers, so the gate runs offline. Mutation proof: both layers were changed on purpose — `primary40` → `#6750a5`, role `primary` → `primary50` — and each was reported by name |
 | the other four layers | `tests/test_official_layers.py` does the same for shape, elevation, state and type against five first-hand v0_192 files: corners **12/12**, elevation **6/6** (`0/1/3/6/8/12` dp), state layers **4/4** (`0.08/0.12/0.12/0.16`), type **10/10 shared roles** (size, line, tracking and weight; rem converted at 16px) — every one zero differences. The five official roles we do not carry (`display-large/medium/small`, `headline-large/medium`) are asserted absent *by name*, so adding one is a deliberate edit. Mutation proof: one value per layer (`lg` 16→15, `level2` 3→4, `dragged` 0.16→0.17, `body-small.tracking` 0.4→0.3) and all four tests failed, naming the values — the `lg` change also moved `corner-large-top`, `-start` and `-end`, because those are composed from the scale |
 | the dp→shadow recipe | the same gate now covers the one file that was still cited-but-unchecked: MDC-Web's `packages/mdc-elevation/_elevation-theme.scss` (**MIT**, not Apache-2.0 — header kept verbatim). Three maps × our six levels = 18 shadow values, plus the three opacities (`0.2/0.14/0.12`) and the black baseline: **0 differences**. Mutation proof: `penumbra[1]` `0px 1px 1px 0px` → `0px 1px 2px 0px` reported `penumbra at 1dp`; the opacity `0.14 → 0.15` reported `penumbra`. This is the layer where a wrong value is least visible — an `11px` blur instead of `10px` renders, looks like elevation, and is not Google's |
+| M3E springs | the third source repository. `ExpressiveMotionTokens.kt` + `StandardMotionTokens.kt` + `MotionScheme.kt` (androidx material3 v0_14_0) are vendored and compared: **12 damping/stiffness pairs, 0 differences**, no key missing or extra, and each scheme impl asserted to reference *only* its own token file (so `standard-*` and `expressive-*` cannot be swapped). Mutation proof: `expressive-fast-spatial.damping` 0.6 → 0.65 and `standard-slow-effects.stiffness` 800 → 900, reported by name with both values. What remains ours is the step after the pair — 24-sample `linear()` easing, settle tolerance 0.001, cubic-bezier fallback — recorded in the deviation register and in `docs/limitations.md` item 23, along with the one layer still without a gate: the 27 component-token families |
 | forced colours, second pass | `--focus` and `--disabled` now also run under `forced-colors: active`: **1631 focusable elements** (up from 808) and **72 disabled variants** (up from 36), 0 defects. Two of the first failures were the *check's* own: it dropped the outline style keyword when composing the string (`"3px rgb(...)"` has nothing for the parser to match), and it demanded a composed `on-surface` in a mode whose whole purpose is to replace the ink |
 | keyboard focus, swept | `--focus` over **5 routes × 2 themes, 540 nodes** — 98 by synthetic `focus()`, 406 by <kbd>Tab</kbd>, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 44 ring-delegated, 26 skipped by the synthetic pass because they have no box and judged by the keyboard pass instead. Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, and a 12% layer that never landed on our own buttons. `rgb(194,189,201)` is the light value; the review measured `rgb(76,70,91)` on a dark menu item, so "the same in both themes" was wrong and is corrected in `docs/theming.md` |
 | keyboard focus, swept | `--focus` over **the five list routes plus a session-detail route, both themes, 796 nodes** — synthetic `focus()` and a real <kbd>Tab</kbd> walk, an open dropdown included — **0 defects**: every ring is `3px` of `#625b71` (light) / `#ccc2dc` (dark) at a `2px` offset, choreography timed at `150ms` + `450ms` after a `150ms` delay, **0** elements whose own radius changes on focus, 22 ring-delegated where the focusable node is not the visible box, box-less nodes judged by the keyboard pass, and disabled controls skipped (the pager's inner button on page 1 cannot take focus at all). Before: antd's derived grey on 17 of 49 the old sweep could see, a `border-radius: 4px` rewritten on 4, a 12% layer that never landed on our own buttons, plus — found by widening the sweep — antd's ring on three keyboard-reachable cases the review named and on the session-detail `Pagination` |
@@ -290,6 +291,20 @@ by a look:
     penumbra offset and a penumbra opacity — and reported as `penumbra at 1dp` and
     `penumbra`. With that, every number the generator takes from Google is
     compared against a first-hand file rather than against a comment.
+17. **The springs, and the one layer that is still ours.** M3E's motion is
+    published in androidx rather than material-web, and it had the same
+    citation-only status: twelve damping/stiffness pairs, transcribed. They are
+    now vendored (`ExpressiveMotionTokens.kt`, `StandardMotionTokens.kt`,
+    `MotionScheme.kt`, all Apache-2.0 with the `v0_14_0` banner asserted) and
+    compared: **12/12, 0 differences**, with the extra structural check that
+    `MotionScheme`'s standard impl references only the standard file and its
+    expressive impl only the expressive one. Mutated both a damping and a
+    stiffness afterwards and the test named both keys with their values. The
+    honest remainder is written down rather than glossed: everything after the
+    pair — the 24-sample `linear()`, the 0.001 settle tolerance, the bezier
+    fallback — is this repo's conversion, because M3E is not a CSS system; and the
+    **27 component-token families** still have citations and a one-off manual
+    review but no repeatable gate, which is the next layer to build.
 
 Each round is in `docs/theming.md` with its evidence, and the ones that cost
 something are in the deviation register rather than in a commit message.
@@ -643,3 +658,7 @@ antd's behaviour layer (a11y, keyboard, Table virtualisation stay antd's).
       header asserted) and compared: 3 maps × 6 levels + 3 opacities + the
       baseline colour, 0 differences, mutation-proved on both a shadow value and
       an opacity (covers: S2; depends: T21)
+- [x] T23: The M3E springs — androidx's two motion token files plus
+      `MotionScheme.kt` vendored (Apache-2.0, `v0_14_0` asserted) and compared:
+      12 damping/stiffness pairs, 0 differences, each scheme referencing only its
+      own file, mutation-proved on a damping and a stiffness (covers: S2; depends: T21)
