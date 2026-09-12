@@ -210,18 +210,19 @@ sampled away.
 
 22. **The layer gate has the same shape of limit, and one deliberate absence.**
     `tests/test_official_layers.py` covers the five non-colour layers against
-    pinned copies of `_md-sys-shape/sc-elevation/state/typescale.scss` and
-    `_md-ref-typeface.scss`: corners 12/12, elevation 6/6, state 4/4, type 10/10
-    shared roles — all zero differences, all four layers mutation-proved. What it
-    does **not** say: that those copies are still upstream (they were fetched on
+    pinned copies of `_md-sys-shape/sc-elevation/state/typescale.scss`,
+    `_md-ref-typeface.scss` and `packages/mdc-elevation/_elevation-theme.scss`:
+    corners 12/12, elevation levels 6/6, the dp→shadow recipe 18/18 (three maps ×
+    six levels, plus three opacities and the baseline colour), state 4/4, type
+    10/10 shared roles — all zero differences, every layer mutation-proved. What
+    it does **not** say: that those copies are still upstream (they were fetched on
     2026-09-12 and nothing re-fetches them), and it does not cover the five
     official type roles the cockpit does not carry (`display-large/medium/small`,
     `headline-large/medium`) — they are asserted absent by name, which makes
     *adding* one a deliberate test edit, but it also means the product has no
-    display-size typography at all, because no view uses it. The elevation gate
-    compares the **dp levels**; the dp→box-shadow recipes come from MDC-Web's
-    `packages/mdc-elevation/_elevation-theme.scss`, which is a second file this
-    gate does not vendor.
+    display-size typography at all, because no view uses it. One fixture is MIT
+    rather than Apache-2.0 (MDC-Web), and the tests assert both headers so the
+    distinction cannot be lost in a re-vendor.
 
 ## How to check any of this yourself
 

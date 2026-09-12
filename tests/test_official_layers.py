@@ -30,6 +30,8 @@ import importlib.util
 import re
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 SPEC = REPO / "tests" / "fixtures" / "m3spec"
 
@@ -40,6 +42,11 @@ EXPECTED_HASHES = {
     "md-sys-typescale.scss": "7c8cbd48c99465a6924eff73d7809c764f528a81933206d548e1a88b33dbe8d9",
     "md-ref-typeface.scss": "b5055798c322a39f4664f04afe6e09f5126145cd0fd005a71426f8a630434c93",
 }
+# One fixture is from a different repository *and* a different licence: the
+# dp→box-shadow recipe is MDC-Web's, MIT, not material-web's Apache-2.0. The
+# header is kept verbatim and this test asserts it is still there.
+MDC_ELEVATION = "mdc-elevation-theme.scss"
+MDC_ELEVATION_SHA = "e50ad0e52382834369d76a09ceac80644e2d9405b87050282fd19a5dea8954cf"
 
 
 def _generator():
@@ -63,6 +70,60 @@ def test_the_layer_fixtures_are_the_pinned_files():
         data = (SPEC / name).read_bytes()
         assert hashlib.sha256(data).hexdigest() == expected, f"{name} was edited"
         assert b"Design system version: v0.192" in data, name
+
+
+def test_the_mdc_elevation_recipe_is_the_pinned_mit_file():
+    """The one fixture that is not material-web, and not Apache-2.0."""
+    data = (SPEC / MDC_ELEVATION).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == MDC_ELEVATION_SHA
+    assert b"Copyright 2017 Google Inc." in data
+    assert b"Permission is hereby granted, free of charge" in data
+
+
+def test_the_dp_to_shadow_recipe_matches_mdc_web():
+    """Umbra, penumbra and ambient, at the six levels M3 publishes.
+
+    `tests/…::test_elevation_levels_match_the_official_dp_scale` proves we have
+    the right *levels*; this proves we turn each level into the shadow MDC-Web
+    publishes, which is a second file in a second repository. Ten of these values
+    would look plausible if they were wrong — a penumbra blur of `11px` instead of
+    `10px` is not something a reader can see and not something the browser
+    complains about.
+    """
+    gen = _generator()
+    text = (SPEC / MDC_ELEVATION).read_text(encoding="utf-8")
+    chunks = re.split(r"\$([a-z]+)-map:\s*\(", text)
+    official: dict[str, dict[int, str]] = {}
+    for i in range(1, len(chunks), 2):
+        name, body = chunks[i], re.split(r"\$[a-z]+-map:\s*\(", chunks[i + 1])[0]
+        official[name] = {
+            int(key): " ".join(value.split())
+            for key, value in re.findall(r"(\d+):\s*'([^']+)'", body)
+        }
+    opacities = {
+        m.group(1): float(m.group(2))
+        for m in re.finditer(r"\$(umbra|penumbra|ambient)-opacity:\s*([0-9.]+)", text)
+    }
+
+    assert sorted(official) == ["ambient", "penumbra", "umbra"]
+    assert all(len(levels) == 25 for levels in official.values())
+    assert opacities == {"umbra": 0.2, "penumbra": 0.14, "ambient": 0.12}
+
+    ours = {"umbra": gen._UMBRA, "penumbra": gen._PENUMBRA, "ambient": gen._AMBIENT}
+    ours_opacities = {
+        "umbra": gen._UMBRA_OPACITY,
+        "penumbra": gen._PENUMBRA_OPACITY,
+        "ambient": gen._AMBIENT_OPACITY,
+    }
+    for kind, levels in ours.items():
+        assert sorted(levels) == [0, 1, 3, 6, 8, 12], kind
+        for dp, value in levels.items():
+            assert value == official[kind][dp], f"{kind} at {dp}dp"
+    for kind, value in ours_opacities.items():
+        assert value == pytest.approx(opacities[kind]), kind
+    # The shadow colour: MDC's `$baseline-color: black`, which the generator writes
+    # as the rgb triplet every recipe shares.
+    assert gen._SHADOW_RGB == "0, 0, 0"
 
 
 def test_corners_match_the_official_shape_scale():

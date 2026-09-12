@@ -48,6 +48,7 @@ files by `tests/test_official_palette.py`:
 | elevation | `ELEVATION_DP` | `0 / 1 / 3 / 6 / 8 / 12` dp | `_md-sys-elevation.scss` — 6 levels, **0 differences** |
 | state layers | `STATE` | hover `0.08`, focus `0.12`, pressed `0.12`, dragged `0.16` | `_md-sys-state.scss` — 4 opacities, **0 differences** |
 | type scale | `TYPESCALE` | 10 roles × size/line/tracking/weight | `_md-sys-typescale.scss` + `_md-ref-typeface.scss` — the 10 shared roles **0 differences**; the official file's `display-large/medium/small` and `headline-large/medium` are asserted *absent* by name rather than ignored |
+| the dp→shadow recipe | `_UMBRA` / `_PENUMBRA` / `_AMBIENT` + their three opacities | six levels × three shadows, plus `0.2 / 0.14 / 0.12` and a black baseline | `packages/mdc-elevation/_elevation-theme.scss` from **material-components-web** — 18 values, **0 differences** |
 
 Measured on 2026-09-12 against copies fetched first-hand from
 `material-components/material-web`: **0 differences** in either layer, in either
@@ -61,6 +62,12 @@ are published as four-value lists (`28px 28px 0px 0px`) where the generator keep
 them as named tuples it flattens — so `corner-large-top`, `-start` and `-end`
 move when the `lg` step moves, which is the point of owning the scale rather than
 the lists.
+
+The shadow recipe comes from a **second repository and a second licence**: MDC-Web
+is MIT (material-web is Apache-2.0), and its header is kept verbatim in the
+vendored copy. That row matters because the dp→shadow step is where a wrong value
+is least visible — a penumbra blur of `11px` instead of `10px` renders, looks like
+elevation, and is not what Google publishes.
 
 Both files are vendored under `tests/fixtures/m3spec/` (Apache-2.0, Google's
 headers intact) with their sha256 pinned in the test, because a gate that needs
