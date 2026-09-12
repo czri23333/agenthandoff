@@ -501,6 +501,68 @@ reaching 0 bytes free 鈥?node died with a V8 allocation failure mid-build 鈥?s
 browser runs were re-taken with `TEMP` and the npm cache pointed at D:; the
 numbers above are from runs that completed after that.
 
+### Round 19 鈥?the eclipse gate covers every antd family the product mounts
+
+Round 18's `--eclipse` sweep read the three popups the cockpit opens. The
+mounted families are more than that, so the sweep was extended to the surfaces a
+real route draws, and the list is measured rather than guessed: a family
+inventory of the running app (five routes, both themes) says the dashboard draws
+segmented controls and a Select, the inbox draws switches and the empty state,
+the threads view draws the sliders, and the two table views are the doctor's and
+the memory export's.
+
+| Claim | Measured |
+|---|---|
+| coverage | **17 entries** over **5 routes** 鈥?segmented item type and corner, switch track width and corner, slider rail height and ink, table head weight, and the nine popup entries from round 18 | 
+| readings per run | **25** (a route-scoped entry is read on its own route, the popups once) 鈥?every one computes the value its token names |
+| the gate is not vacuous | an entry whose element never appears is a defect, not a skip (`nothing matched 鈥?on any of the N route(s) swept`), and the run fails if fewer entries were read than exist |
+| it can fail | `theme.ts`'s slider `railSize` moved to 8 against a 16px token 鈫?`slider rail height: .ant-slider .ant-slider-rail computes 8px, but --ah-c-slider-track-height is 16px` |
+
+Two findings from writing it. The progress-bar family has **no** eclipse entry:
+no view mounts a progress bar (the product shows spinners), so its rules are
+gallery-only 鈥?which is exactly what the reachability sweep exists to state, and
+adding an entry for it would have produced a permanent false defect. And one
+entry cannot be proved by editing our stylesheet at all: the slider rail's height
+is painted by antd's `--ant-slider-rail-size`, which `theme.ts` sets from the
+same token, so the mutation had to move that number rather than our declaration.
+That is the honest description of "who paints this pixel" 鈥?the gate checks the
+pixel, not the authorship.
+
+### Round 20 鈥?the app sweep found four more, and the gate learned to locate them
+
+Round 19's `--eclipse` work exposed a gap in the *other* app checks: the
+off-token sweep only ever ran on `#/` plus one discovered session, so a defect
+that needs a code block, a pager or a table was invisible. This round pointed
+the sweep at all five routes plus a chosen session, and — because the machine
+was down to 1.3 GB of free RAM (a training job was using 15 GB) — added
+`--app-only`, which skips the Vite build and says so in its report instead of
+implying the gallery checks passed.
+
+| Finding | Measured before | Fix |
+|---|---|---|
+| the code-block **copy button was hover-only** (`opacity-0` + `group-hover`), so a keyboard user tabbed to an invisible control with an invisible ring — a WCAG 2.4.7/2.4.11 failure | 8 defect lines across two themes on the session route (`the focused node has no visible box and nothing around it draws the ring`) | `focus:opacity-100` + `group-focus-within/code:opacity-100` + an `aria-label`; the same route is 0 defects |
+| the pager kept **antd's link ink**: `rgb(22, 104, 220)` in light (antd's own blue) and `rgb(180, 163, 220)` in dark (its derived primary) | both reported by the off-token sweep, on `a`/`span.anticon`/`svg`/`path` | token rules for items, links, the active item (`secondary-container` + `on-secondary-container`) and the disabled link (38% of on-surface). The **jump** buttons needed a four-class chain: antd paints `.ant-pagination-item-container`, and its `:where()` prefix still leaves three classes |
+| Tailwind's `rounded-full` is `calc(infinity * 1px)` in v4, which the browser reports as `33554432px` 鈥?a literal the shape gate cannot see and the radius sweep could not match to any token | 15 occurrences on the 1脳1 bullet | `.ah-round { border-radius: var(--ah-shape-full) }`, used by the bullet and the expert avatar |
+| the off-token report said `path.[object` 鈥?true, and useless: the value is inherited from an ancestor's rule | 4 of the 12 rows were unlocatable | the sweep now reports the element **and three ancestors**, which is what identified the jump-button container in one run |
+
+The gate also stopped conflating two different things. A computed value that is
+*a token at reduced alpha* (`color-mix(in srgb, <token> N%, transparent)`, the
+form every disabled ink and state layer takes) was being reported as "in no
+token"; it is now accepted by **un-mixing** it 鈥?the channels have to equal a
+token's and the alpha has to say N% 鈥?which is a stronger statement than a list
+of selector names. The three things that genuinely are not tokens (the vendored
+highlight.js syntax palette, its `code.hljs` ink, and the 45% zebra stripe inside
+rendered Markdown) are allowed **by name with a reason**, printed with the run,
+and anything that does not match stays a defect.
+
+| Claim | Measured |
+|---|---|
+| the app-only run | `--focus --eclipse`, 6 routes 脳 2 themes: **2086** focusable elements, 0 ring defects, **27/17** eclipse readings equal to their tokens, **9** values allowed with reasons |
+| the full run (gallery included) | 249/**309** rules reach an element with 0 unverified 路 focus **832** elements 0 defects 路 overlap **664** controls 路 states **16** 路 disabled **72** 路 eclipse **25/17** |
+| the copy-button fix | the same session route reports 0 focus defects in both themes (it reported 8 before), with the button visible when focused |
+| the pager fix | no off-token colour remains on the pager in either theme |
+| `--app-only` is honest | the summary prints `gallery skipped (--app-only): rule reachability and the disabled sweep were NOT measured this run` and the JSON carries `gallery_skipped: true`; it cannot be mistaken for a green gallery run |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

@@ -217,7 +217,21 @@ APP_SWEEP_JS = """
     const rect = el.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) continue;
     const cs = getComputedStyle(el);
-    const where = el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0];
+    // The element *and* three ancestors, because an off-token value is usually
+    // painted by a rule on an ancestor and reported on the node that inherits
+    // it: the first version said `path.[object` and left the reader to guess
+    // which popup it was in.
+    const where =
+      el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0] +
+      (() => {
+        const chain = [];
+        let node = el.parentElement;
+        for (let i = 0; i < 3 && node && node.tagName !== 'BODY'; i += 1) {
+          chain.push(node.tagName.toLowerCase() + '.' + String(node.className).split(' ')[0]);
+          node = node.parentElement;
+        }
+        return chain.length ? ' < ' + chain.join(' < ') : '';
+      })();
     const hasText = [...el.childNodes].some(
       (n) => n.nodeType === 3 && (n.textContent || '').trim().length > 0
     );
@@ -652,9 +666,17 @@ def _rgb(value: str) -> str:
 # failed. The check is the only one that needs to know antd's selector shape, so
 # each entry names it in full and says which token has to win.
 
+# The routes the cockpit actually has, so the sweep covers the surfaces rather
+# than the one the app opens on. Measured with a family inventory on 2026-09-12:
+# the dashboard draws segmented controls and a Select, the inbox draws switches
+# and the empty state, the threads view draws the sliders, and the two table
+# views are the doctor's and the memory export's.
+LIST_ROUTES: tuple[str, ...] = ("#/", "#/inbox", "#/threads", "#/memory", "#/doctor")
+
 ECLIPSED: tuple[dict[str, str], ...] = (
     {
         "label": "dropdown menu item type",
+        "when": "dropdown",
         "selector": ":root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
         "against": ".ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
         "property": "fontSize",
@@ -662,6 +684,7 @@ ECLIPSED: tuple[dict[str, str], ...] = (
     },
     {
         "label": "dropdown menu item ink",
+        "when": "dropdown",
         "selector": ":root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
         "against": ".ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
         "property": "color",
@@ -669,6 +692,7 @@ ECLIPSED: tuple[dict[str, str], ...] = (
     },
     {
         "label": "dropdown menu item corner",
+        "when": "dropdown",
         "selector": ":root .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
         "against": ".ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item",
         "property": "borderRadius",
@@ -676,6 +700,7 @@ ECLIPSED: tuple[dict[str, str], ...] = (
     },
     {
         "label": "dropdown menu corner",
+        "when": "dropdown",
         "selector": ":root .ant-dropdown .ant-dropdown-menu",
         "against": ".ant-dropdown .ant-dropdown-menu",
         "property": "borderRadius",
@@ -683,6 +708,7 @@ ECLIPSED: tuple[dict[str, str], ...] = (
     },
     {
         "label": "select item type",
+        "when": "select",
         "selector": ":root .ant-select-dropdown .ant-select-item",
         "against": ".ant-select-dropdown .ant-select-item",
         "property": "fontSize",
@@ -690,6 +716,7 @@ ECLIPSED: tuple[dict[str, str], ...] = (
     },
     {
         "label": "select item ink",
+        "when": "select",
         "selector": ":root .ant-select-dropdown .ant-select-item",
         "against": ".ant-select-dropdown .ant-select-item",
         "property": "color",
@@ -697,10 +724,100 @@ ECLIPSED: tuple[dict[str, str], ...] = (
     },
     {
         "label": "select popup corner",
+        "when": "select",
         "selector": ":root .ant-select-dropdown",
         "against": ".ant-select-dropdown",
         "property": "borderRadius",
         "token": "--ah-c-menu-shape",
+    },
+    # The rest of what the product mounts, measured rather than assumed: these
+    # are the families the family inventory found on a real route
+    # (table, segmented, switch, slider, progress, tooltip), each of which antd
+    # also paints. A rule of ours that matches but loses shows up here.
+    {
+        "label": "segmented item type",
+        "when": "page",
+        "selector": ":root .ant-segmented .ant-segmented-item",
+        "against": ".ant-segmented .ant-segmented-item",
+        "property": "fontSize",
+        "token": "--ah-c-segmented-type-role-size",
+    },
+    {
+        "label": "segmented item corner",
+        "when": "page",
+        "selector": ":root .ant-segmented .ant-segmented-item",
+        "against": ".ant-segmented .ant-segmented-item",
+        "property": "borderRadius",
+        "token": "--ah-c-segmented-shape",
+    },
+    {
+        "label": "switch track width",
+        "when": "page",
+        "route": "#/inbox",
+        "selector": ":root .ant-switch",
+        "against": ".ant-switch",
+        "property": "width",
+        "token": "--ah-c-switch-track-width",
+    },
+    {
+        "label": "switch track corner",
+        "when": "page",
+        "route": "#/inbox",
+        "selector": ":root .ant-switch",
+        "against": ".ant-switch",
+        "property": "borderRadius",
+        "token": "--ah-c-switch-track-shape",
+    },
+    {
+        "label": "slider rail height",
+        "when": "page",
+        "route": "#/threads",
+        "selector": ":root .ant-slider .ant-slider-rail",
+        "against": ".ant-slider .ant-slider-rail",
+        "property": "height",
+        "token": "--ah-c-slider-track-height",
+    },
+    {
+        "label": "slider rail ink",
+        "when": "page",
+        "route": "#/threads",
+        "selector": ":root .ant-slider .ant-slider-rail",
+        "against": ".ant-slider .ant-slider-rail",
+        "property": "backgroundColor",
+        "token": "--ah-c-slider-inactive",
+    },
+    {
+        "label": "table head weight",
+        "when": "page",
+        "route": "#/doctor",
+        "selector": ":root .ant-table-thead > tr > th",
+        "against": ".ant-table-thead > tr > th",
+        "property": "fontWeight",
+        "token": "--ah-type-label-large-weight",
+    },
+    {
+        "label": "tooltip bubble ink",
+        "when": "tooltip",
+        "selector": ":root .ant-tooltip .ant-tooltip-container",
+        "against": ".ant-tooltip .ant-tooltip-container",
+        "property": "backgroundColor",
+        "token": "--ah-c-tooltip-container",
+    },
+    {
+        "label": "tooltip bubble corner",
+        "when": "tooltip",
+        "selector": ":root .ant-tooltip .ant-tooltip-container",
+        "against": ".ant-tooltip .ant-tooltip-container",
+        "property": "borderRadius",
+        "token": "--ah-c-tooltip-shape",
+    },
+    {
+        "label": "tooltip bubble type",
+        "when": "tooltip",
+        "selector": ":root .ant-tooltip .ant-tooltip-container",
+        "against": ".ant-tooltip .ant-tooltip-container",
+        "property": "fontSize",
+        "token": "--ah-c-tooltip-type-role-size",
     },
 )
 
@@ -750,28 +867,65 @@ def eclipse_rows(page, items: tuple[dict[str, str], ...]) -> list[dict]:
 
 
 def eclipse_defects(rows: list[dict]) -> list[str]:
-    """Where the token and the pixels disagree, in either direction."""
+    """Where the token and the pixels disagree, in either direction.
+
+    Grouped by label, because an entry is read once per route and it only has to
+    exist on *one* of them: a switch is on the inbox, a slider on the threads
+    view, and reporting "nothing matches" for the four routes that legitimately
+    do not draw one would bury the entries that never matched anywhere.
+    """
 
     defects: list[str] = []
+    by_label: dict[str, list[dict]] = {}
     for row in rows:
-        if not row.get("raw_token"):
-            defects.append(f"{row['label']}: {row['token_name']} is not defined")
+        by_label.setdefault(row["label"], []).append(row)
+    for label, group in sorted(by_label.items()):
+        if not group[0].get("raw_token"):
+            defects.append(f"{label}: {group[0]['token_name']} is not defined")
             continue
-        if row.get("computed") is None:
-            defects.append(f"{row['label']}: nothing matches {row['selector']}")
-            continue
-        got, want = row["computed"], row["token"]
-        if row["property"] in {"fontSize", "borderRadius"}:
-            got, want = f"{float(got.rstrip('px'))}px", f"{float(want.rstrip('px'))}px"
-        if _rgb(got) != _rgb(want):
+        seen = [row for row in group if row.get("computed") is not None]
+        if not seen:
             defects.append(
-                f"{row['label']}: {row['selector']} computes {got}, "
-                f"but {row['token_name']} is {want}"
+                f"{label}: nothing matched {group[0]['selector']} on any of the "
+                f"{len(group)} route(s) swept"
             )
+            continue
+        for row in seen:
+            got, want = row["computed"], row["token"]
+            if row["property"] in {"fontSize", "borderRadius"}:
+                got = f"{float(got.rstrip('px'))}px"
+                want = f"{float(want.rstrip('px'))}px"
+            if _rgb(got) != _rgb(want):
+                defects.append(
+                    f"{label}: {row['selector']} computes {got}, "
+                    f"but {row['token_name']} is {want}"
+                )
     return defects
 
 
-def off_token(sweep: dict) -> tuple[list[str], list[str]]:
+# Computed values the sweep is *expected* to find and that are not defects, each
+# with the reason it is allowed. The pattern matches the element half of a
+# bucket key (`<value> :: <tag>.<class>`). Allowed rows are still reported, with
+# their reason, so this cannot become a place where a real off-token value hides:
+# anything that does not match a pattern below stays a defect.
+OFF_TOKEN_ALLOWED: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"^span\.hljs-[a-z]+(?: | < |$)"),
+        "the vendored highlight.js syntax palette: it colours code, not chrome",
+    ),
+    (
+        re.compile(r"^code\.hljs(?: | < |$)"),
+        "the code block's own ink, from the same vendored syntax palette",
+    ),
+    (
+        re.compile(r"^tr\.(?: | < |$)"),
+        "a zebra stripe: color-mix(surface-2 45%, transparent) inside rendered "
+        "Markdown, so the value is derived from a token rather than being one",
+    ),
+)
+
+
+def off_token(sweep: dict) -> tuple[list[str], list[str], list[str]]:
     """Colours and radii from a running app that are in no token anywhere.
 
     Weights and sizes are closed sets and `off_scale` checks them exactly.
@@ -781,6 +935,29 @@ def off_token(sweep: dict) -> tuple[list[str], list[str]]:
     """
     tokens = {_rgb(value) for value in sweep.get("tokens", [])}
     buckets = sweep.get("buckets", {})
+    allowed: list[str] = []
+
+    def token_at_alpha(value: str) -> str | None:
+        """A `color-mix(in srgb, <token> N%, transparent)` result, or None.
+
+        The mix keeps the token's channels and takes its alpha from the
+        percentage, so un-mixing is exact rather than a tolerance: if the
+        channels are a token's, the value *is* that token at N%. That is a
+        stronger statement than an allowlist of selectors, and it is what makes
+        every disabled ink in the sheet (38% of on-surface) legal without listing
+        the components that spend it.
+        """
+
+        match = re.fullmatch(
+            r"color\(srgb ([0-9.]+) ([0-9.]+) ([0-9.]+)(?: / ([0-9.]+))?\)", value
+        )
+        if not match:
+            return None
+        red, green, blue, alpha = (float(part) for part in match.groups(default="1"))
+        if alpha >= 0.999:
+            return None
+        channels = f"rgb({round(red * 255)}, {round(green * 255)}, {round(blue * 255)})"
+        return f"{channels} at {round(alpha * 100)}% alpha" if channels in tokens else None
 
     def rows(bucket: str) -> list[str]:
         out: list[str] = []
@@ -788,10 +965,22 @@ def off_token(sweep: dict) -> tuple[list[str], list[str]]:
             value = key.split(" :: ")[0]
             if _rgb(value) in tokens:
                 continue
+            mixed = token_at_alpha(value)
+            if mixed is not None:
+                allowed.append(f"{key} (x{count}) -- {mixed}, a token with a state layer on it")
+                continue
+            where = key.split(" :: ", 1)[1] if " :: " in key else ""
+            reason = next(
+                (text for pattern, text in OFF_TOKEN_ALLOWED if pattern.match(where)),
+                None,
+            )
+            if reason is not None:
+                allowed.append(f"{key} (x{count}) -- {reason}")
+                continue
             out.append(f"{key} (x{count})")
         return sorted(out)
 
-    return rows("colors"), rows("radii")
+    return rows("colors"), rows("radii"), sorted(allowed)
 
 
 def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
@@ -1816,27 +2005,36 @@ def focus_defects(rows: list[dict], expected: str | dict[str, str]) -> list[str]
 
 
 def run_eclipse_sweep(page, url: str, routes: list[str]) -> dict:
-    """Open the antd popups this app mounts, then read both sides of each entry.
+    """Read both sides of every entry, on the page state that renders it.
 
-    Two passes, because the two popups are different classes and opening one
-    closes the other: the header's display-settings trigger opens a Dropdown, and
-    the toolbar's chip opens a Select. An entry whose popup is not mounted is
-    reported by `eclipse_defects` as "nothing matches" rather than skipped 鈥?the
-    failure mode this sweep exists to catch is a rule that looks alive because
-    nothing ever checked it.
+    Each entry names the state it needs (`when`): `page` for something a route
+    draws, `dropdown`/`select`/`tooltip` for the three popups the cockpit mounts,
+    and `detail` for the session view. One state per page load, because opening a
+    popup covers the toolbar, `Escape` does not always close it, and the sweep
+    then measures a Select that never opened 鈥?which is exactly the "nothing
+    matches" defect it reported on its first run.
+
+    An entry whose element does not appear is reported by `eclipse_defects` as
+    "nothing matches" rather than skipped: the failure mode this sweep exists to
+    catch is a rule that looks alive because nothing ever checked it.
     """
 
     rows: list[dict] = []
 
-    def open_route(route: str) -> None:
-        """Land on the route with no popup from a previous pass still open.
+    def group(where: str, route: str | None = None) -> tuple[dict[str, str], ...]:
+        """The entries for one state, on one route.
 
-        The two passes cannot share a page: after the dropdown pass an open
-        overlay covers the toolbar, `Escape` does not always close it, and the
-        sweep then measures a Select that never opened 鈥?which is exactly the
-        "nothing matches" defect it reported on its first run.
+        An entry with a `route` is only read there; one without is read wherever
+        the state it names is prepared.
         """
 
+        return tuple(
+            e
+            for e in ECLIPSED
+            if e["when"] == where and (route is None or e.get("route") in (None, route))
+        )
+
+    def open_route(route: str) -> None:
         page.goto(url, wait_until="domcontentloaded")
         page.wait_for_selector("#ah-tokens", state="attached")
         page.wait_for_timeout(1200)
@@ -1844,28 +2042,45 @@ def run_eclipse_sweep(page, url: str, routes: list[str]) -> dict:
         page.wait_for_timeout(1500)
 
     for route in routes:
-        dropdown = tuple(e for e in ECLIPSED if e["against"].startswith(".ant-dropdown"))
         open_route(route)
-        trigger = page.query_selector("header button.ah-iconbtn")
-        if trigger is not None:
-            trigger.click()
-            page.wait_for_timeout(400)
-        rows.extend(eclipse_rows(page, dropdown))
+        rows.extend(eclipse_rows(page, group("page", route)))
 
-        select = tuple(e for e in ECLIPSED if e["against"].startswith(".ant-select"))
-        open_route(route)
-        chip = page.query_selector(".ah-select-chip, .ant-select")
-        if chip is not None:
-            try:
-                chip.click()
-                page.wait_for_selector(
-                    ".ant-select-dropdown", state="attached", timeout=4000
-                )
-            except Exception:  # noqa: BLE001 鈥?the rows below report the miss
-                pass
-            page.wait_for_timeout(400)
-        rows.extend(eclipse_rows(page, select))
+    # The three popups are one page state each, and each is prepared on the
+    # route that owns the trigger, so a single pass covers every entry.
+    base = routes[0]
+    for state, prepare in (
+        ("dropdown", lambda: _click(page, "header button.ah-iconbtn")),
+        ("select", lambda: _click(page, ".ah-select-chip, .ant-select")),
+        ("tooltip", lambda: _hover(page, "header button.ah-iconbtn")),
+    ):
+        wanted = group(state)
+        if not wanted:
+            continue
+        open_route(base)
+        prepare()
+        page.wait_for_timeout(500)
+        rows.extend(eclipse_rows(page, wanted))
     return {"rows": rows, "examined": len(rows)}
+
+
+def _click(page, selector: str) -> None:
+    """Click if it is there; the rows below report what did not appear."""
+
+    element = page.query_selector(selector)
+    if element is None:
+        return
+    # An overlay left by a previous pass can swallow the click; that is not a
+    # defect here, because the rows report whatever failed to appear.
+    with contextlib.suppress(Exception):
+        element.click(timeout=3000)
+
+
+def _hover(page, selector: str) -> None:
+    element = page.query_selector(selector)
+    if element is None:
+        return
+    with contextlib.suppress(Exception):
+        element.hover(timeout=3000)
 
 
 def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int]:
@@ -2122,6 +2337,17 @@ def main() -> int:
             "equal the token it names, not antd's fallback"
         ),
     )
+    parser.add_argument(
+        "--app-only",
+        action="store_true",
+        help=(
+            "skip the gallery and its Vite build, and sweep only the running "
+            "cockpit named with --app. For a machine with no memory or disk to "
+            "spare (a Vite build is hundreds of megabytes); the report says the "
+            "gallery-derived checks were not measured instead of implying they "
+            "passed"
+        ),
+    )
     args = parser.parse_args()
 
     if not (WEB / "node_modules").is_dir():
@@ -2140,34 +2366,43 @@ def main() -> int:
     root = Path(tempfile.mkdtemp(prefix="ah-rule-audit-"))
     print(f"gallery: {root}")
     port = free_port()
-    build_gallery(root)
-    run(["npx", "--no-install", "vite", "build"], cwd=root)
-    # `--host 127.0.0.1` rather than Vite's default `localhost`: on Windows the
-    # preview server binds `::1` only, and a probe that asks for the IPv4
-    # literal then times out against a server that is running perfectly well.
+    if args.app_only and not args.app:
+        print("--app-only needs at least one --app URL; there would be nothing to sweep")
+        return 2
+    preview = None
+    base = ""
     log = root / "preview.log"
-    with log.open("w", encoding="utf-8") as handle:
-        preview = subprocess.Popen(
-            [
-                "npx", "--no-install", "vite", "preview",
-                "--port", str(port), "--strictPort", "--host", "127.0.0.1",
-            ],
-            cwd=root,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            shell=(os.name == "nt"),
-        )
-    base = f"http://127.0.0.1:{port}/"
+    if not args.app_only:
+        build_gallery(root)
+        run(["npx", "--no-install", "vite", "build"], cwd=root)
+        # `--host 127.0.0.1` rather than Vite's default `localhost`: on Windows the
+        # preview server binds `::1` only, and a probe that asks for the IPv4
+        # literal then times out against a server that is running perfectly well.
+        with log.open("w", encoding="utf-8") as handle:
+            preview = subprocess.Popen(
+                [
+                    "npx", "--no-install", "vite", "preview",
+                    "--port", str(port), "--strictPort", "--host", "127.0.0.1",
+                ],
+                cwd=root,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                shell=(os.name == "nt"),
+            )
+        base = f"http://127.0.0.1:{port}/"
+    else:
+        print("gallery skipped (--app-only): the rule-reachability sweep will not run")
     try:
-        for _ in range(40):
-            try:
-                urllib.request.urlopen(base, timeout=1)  # noqa: S310 - localhost
-                break
-            except (urllib.error.URLError, OSError):
-                time.sleep(0.5)
-        else:
-            print(f"preview server never came up; its log says:\n{log.read_text()}")
-            return 2
+        if not args.app_only:
+            for _ in range(40):
+                try:
+                    urllib.request.urlopen(base, timeout=1)  # noqa: S310 - localhost
+                    break
+                except (urllib.error.URLError, OSError):
+                    time.sleep(0.5)
+            else:
+                print(f"preview server never came up; its log says:\n{log.read_text()}")
+                return 2
 
         rows: list[dict] = []
         sweep: dict[str, dict[str, int]] = {"weights": {}, "sizes": {}}
@@ -2181,7 +2416,7 @@ def main() -> int:
             # Both palettes: the gallery used to run dark-only, so every value
             # this sweep read — disabled opacities, colours, radii against the
             # tokens — had one theme's evidence behind it.
-            for url, scope in (
+            for url, scope in () if args.app_only else (
                 (base, "interactive"),
                 (base + "?modal=1", "modal"),
                 (base + "?confirm=1", "confirm"),
@@ -2220,7 +2455,7 @@ def main() -> int:
             # has two such controls, so measuring them on the gallery is the only
             # way to cover the families.
             disabled: dict = {"rows": [], "examined": 0}
-            if args.disabled:
+            if args.disabled and not args.app_only:
                 for theme in ("dark", "light"):
                     found = run_disabled_sweep(page, base, theme)
                     disabled["rows"].extend(found["rows"])
@@ -2250,7 +2485,7 @@ def main() -> int:
             eclipses: dict = {"rows": [], "examined": 0}
             for url in args.app:
                 if args.eclipse:
-                    found_eclipses = run_eclipse_sweep(page, url, args.route or ["#/"])
+                    found_eclipses = run_eclipse_sweep(page, url, args.route or list(LIST_ROUTES))
                     eclipses["rows"].extend(found_eclipses["rows"])
                     eclipses["examined"] += found_eclipses["examined"]
                 if args.states:
@@ -2301,7 +2536,8 @@ def main() -> int:
                             target[key] = target.get(key, 0) + count
             browser.close()
     finally:
-        kill_tree(preview)
+        if preview is not None:
+            kill_tree(preview)
         if args.keep:
             print(f"kept: {root}")
         else:
@@ -2314,9 +2550,10 @@ def main() -> int:
     rows = list(best.values())
     defects, unverified, _ = reachable(rows)
     matched = sum(1 for r in rows if r["matched"] > 0)
+    gallery_skipped = bool(args.app_only)
     off_weight, off_size = off_scale(sweep)
     app_weights, app_sizes = off_scale(app_sweep)
-    app_colors, app_radii = off_token(app_sweep)
+    app_colors, app_radii, app_allowed = off_token(app_sweep)
     focus_failures = focus_defects(focus["rows"], focus["expect"]) if args.focus else []
     if args.focus and focus["examined"] < 20:
         # An empty producer is the failure mode this whole script exists to
@@ -2336,7 +2573,9 @@ def main() -> int:
     overlap_failures = overlaps if args.overlap else []
     state_failures = state_defects(states["rows"]) if args.states else []
     eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
-    eclipse_read = sum(1 for r in eclipses["rows"] if r.get("computed") is not None)
+    eclipse_read = len(
+        {r["label"] for r in eclipses["rows"] if r.get("computed") is not None}
+    )
     if args.eclipse and eclipse_read < len(ECLIPSED):
         # Every entry has to be read at least once: a sweep that reports "the
         # token won" from three of seven entries is the false green this file
@@ -2368,6 +2607,7 @@ def main() -> int:
     print(
         json.dumps(
             {
+                "gallery_skipped": gallery_skipped,
                 "rules_reading_component_tokens": len(rows),
                 "matched": matched,
                 "defects": defects,
@@ -2378,6 +2618,7 @@ def main() -> int:
                 "app_off_scale_font_sizes": app_sizes,
                 "app_colours_in_no_token": app_colors,
                 "app_radii_in_no_token": app_radii,
+                "app_values_allowed_by_name": app_allowed,
                 "overlap_sweep": {
                     "enabled": args.overlap,
                     "controls_examined": overlap_examined,
@@ -2460,9 +2701,18 @@ def main() -> int:
                 print(f"  {label}: {item}")
         print(f"\n{len(defects)} rule(s) read component tokens and reach nothing.")
         return 1
-    print(f"\nno dead rules. {matched}/{len(rows)} reach an element; "
-          f"{len(unverified)} are unverified (see the reasons above). "
-          "Every rendered weight is 400 or 500 and every size is an M3 role.")
+    if gallery_skipped:
+        # Not a pass and not a defect: the gallery was never built, so the
+        # reachability question was not asked. Saying "no dead rules" here would
+        # be the exact false green this file exists to refuse.
+        print(
+            "\ngallery skipped (--app-only): rule reachability and the disabled "
+            "sweep were NOT measured this run; the app sweeps below were."
+        )
+    else:
+        print(f"\nno dead rules. {matched}/{len(rows)} reach an element; "
+              f"{len(unverified)} are unverified (see the reasons above). "
+              "Every rendered weight is 400 or 500 and every size is an M3 role.")
     if args.focus:
         print(
             f"Focus: {focus['examined']} focusable elements across "
@@ -2491,6 +2741,13 @@ def main() -> int:
             f"Eclipse: {eclipses['examined']} popup properties read on rendered "
             f"elements against {len(ECLIPSED)} entries; every one computes the value "
             "its token names, so no antd rule of equal shape is painting instead."
+        )
+    if app_allowed:
+        print(
+            f"Allowed: {len(app_allowed)} computed value(s) that are in no token "
+            "either because they are a token at reduced alpha (a state layer), or "
+            "because a name in OFF_TOKEN_ALLOWED says why 鈥?each is printed above "
+            "with its reason."
         )
     return 0
 

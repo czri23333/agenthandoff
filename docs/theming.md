@@ -182,6 +182,38 @@ the rendered element equals the token it names. Measured on the running app on
 item corner `8px` → `4px`. With the fix reverted the sweep fails and names all
 three.
 
+The sweep started with the three popups the cockpit mounts and now covers every
+antd family a real route draws: **17 entries over five routes** (segmented,
+switch, slider, table head and the three popups), 25 readings per run, all
+equal to their tokens. The routes are not guessed — a family inventory of the
+running app says which view draws what (switches on the inbox, sliders on the
+threads view, the table on the doctor's), and an entry that matches nothing on
+any route is a defect, not a skip. Two facts the sweep made visible: the
+progress-bar family has *no* entry because no view mounts one (its rules are
+gallery-only, which is what the reachability sweep is for), and one entry cannot
+be proved by editing our stylesheet at all — the slider rail is painted by
+antd's `--ant-slider-rail-size`, which `theme.ts` sets from the same token, so
+the gate was proved by moving *that* number instead: with `railSize: 8` against
+a 16px token it reports `computes 8px, but --ah-c-slider-track-height is 16px`.
+
+Three more places in the product turned out to be painted by something other
+than a token, all found by pointing the app sweep at every route. The pager kept
+antd's link ink (`rgb(22, 104, 220)` light, `rgb(180, 163, 220)` dark) — the jump
+buttons needed a four-class chain because antd paints
+`.ant-pagination-item-container` and its `:where()` prefix still leaves three
+classes of specificity. Tailwind's `rounded-full` is `calc(infinity * 1px)` in
+v4, which the browser reports as `33554432px`: a literal the shape gate cannot
+see, now `.ah-round`, made of `--ah-shape-full`. And the code-block copy button
+was hover-only (`opacity-0` + `group-hover`), so a keyboard user tabbed to an
+invisible control with an invisible ring; it now appears on focus too. The
+off-token sweep also stopped calling a *state layer* an off-token colour: a
+computed value that is a token at reduced alpha is accepted by un-mixing it, and
+the three values that really are not tokens (the highlight.js syntax palette and
+the 45% zebra stripe inside rendered Markdown) are allowed by name with a reason
+that the run prints. `--app-only` exists for a machine that cannot afford the
+gallery's Vite build, and its report says the gallery checks were not measured
+rather than implying they passed.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to

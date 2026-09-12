@@ -2044,6 +2044,58 @@
   border-radius: var(--ah-c-switch-track-shape);
 }
 
+/* The pager. M3 publishes no pagination component, so this is our composition
+   and it says so in `docs/theming.md` 鈥?but it is still made of roles, not of
+   antd's defaults. Measured on the running app before these rules: the prev/next
+   links painted `rgb(22, 104, 220)` in light (antd's own link blue) and
+   `rgb(180, 163, 220)` in dark (the colour its algorithm derives), neither of
+   which is in our token table. Both are gone now. */
+:root .ant-pagination .ant-pagination-item a,
+:root .ant-pagination .ant-pagination-item-link,
+:root .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+:root .ant-pagination .ant-pagination-next .ant-pagination-item-link,
+:root .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link,
+:root .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link {
+  color: var(--ah-text-2);
+}
+
+:root .ant-pagination .ant-pagination-item:hover a,
+:root .ant-pagination .ant-pagination-prev:hover .ant-pagination-item-link,
+:root .ant-pagination .ant-pagination-next:hover .ant-pagination-item-link {
+  color: var(--ah-accent);
+}
+
+:root .ant-pagination .ant-pagination-item-active {
+  background: var(--ah-c-segmented-selected-container);
+  border-color: transparent;
+}
+
+:root .ant-pagination .ant-pagination-item-active a,
+:root .ant-pagination .ant-pagination-item-active:hover a {
+  color: var(--ah-c-segmented-selected-content);
+}
+
+:root .ant-pagination .ant-pagination-disabled .ant-pagination-item-link {
+  color: color-mix(
+    in srgb,
+    var(--ah-on-surface) var(--ah-c-button-disabled-content),
+    transparent
+  );
+}
+
+/* The jump buttons' ellipsis. antd paints `.ant-pagination-item-container`
+   (inside the link) with its own ink, and the `:where()` in front of its
+   selector still leaves three classes of specificity 鈥?the ancestor chain below
+   is four, so this wins by specificity rather than by injection order. Measured
+   before: `rgb(180, 163, 220)` on the ellipsis icon and its `svg`/`path` in the
+   dark theme, antd's derived primary; the sweep's ancestor chain is what
+   pointed at this node rather than at the `path` that inherited it. */
+:root .ant-pagination .ant-pagination-item-link .ant-pagination-item-container,
+:root .ant-pagination .ant-pagination-item-link .ant-pagination-item-ellipsis,
+:root .ant-pagination .ant-pagination-item-link .ant-pagination-item-link-icon {
+  color: var(--ah-text-2);
+}
+
 /* A `Select` wearing a filter chip. M3 has no select *control*; the thing that
    filters a list is a chip, so the toolbar's two dropdowns take
    ChipsTokens/FilterChipTokens geometry — 32dp, corner-medium at rest and

@@ -168,7 +168,7 @@ export function Bullets({
               {i + 1}
             </span>
           ) : (
-            <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-[var(--ah-text-3)]" />
+            <span className="mt-[9px] h-1 w-1 shrink-0 ah-round bg-[var(--ah-text-3)]" />
           )}
           <span className="min-w-0 break-words">{s}</span>
         </li>

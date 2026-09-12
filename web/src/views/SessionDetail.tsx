@@ -321,7 +321,7 @@ function TranscriptRow({
         <div className="mb-1 flex items-center gap-1.5">
           <span className="ah-label flex select-none items-center" style={{ textTransform: "none" }}>
             {expert?.avatar ? (
-              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 rounded-full align-[-2px]" loading="lazy" />
+              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 ah-round align-[-2px]" loading="lazy" />
             ) : (
               <span className="mr-1">🤖</span>
             )}

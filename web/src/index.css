@@ -939,6 +939,10 @@ html {
 /* Code block shell */
 .ah-codeblock pre { background: var(--ah-code-bg); border: 1px solid var(--ah-line); margin: 0; }
 .ah-copybtn { background: var(--ah-surface-2); border: 1px solid var(--ah-line-strong); color: var(--ah-text-2); }
+/* Tailwind's `rounded-full` is `calc(infinity * 1px)` in v4, which is a literal
+   our shape gate cannot see and the browser reports as 33554432px; this class is
+   the same circle made of `--ah-shape-full`. */
+.ah-round { border-radius: var(--ah-shape-full); }
 .ah-copybtn:hover {
   color: var(--ah-text-1);
   border-color: var(--ah-accent);

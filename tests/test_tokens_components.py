@@ -688,7 +688,7 @@ def test_the_app_sweep_reports_what_it_looked_at():
     audit = importlib.util.module_from_spec(module)
     module.loader.exec_module(audit)
 
-    colors, radii = audit.off_token(
+    colors, radii, allowed = audit.off_token(
         {
             "tokens": ["#e6e0e9", "#d0bcff", "#141218", "9999px"],
             "buckets": {
@@ -710,10 +710,53 @@ def test_the_app_sweep_reports_what_it_looked_at():
     # Tailwind's `calc(infinity * 1px)` spelling does not.
     assert colors == ["rgb(180, 163, 220) :: i.ant-spin-dot-item (x4)"]
     assert radii == ["calc(infinity * 1px) :: span.freshness-dot (x1)"]
+    assert allowed == []
+
+    # A *state layer* is a token at reduced alpha, and un-mixing is exact: the
+    # channels are `on-surface` (230, 224, 233) and the alpha is 38%. That is not
+    # an off-token colour, and it is reported as allowed rather than hidden.
+    colors, radii, allowed = audit.off_token(
+        {
+            "tokens": ["#e6e0e9"],
+            "buckets": {
+                "colors": {"color(srgb 0.901961 0.878431 0.913725 / 0.38) :: button": 2}
+            },
+        }
+    )
+    assert colors == [] and radii == []
+    assert len(allowed) == 1 and "38%" in allowed[0], allowed
+
+    # The same shape at full alpha is *not* a state layer, and a colour whose
+    # channels are in no token stays a violation even at 38%.
+    for value in (
+        "color(srgb 0.901961 0.878431 0.913725) :: button",
+        "color(srgb 0.1 0.2 0.3 / 0.38) :: button",
+    ):
+        colors, _, allowed = audit.off_token(
+            {"tokens": ["#e6e0e9"], "buckets": {"colors": {value: 1}}}
+        )
+        assert colors == [f"{value} (x1)"], (value, colors, allowed)
+
+    # Two named exceptions, and something that merely looks like them is not one:
+    # the syntax palette is allowed where it renders code, and nowhere else.
+    colors, _, allowed = audit.off_token(
+        {
+            "tokens": [],
+            "buckets": {
+                "colors": {
+                    "rgb(255, 123, 114) :: span.hljs-keyword < div.ah-md": 3,
+                    "rgb(201, 209, 217) :: code.hljs < pre < div.ah-codeblock": 2,
+                    "rgb(255, 123, 114) :: div.ah-md": 1,
+                }
+            },
+        }
+    )
+    assert colors == ["rgb(255, 123, 114) :: div.ah-md (x1)"]
+    assert len(allowed) == 2, allowed
 
     # A sweep that examined nothing says so.
-    colors, radii = audit.off_token({"buckets": {}, "tokens": [], "checked": {}})
-    assert colors == [] and radii == []
+    colors, radii, allowed = audit.off_token({"buckets": {}, "tokens": [], "checked": {}})
+    assert colors == [] and radii == [] and allowed == []
 
 
 def test_the_focus_gate_separates_a_ring_from_a_derived_colour():
