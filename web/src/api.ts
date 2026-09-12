@@ -151,6 +151,27 @@ export interface ThreadGroup {
   last_active: string | null;
 }
 
+/**
+ * What the clustering actually managed to look at.
+ *
+ * `with_files < sessions` means the file-overlap signal covered only part of the
+ * store — the pass runs under a time budget because reading every session record
+ * costs ~150s on an 802-session store. The view says so out loud instead of
+ * presenting a partial cluster set as the whole picture.
+ */
+export interface ThreadsCoverage {
+  sessions: number;
+  with_files: number;
+  seconds: number;
+  budget_s: number;
+  budget_hit: boolean;
+}
+
+export interface ThreadsPayload {
+  threads: ThreadGroup[];
+  coverage: ThreadsCoverage;
+}
+
 export interface InboxItem {
   path: string;
   title: string;
@@ -287,7 +308,14 @@ export const api = {
   /** Download the session's ORIGINAL storage (zip, byte-faithful). */
   rawUrl: (cli: string, sid: string) =>
     `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/raw`,
-  threads: (cwd?: string) => get<ThreadGroup[]>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
+  threads: (cwd?: string) =>
+    get<ThreadsPayload>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
+  // One more budget's worth of file sets. The clustering reads every session's
+  // record to know which files it touched — ~150s over this machine's 802
+  // sessions — so the first call answers with what fits in its budget and this
+  // asks for the next batch.
+  threadsMore: (cwd?: string) =>
+    get<ThreadsPayload>(`/api/threads/refresh${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
   inbox: (globalScope = false) => get<InboxItem[]>(`/api/inbox?global_scope=${globalScope}`),
   launcher: (cli: string, sid: string) =>
     get<Launcher>(`/api/launcher/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}`).catch(() => null),

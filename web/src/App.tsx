@@ -1,7 +1,7 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { Layout, Segmented, Tooltip, Typography } from "antd";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { App as AntApp, Dropdown, Layout, Tooltip, Typography } from "antd";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
-import { setThemeMode, useTheme, type ThemeMode } from "./theme";
+import { getSeed, seeds, setSeed, setThemeMode, useTheme, type ThemeMode } from "./theme";
 import Dashboard from "./views/Dashboard";
 // Route-split (§4-2): the 1.4MB bundle was every view up front. Dashboard
 // stays in the entry chunk; the rest load on first visit with a fallback
@@ -51,9 +51,38 @@ function toHash(v: View): string {
 export default function App() {
   const t = useT();
   const { mode } = useTheme();
+  const { message } = AntApp.useApp();
   const [view, setView] = useState<View>(parseHash);
   const [lang, setLangState] = useState<Lang>(getLang);
   const navDepth = useRef(0);
+  /* The tab indicator is one element that *travels*, which is what Material's
+     own implementation does and what a per-tab pseudo-element cannot: a rule
+     can fade its own indicator in, but only a shared element can move between
+     two tabs. `theme.ts` cannot measure anything, so this is the one piece of
+     geometry the app owns — and it reads its size and colour from tokens. */
+  const navRef = useRef<HTMLElement | null>(null);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
+  const activeTabId = view.name === "detail" ? "dashboard" : view.name;
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const tab = tabRefs.current[activeTabId];
+      const nav = navRef.current;
+      if (!tab || !nav) return;
+      // `offsetLeft` is relative to the nav's padding box and does not change
+      // when the strip is scrolled, so the indicator scrolls with its tab.
+      setIndicator({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (observer && navRef.current) observer.observe(navRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeTabId]);
 
   const setLang = (l: Lang) => {
     setLangState(l);
@@ -130,50 +159,121 @@ export default function App() {
   return (
     <Layout className="mx-auto h-screen max-w-[1500px]">
       <Layout.Header
-        className="!flex !h-auto !flex-wrap !items-center gap-x-4 gap-y-1.5 !px-5 !py-2.5"
+        className="ah-appbar !flex !items-center gap-x-4 !px-4"
         style={{ borderBottom: "1px solid var(--ah-line)" }}
       >
-        <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
+        {/* An <h1> rather than antd's `Typography.Title level={5}`: the app bar's
+            title role is M3's title-large (22px), and antd's own heading rule is
+            `h5.ant-typography` plus its runtime hash class, so a single-class
+            override loses and the bar kept a 16px heading. */}
+        <h1 className="ah-appbar__title m-0 whitespace-nowrap">
           agenthandoff{" "}
-          <span className="ah-label" style={{ textTransform: "none", letterSpacing: 0 }}>
+          <span className="ah-label ah-label-plain">
             cockpit
           </span>
-        </Typography.Title>
-        {/* A Segmented control instead of antd's horizontal Menu: the Menu's
-            selected item paints its own container colour and measured 3.66:1 on
-            our header surface, while Segmented inherits the token palette. */}
-        {/* Below md the nav drops to a row of its own: it needs ~276px and was
-            being overlapped by the theme switcher, which made the wrong control
-            win the hit test on a phone. */}
-        <Segmented
-          className="min-w-0 flex-1 max-md:order-last max-md:basis-full"
-          value={view.name === "detail" ? "dashboard" : view.name}
-          onChange={(v) => goTo(String(v))}
-          options={TABS.map((tb) => ({ label: `${t(tb.labelKey)} ${tb.key}`, value: tb.id }))}
-        />
-        <Tooltip title={t("themeToggleHint")}>
-          <Segmented
-            size="small"
-            className="shrink-0"
-            value={mode}
-            onChange={(v) => setThemeMode(v as ThemeMode)}
-            options={[
-              { label: t("themeAuto"), value: "auto" },
-              { label: t("themeDark"), value: "dark" },
-              { label: t("themeLight"), value: "light" },
-            ]}
-          />
-        </Tooltip>
-        <Segmented
-          size="small"
-          className="shrink-0"
-          value={lang}
-          onChange={(v) => setLang(v as Lang)}
-          options={[
-            { label: "中", value: "zh" },
-            { label: "EN", value: "en" },
-          ]}
-        />
+        </h1>
+        {/* PrimaryNavigationTabTokens: the official control for "which of these
+            destinations am I on" — a 48dp tab whose 3dp primary indicator sits
+            under the active one. This replaces an antd Segmented, which is a
+            *segmented button*: the right control for a filter, the wrong one for
+            navigation, and at full width it read as a search box.
+            Below md the row drops to its own line: it needs ~300px and was being
+            overlapped by the theme switcher, which made the wrong control win the
+            hit test on a phone. */}
+        <nav
+          ref={navRef}
+          className="ah-tabs min-w-0 flex-1 overflow-x-auto max-md:order-last max-md:basis-full"
+          aria-label={t("sessions")}
+        >
+          {indicator && (
+            <span
+              className="ah-tabs__indicator"
+              aria-hidden="true"
+              style={{ translate: `${indicator.left}px`, width: indicator.width }}
+            />
+          )}
+          {TABS.map((tb) => {
+            const active = activeTabId === tb.id;
+            return (
+              <button
+                key={tb.id}
+                type="button"
+                ref={(el) => {
+                  tabRefs.current[tb.id] = el;
+                }}
+                className={`ah-tab ${active ? "ah-tab--active" : "ah-tab--inactive"}`}
+                aria-current={active ? "page" : undefined}
+                onClick={() => goTo(tb.id)}
+              >
+                {t(tb.labelKey)}
+                <span className="ah-tab__key">{tb.key}</span>
+              </button>
+            );
+          })}
+        </nav>
+        {/* Display settings are an icon button and a menu, not two more
+            segmented buttons. The toolbar above already has one segmented
+            control (the search mode) and one below it (the grouping), which is
+            what a segmented button is *for* — a filter. Theme and language are
+            settings: M3 puts them on an IconButtonTokens trigger that opens a
+            MenuTokens menu, and four identical pills in one bar is the thing
+            that read as "not a Material app". The `T` shortcut still cycles the
+            theme without opening the menu. */}
+        <Dropdown
+          trigger={["click"]}
+          placement="bottomRight"
+          menu={{
+            selectedKeys: [`theme:${mode}`, `seed:${getSeed() ?? "baseline"}`, `lang:${lang}`],
+            onClick: ({ key }) => {
+              if (key.startsWith("seed:")) {
+                // The menu carries the seed's *id*; the hex comes from the token
+                // file, so a preset cannot drift between the two places.
+                const id = key.slice("seed:".length);
+                const chosen = seeds.find((seed) => seed.id === id);
+                const value = chosen?.hex || null;
+                // `null` restores the hand-authored baseline; anything else is a
+                // seed Google's dynamic-colour maths derives the roles from. The
+                // verdict is shown when a seed fails the AA gate the baseline is
+                // held to, rather than applied and quietly made unreadable.
+                void setSeed(value).then((verdict) => {
+                  if (!verdict.ok) {
+                    message.warning(`${t("seedRejected")} ${verdict.detail}`);
+                  }
+                });
+                return;
+              }
+              const [group, value] = key.split(":");
+              if (group === "theme") setThemeMode(value as ThemeMode);
+              else setLang(value as Lang);
+            },
+            items: [
+              { key: "theme:auto", label: t("themeAuto") },
+              { key: "theme:dark", label: t("themeDark") },
+              { key: "theme:light", label: t("themeLight") },
+              { type: "divider" },
+              // From `tokens.json`: a seed is an input to Google's derivation, and
+              // the repo's rule is that a colour with no owner does not appear in
+              // a component — not even as a starting point.
+              ...seeds.map((seed) => ({
+                key: `seed:${seed.id}`,
+                label: seed.id === "baseline" ? t("seedBaseline") : seed.label,
+              })),
+              { type: "divider" },
+              { key: "lang:zh", label: "中文" },
+              { key: "lang:en", label: "EN" },
+            ],
+          }}
+        >
+          <Tooltip title={t("themeToggleHint")}>
+            <button
+              type="button"
+              className="ah-iconbtn shrink-0"
+              aria-label={t("displaySettings")}
+            >
+              <span aria-hidden="true">◐</span>
+            </button>
+          </Tooltip>
+        </Dropdown>
         <Typography.Text className="ah-md-hide ah-faint" style={{ whiteSpace: "nowrap" }}>
           {t("localOnly")}
         </Typography.Text>
@@ -192,7 +292,7 @@ export default function App() {
               fallback={
                 <div className="space-y-2 px-5 py-3">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="ah-skeleton h-11" />
+                    <div key={i} className="ah-skeleton" />
                   ))}
                 </div>
               }

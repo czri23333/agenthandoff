@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Button, Empty, Slider, Spin, Typography } from "antd";
-import { api, type ThreadGroup } from "../api";
+import { Button, Slider, Typography } from "antd";
+import { api, type ThreadGroup, type ThreadsCoverage } from "../api";
+import { EmptyState } from "../components";
 import { useT } from "../i18n";
 
 /**
@@ -10,12 +11,25 @@ import { useT } from "../i18n";
 export default function Threads() {
   const t = useT();
   const [threads, setThreads] = useState<ThreadGroup[] | null>(null);
+  const [coverage, setCoverage] = useState<ThreadsCoverage | null>(null);
   const [minOverlap, setMinOverlap] = useState(0.15);
 
   const recluster = async () => {
     setThreads(null);
-    const all = await api.threads().catch(() => [] as ThreadGroup[]);
-    setThreads(all);
+    const payload = await api
+      .threads()
+      .catch(() => ({ threads: [] as ThreadGroup[], coverage: null }));
+    setThreads(payload.threads);
+    setCoverage(payload.coverage);
+  };
+
+  /** The next budget's worth. The server caches what it already read, so this
+   *  does not re-pay for the previous batch. */
+  const loadMore = async () => {
+    const payload = await api.threadsMore().catch(() => null);
+    if (!payload) return;
+    setThreads(payload.threads);
+    setCoverage(payload.coverage);
   };
 
   useEffect(() => {
@@ -50,11 +64,32 @@ export default function Threads() {
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {threads === null && (
           <div className="flex items-center gap-2 p-6">
-            <Spin />
+            {/* LoadingIndicatorTokens, not antd's four-dot `Spin`: the dots draw
+                `colorPrimary` through antd's derivative chain, which resolves to
+                `rgb(180,163,220)` — a colour in no token table — where M3E's
+                indicator is a 38dp shape in `primary`. */}
+            <span className="ah-loading ah-loading--uncontained" aria-hidden="true" />
             <span className="ah-meta">{t("clustering")}</span>
           </div>
         )}
-        {multi?.length === 0 && <Empty description={<span className="ah-meta">{t("noThreads")}</span>} />}
+        {multi?.length === 0 && <EmptyState text={t("noThreads")} />}
+        {/* Honesty about what was actually read. The file-overlap signal needs
+            every session's record; on an 802-session store that is ~150s, so the
+            pass stops at a budget and the view reports the count it reached
+            rather than presenting partial clusters as the whole picture. */}
+        {coverage?.budget_hit && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Typography.Text className="ah-warn ah-meta">
+              {t("threadsCoverage")
+                .replace("{with_files}", String(coverage.with_files))
+                .replace("{sessions}", String(coverage.sessions))
+                .replace("{seconds}", String(coverage.seconds))}
+            </Typography.Text>
+            <Button size="small" onClick={() => void loadMore()}>
+              {t("threadsLoadMore")}
+            </Button>
+          </div>
+        )}
         {singleCount > 0 && (
           <Typography.Text className="ah-faint mb-3 block">
             {singleCount} {t("standaloneHidden")}

@@ -44,13 +44,22 @@ STORE_KINDS: dict[str, str] = {
     "claude": "JSONL dir",
     "codebuddy": "JSONL dir",
     "codebuddy-cn": "JSONL dir",
+    "workbuddy": "JSONL dir + SQLite title index",
     "qoderwork": "JSONL dir",
     "qoderwork-cn": "JSONL dir",
     "qodercn-ide": "JSONL dir",
+    "qoder-ide": "Electron leveldb",
     "qwenwork": "JSONL dir",
     "dsh": "zstd JSONL dir",
     "kimi": "state.json + wire.jsonl",
     "codex": "JSONL rollouts",
+    "opencode": "SQLite (read-only URI)",
+    "qoderwake": "SQLite daemon store + shared JSONL",
+    "qoderwake-cn": "SQLite daemon store + shared JSONL",
+    "qoderwork-app": "SQLite (read-only URI)",
+    "qoderwork-cn-app": "SQLite (read-only URI)",
+    "qwenwork-app": "SQLite (read-only URI)",
+    "cherrystudio": "SQLite (read-only URI)",
 }
 
 # Parsers whose format handling is knowingly incomplete upstream of us.
@@ -60,6 +69,49 @@ ROADMAP: dict[str, str] = {
     "qoder-ide": "Electron leveldb — no session files on disk",
     "opencode": "storage layout undocumented",
     "trae": "IDE SQLite; read-only only, never written",
+}
+
+# Why a reader that *has* a parser is still unproven, and what would prove it.
+# An `unverified` row with no reason is the failure mode this table exists to
+# prevent: "no fixture" is a fact about the machine that built the fixtures, not
+# about the reader, and the difference matters to whoever picks the work up.
+# Every reason ends with the command that would close it, and
+# `tests/test_reader_lockstep.py` enforces that, so a new reader cannot land
+# unproven *and* unexplained.
+UNPROVEN: dict[str, str] = {
+    "claude": (
+        "no Claude Code store on the machine that built the fixtures "
+        "(`~/.claude/projects`); run `python scripts/sanitize_fixtures.py "
+        "--cli claude` where one exists"
+    ),
+    "codebuddy-cn": (
+        "no CN CodeBuddy store here (`~/.codebuddy` is the international one); "
+        "the parser is pinned to CodeBuddy's shape by "
+        "`tests/test_edition_parity.py`, and `python scripts/sanitize_fixtures.py "
+        "--cli codebuddy-cn` closes it on a machine with the CN store"
+    ),
+    "qoder-ide": (
+        "Qoder IDE keeps sessions in an Electron leveldb and this machine has "
+        "no session files on disk; run `python scripts/sanitize_fixtures.py "
+        "--cli qoder-ide` where the IDE has been used"
+    ),
+    "opencode": (
+        "no OpenCode store here and its storage layout is undocumented upstream; "
+        "run `python scripts/sanitize_fixtures.py --cli opencode` with a store "
+        "present, then record what the layout turned out to be"
+    ),
+    "qoderwake": (
+        "the shared `~/.qoder/projects` store reads fine but holds 0 transcript "
+        "files (the CN sibling has 132 and is proven, which is why the parser is "
+        "pinned by `tests/test_edition_parity.py`); run `python "
+        "scripts/sanitize_fixtures.py --cli qoderwake` once it holds a session"
+    ),
+    "qwenwork-app": (
+        "the store exists (`AppData/Roaming/QwenWorkCN/data/agents.db`) and is "
+        "readable, but holds 0 message rows, so there is nothing to sample and "
+        "the honest result is shape-only at best; re-run `python "
+        "scripts/sanitize_fixtures.py --cli qwenwork-app` after it has been used"
+    ),
 }
 
 MATRIX_VERSION = "1"
@@ -154,6 +206,8 @@ def build_rows() -> list[Row]:
         if evidence.sampled:
             row.notes.append("record-sampled")
         row.status = derive_status(row)
+        if row.status == "unverified" and parser.cli in UNPROVEN:
+            row.notes.append(UNPROVEN[parser.cli])
         rows.append(row)
     for cli in ROADMAP:
         if cli not in registered:

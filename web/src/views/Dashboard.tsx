@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Input, Segmented, Select, Tooltip, Typography, type GetRef } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Button, Segmented, Select, Tooltip, Typography } from "antd";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   api,
   relTime,
@@ -10,7 +10,7 @@ import {
   type SessionMeta,
   type StoreInfo,
 } from "../api";
-import { CliBadge, CopyButton, Highlight, StatusTag } from "../components";
+import { CliBadge, CopyButton, EmptyState, Highlight, StatusTag } from "../components";
 import { ActivityGrid } from "../charts";
 import { useFmt, useT, type TKey } from "../i18n";
 
@@ -100,7 +100,9 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     }
   }, [groupMode]);
   const [, tick] = useState(0);
-  const inputRef = useRef<GetRef<typeof Input.Search>>(null);
+  /* The search control is our own M3 search bar now, so the ref is a plain
+     input rather than antd's `InputRef` proxy. */
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
     async (manual = false) => {
@@ -369,7 +371,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
           {t("bundleStale")}
         </button>
       )}
-      <div className="ah-bar ah-toolbar px-4 py-2.5">
+      {/* DockedToolbarTokens: a 64dp surface-container strip with 16dp leading
+          and trailing space. The toolbar used to be a `.ah-bar` (a 1px rule on
+          the app-bar surface), which made the app bar, the toolbar and the list
+          three white bands separated by hairlines. */}
+      <div className="ah-docked-toolbar">
         <Segmented
           size="small"
           value={mode}
@@ -379,22 +385,49 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             { label: t("searchModeFull"), value: "full" },
           ]}
         />
-        <Input.Search
-          ref={inputRef}
-          allowClear
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onSearch={(v) => setQ(v)}
-          placeholder={mode === "titles" ? t("searchTitles") : t("searchFull")}
-          className="ah-search-input"
-          loading={searching}
-        />
+        {/* M3's docked search bar (SearchBarTokens): 56dp, corner-full,
+            surface-container-high, elevation 3. This was an antd `Input.Search`
+            — a 32px rounded rectangle with a square button bolted to its right
+            edge — which is the single clearest "this is not Material" tell on
+            the screen. Behaviour is unchanged and still ours: `/` focuses it
+            from anywhere, Escape clears it, and a submit warms the index. */}
+        <div className="ah-searchbar ah-search-input">
+          <span className="ah-searchbar__icon" aria-hidden="true">
+            <SearchOutlined />
+          </span>
+          <input
+            ref={inputRef}
+            className="ah-searchbar__input"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void api.searchWarm().then(setIndex);
+              if (e.key === "Escape") setQ("");
+            }}
+            placeholder={mode === "titles" ? t("searchTitles") : t("searchFull")}
+            aria-label={mode === "titles" ? t("searchTitles") : t("searchFull")}
+          />
+          {searching ? (
+            <span className="ah-loading ah-loading--uncontained" aria-hidden="true" />
+          ) : (
+            q.length > 0 && (
+              <button
+                type="button"
+                className="ah-searchbar__icon ah-searchbar__icon--trailing"
+                onClick={() => setQ("")}
+                aria-label={t("clear")}
+              >
+                ✕
+              </button>
+            )
+          )}
+        </div>
         <Select
           value={cliFilter || undefined}
           onChange={setCliFilter}
           placeholder={t("allClis")}
           allowClear
-          className="w-44"
+          className="ah-select-chip w-44"
           options={cliOptions.map((c) => ({ value: c, label: c }))}
         />
         <Tooltip title={t("domainsHint")}>
@@ -403,7 +436,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             onChange={setDomainFilter}
             placeholder={t("allDomains")}
             allowClear
-            className="ah-narrow-hide min-w-56 max-w-80"
+            className="ah-select-chip ah-narrow-hide min-w-56 max-w-80"
             options={domains.map(([d, n]) => ({
               value: d,
               label: `${d.split(/[\\/]/).filter(Boolean).pop() ?? d} (${n})`,
@@ -423,16 +456,17 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
           />
         </Tooltip>
         <Tooltip title={needsReplyHint}>
-          <Button
-            size="small"
-            type={needsReplyOnly ? "primary" : "default"}
+          <button
+            type="button"
+            className="ah-filterchip"
+            aria-pressed={needsReplyOnly}
             onClick={() => setNeedsReplyOnly((v) => !v)}
           >
             ⚠ {t("needsReply")}
             {needsReplyCount > 0 && (
-              <span className="ml-1 font-mono">{needsReplyCount}</span>
+              <span className="ah-num">{needsReplyCount}</span>
             )}
-          </Button>
+          </button>
         </Tooltip>
         <div className="ml-auto flex items-center gap-3">
           {indexLine()}
@@ -450,7 +484,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
           )}
           <span className="ah-md-hide ah-faint flex items-center gap-1.5">
             <span
-              className="freshness-dot h-1.5 w-1.5 rounded-full"
+              className="freshness-dot h-1.5 w-1.5 rounded-[var(--ah-shape-full)]"
               style={{ opacity: refreshing ? 0.5 : 1 }}
             />
             {refreshing
@@ -480,9 +514,9 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
         ) : sessions === null ? (
           <SkeletonRows n={10} />
         ) : visible.length === 0 ? (
-          <Empty description={t("noSessions")}>
+          <EmptyState text={t("noSessions")}>
             <FirstRun />
-          </Empty>
+          </EmptyState>
         ) : (
           groupMode === "flat" ? (
             <ul className="m-0 list-none space-y-1.5 p-0">
@@ -669,7 +703,7 @@ function SessionRow({
           )}
           {s.automation && (
             <Tooltip title={`${t("automation")} · ${s.automation}`}>
-              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-pill)] px-2 py-px font-mono text-[11px] lg:inline">
+              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-full)] px-2 py-px font-mono text-[11px] lg:inline">
                 ⚙ {s.automation.length > 18 ? `${s.automation.slice(0, 17)}…` : s.automation}
               </span>
             </Tooltip>
@@ -704,7 +738,7 @@ function SessionRow({
           </span>
           {s.needs_reply === true && (
             <Tooltip title={t("needsReplyHint")}>
-              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
+              <span className="ah-warn shrink-0 text-[14px]">⚠</span>
             </Tooltip>
           )}
           <span className="w-24 shrink-0 text-right max-sm:hidden">
@@ -713,7 +747,7 @@ function SessionRow({
         </button>
       </div>
       {open && kids.length > 0 && (
-        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
+        <ul className="ah-expand m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
           {kids.map((k) => (
             <SessionRow key={`${k.cli}:${k.session_id}`} s={k} onOpen={onOpen} depth={depth + 1} />
           ))}
@@ -757,7 +791,7 @@ function HitList({
         )}
       </div>
       {hits.length === 0 && !building && (
-        <Empty description={<span className="ah-meta">{t("noFullHits")}</span>} />
+        <EmptyState text={t("noFullHits")} />
       )}
       <ul className="m-0 list-none space-y-1.5 p-0">
         {hits.map((h) => (
@@ -848,7 +882,7 @@ function SkeletonRows({ n }: { n: number }) {
   return (
     <div className="space-y-2">
       {Array.from({ length: n }).map((_, i) => (
-        <div key={i} className="ah-skeleton h-11" />
+        <div key={i} className="ah-skeleton" />
       ))}
     </div>
   );

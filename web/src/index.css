@@ -1,4 +1,13 @@
 @import "tailwindcss";
+/* The pre-JS first paint, generated from the same palette as everything else:
+   `--ah-surface-0` only exists once `theme.ts` has run, and until it does the
+   canvas has no paint at all — which is what made a dark-theme screenshot come
+   out white. Must be imported before any rule that could paint the root. */
+@import "./firstpaint.css";
+/* Material 3 component anatomy. Imported before the rules below so this sheet's
+   element-level pressable shorthand still decides what a button can animate, and
+   because every `@import` has to precede other rules. */
+@import "./m3.css";
 
 /* ── Cockpit style system ─────────────────────────────────────────────────────
    Colours come only from CSS custom properties injected by theme.ts out of
@@ -19,7 +28,71 @@
   --ah-shape-md: 12px;
   --ah-shape-lg: 16px;
   --ah-shape-xl: 28px;
-  --ah-shape-pill: 999px;
+  --ah-shape-full: 9999px;
+  /* M3E motion tokens (theme.ts injects the full table from tokens.json; these
+     fallbacks cover the subset this sheet uses, so CSS is valid before JS runs).
+     Durations and the standard/emphasized/linear curves are Google's
+     (material-web v0.192); expressive-* and the stagger step are ours, for the
+     spring overshoot and the list rhythm M3E calls for.
+
+     How they are spent — the rule this sheet follows, so a reviewer can check an
+     animation against a rule instead of a vibe:
+       press / hover feedback ..... short2-short3  (100-150ms), standard or expressive-*
+       a row or chip appearing .... short4          (200ms), standard-decelerate
+       a view or panel ............ medium2        (300ms), emphasized-decelerate
+       a hover on a surface ....... medium1        (250ms), emphasized — the outline
+                                                   firms up; a surface is not a control
+       a large surface resizing ... medium1-medium2, emphasized
+       a container unfolding ..... short4          (200ms), expressive-over
+       an endless loop ............ extra-long4, linear                        */
+  --ah-motion-stagger-row: 12ms;
+  --ah-motion-duration-short2: 100ms;
+  --ah-motion-duration-short3: 150ms;
+  --ah-motion-duration-short4: 200ms;
+  --ah-motion-duration-medium1: 250ms;
+  --ah-motion-duration-medium2: 300ms;
+  --ah-motion-duration-extra-long4: 1000ms;
+  --ah-motion-easing-linear: cubic-bezier(0, 0, 1, 1);
+  --ah-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ah-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ah-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ah-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ah-motion-easing-expressive-over: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ah-motion-easing-expressive-out: cubic-bezier(0.22, 1.2, 0.36, 1);
+  /* M3E springs (androidx material3 tokens v0_14_0). theme.ts injects the official
+     damping/stiffness pair, the `linear()` sample of it and its settle time, so
+     `--ah-dur-*`/`--ah-ease-*` below are just one-line standing names for the five
+     springs this sheet spends. The `linear()` sample is selected by @supports, not
+     by cascade order: a var() that resolves to a function the engine does not
+     support makes the whole declaration invalid at computed-value time, which does
+     *not* fall back to the previous declaration. */
+  --ah-dur-fast-spatial: var(--ah-spring-standard-fast-spatial-duration);
+  --ah-ease-fast-spatial: var(--ah-spring-standard-fast-spatial-fallback);
+  --ah-dur-default-spatial: var(--ah-spring-standard-default-spatial-duration);
+  --ah-ease-default-spatial: var(--ah-spring-standard-default-spatial-fallback);
+  --ah-dur-fast-effects: var(--ah-spring-standard-fast-effects-duration);
+  --ah-ease-fast-effects: var(--ah-spring-standard-fast-effects-fallback);
+  --ah-dur-view-spatial: var(--ah-spring-expressive-default-spatial-duration);
+  --ah-ease-view-spatial: var(--ah-spring-expressive-default-spatial-fallback);
+  --ah-dur-expand-spatial: var(--ah-spring-expressive-fast-spatial-duration);
+  --ah-ease-expand-spatial: var(--ah-spring-expressive-fast-spatial-fallback);
+  /* Tailwind's bare `.transition-*` utilities (one is used in Markdown.tsx)
+     default to 150ms/ease. The import at the top of this file lands in a cascade
+     layer, so these unlayered declarations win: no utility animates on a curve
+     that is not in the contract. */
+  --default-transition-duration: var(--ah-motion-duration-short3);
+  --default-transition-timing-function: var(--ah-motion-easing-standard);
+}
+
+/* The real M3E curves, where the engine can express them. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ah-ease-fast-spatial: var(--ah-spring-standard-fast-spatial-easing);
+    --ah-ease-default-spatial: var(--ah-spring-standard-default-spatial-easing);
+    --ah-ease-fast-effects: var(--ah-spring-standard-fast-effects-easing);
+    --ah-ease-view-spatial: var(--ah-spring-expressive-default-spatial-easing);
+    --ah-ease-expand-spatial: var(--ah-spring-expressive-fast-spatial-easing);
+  }
 }
 
 html,
@@ -32,7 +105,7 @@ body {
   margin: 0;
   background: var(--ah-surface-0);
   color: var(--ah-text-1);
-  font-size: 14px;
+  font-size: var(--ah-type-body-medium-size);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -46,6 +119,13 @@ body {
   background: var(--ah-surface-1);
   border: 1px solid var(--ah-line);
   border-radius: var(--ah-shape-lg);
+  /* A card is a surface, not a control: it does not move, its outline firms up.
+     medium + emphasized is the M3 pairing for a surface this size. */
+  transition: border-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-card:hover {
+  border-color: var(--ah-line-strong);
 }
 
 .ah-inset {
@@ -80,8 +160,8 @@ body {
   border-radius: var(--ah-shape-lg) var(--ah-shape-lg) 0 var(--ah-shape-lg);
   background: var(--ah-accent-container);
   color: var(--ah-text-1);
-  font-size: 13px;
-  line-height: 19px;
+  font-size: var(--ah-type-body-medium-size);
+  line-height: var(--ah-type-body-medium-line);
   overflow-wrap: break-word;
   /* Official geometry: long turns scroll inside the bubble (310px cap),
      never stretch the timeline. */
@@ -100,14 +180,16 @@ body {
 .ah-assistant-body {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--ah-type-body-medium-size);
+  line-height: var(--ah-type-body-medium-line);
+  letter-spacing: var(--ah-type-body-medium-tracking);
   color: var(--ah-text-1);
 }
 .ah-time-tip {
   opacity: 0;
-  transition: opacity 150ms ease;
-  font-size: 12px;
+  transition: opacity var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
   color: var(--ah-text-3);
 }
 .ah-assistant-row:hover .ah-time-tip,
@@ -118,7 +200,8 @@ body {
 /* Thinking block: tertiary 13px header + 4px left rule, folded by default. */
 .ah-reasoning {
   margin: 2px 0;
-  font-size: 13px;
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
   color: var(--ah-text-3);
   cursor: pointer;
   user-select: none;
@@ -139,14 +222,16 @@ body {
   border-radius: var(--ah-shape-xs);
   border: 1px solid var(--ah-line-strong);
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
 }
 .ah-toolcall-head {
   padding: 8px 12px;
-  line-height: 16px;
+  line-height: var(--ah-type-label-medium-line);
   background: var(--ah-surface-2);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--ah-type-label-medium-size);
+  letter-spacing: var(--ah-type-label-medium-tracking);
+  font-weight: var(--ah-type-label-medium-weight);
   color: var(--ah-text-1);
   display: flex;
   align-items: center;
@@ -163,7 +248,8 @@ body {
 }
 .ah-toolcall-args {
   font-family: var(--ah-font-mono);
-  font-size: 12.5px;
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
   background: var(--ah-code-bg);
   border: 1px solid var(--ah-line);
   border-radius: var(--ah-shape-xs);
@@ -185,31 +271,48 @@ body {
 /* Text tiers ------------------------------------------------------------- */
 .ah-title {
   color: var(--ah-text-1);
-  font-size: 13.5px;
+  font-size: var(--ah-type-title-small-size);
+  line-height: var(--ah-type-title-small-line);
+  letter-spacing: var(--ah-type-title-small-tracking);
+  font-weight: var(--ah-type-title-small-weight);
 }
 
 .ah-label {
   color: var(--ah-text-2);
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  font-size: var(--ah-type-label-medium-size);
+  line-height: var(--ah-type-label-medium-line);
+  letter-spacing: var(--ah-type-label-medium-tracking);
+  font-weight: var(--ah-type-label-medium-weight);
   text-transform: uppercase;
+}
+
+/* The label's size and ink without its case and tracking — for words that are
+   read as words (the brand suffix in the header), not as a field label. Named
+   here rather than overridden inline, so the one place that opts out of the
+   role's tracking is greppable. */
+.ah-label-plain {
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .ah-meta {
   color: var(--ah-text-2);
-  font-size: 12px;
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
 }
 
 .ah-faint {
   color: var(--ah-text-3);
-  font-size: 12px;
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
 }
 
 .ah-num {
   font-family: var(--ah-font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--ah-text-2);
-  font-size: 12px;
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
 }
 
 .ah-accent {
@@ -231,14 +334,18 @@ body {
   align-items: center;
   gap: 4px;
   padding: 1px 7px;
-  border-radius: var(--ah-shape-pill);
+  border-radius: var(--ah-shape-full);
   border: 1px solid var(--ah-cli-border, var(--ah-line-strong));
   background: var(--ah-cli-bg, var(--ah-surface-2));
   color: var(--ah-cli-fg, var(--ah-text-1));
   font-family: var(--ah-font-mono);
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--ah-type-label-medium-size);
+  line-height: var(--ah-type-label-medium-line);
+  letter-spacing: var(--ah-type-label-medium-tracking);
+  font-weight: var(--ah-type-label-medium-weight);
   white-space: nowrap;
+  /* No press/hover motion here on purpose: a chip is a label, not a control.
+     Answering a press it does not act on would be the interface lying. */
 }
 
 .ah-chip-dim {
@@ -263,54 +370,238 @@ body {
   padding: 0 1px;
 }
 
-/* Rows: M3E medium cards with tonal hover -------------------------------- */
+/* Rows: M3 list items with the official state layer and shape morph -------- */
 .ah-row {
+  /* ListTokens.ItemContainerColor is `surface` and a list item carries **no
+     border**: M3 separates rows with space, a state layer and the shape morph,
+     not with a 1px outline and a white fill. The outline is what made 118 rows
+     read as a stack of antd cards rather than as one Material list, and it is
+     the single change that most moved the page away from "themed dashboard".
+     The container still sits one step above the page (`surface-container-low`
+     on `surface`) because a dense list of 118 sessions needs a resting fill to
+     scan; that step is recorded in the deviation register. */
   background: var(--ah-surface-1);
-  border: 1px solid var(--ah-line);
-  border-radius: var(--ah-shape-md);
+  border: 0;
+  /* ListTokens.ItemContainerShape at rest, and the M3E morph: the row widens to
+     corner-medium on hover and corner-large once it is pressed or selected.
+
+     The row *is* a list item, so it takes the list item's measurements as well
+     as its corners — 16px leading and trailing space and a 12px gap between the
+     leading slot and the label (ListTokens.ItemLeadingSpace/-TrailingSpace).
+     An independent review pointed out that the one-line Two-line/Three-line
+     heights and the three type roles lived only in `.ah-li`, which no view in
+     this app emits, so "T4 is done" was a claim about a stylesheet rather than
+     about the product. The corners were already the real rows; these are too. */
+  border-radius: var(--ah-c-list-item-shape-rest);
+  padding-inline: var(--ah-c-list-item-leading-space) var(--ah-c-list-item-trailing-space);
+  gap: var(--ah-c-list-item-gap);
+  min-height: var(--ah-c-list-item-height-one-line);
+  /* `filter`, `color`, `opacity` and `box-shadow` are here too because many rows
+     *are* <button>s: a class shorthand (0,1,0) outranks the element-level
+     pressable rule below (0,0,1), and leaving a property out of this list makes
+     it snap while the rest eases. */
+  transition:
+    background-color var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    border-color var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    transform var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    opacity var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    color var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    box-shadow var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial);
 }
 
+/* Hover is the official state layer: the row's own content colour composited at
+   M3's 8%, *over* the surface it already has — not a different background token.
+   Composed as an inset shadow so no extra DOM is needed.
+
+   The row does not lift, and that is a correction: the previous slice raised a
+   hovered row to elevation 1 on the belief that M3E lifts list rows. ListTokens
+   says a list item is level 0 at rest, and its *dragged* elevation — level 4 —
+   is the only level it ever reaches. What M3E actually does to a hovered list
+   item is widen its corner (extra-small → medium), which is what happens here. */
 .ah-row:hover {
-  background: var(--ah-accent-container);
-  border-color: var(--ah-line-strong);
+  border-radius: var(--ah-c-list-item-shape-hover);
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-hover), transparent);
+}
+
+/* `:not(:disabled)` is not decoration: it lifts this rule to (0,3,0), which is
+   what it takes to beat the element-level `button:active:not(:disabled)`
+   shorthand further down the file at (0,2,1). */
+.ah-row:active:not(:disabled),
+.ah-row[aria-selected="true"] {
+  border-radius: var(--ah-c-list-item-shape-active);
+  /* The generic press scale is for a *control*; an M3 list item answers a press
+     by widening its corner and compositing the 12% layer, and resizing a row
+     full of text would reflow the thing the reader is looking at. */
+  transform: none;
 }
 
 .ah-skeleton {
   background: var(--ah-surface-2);
   border: 1px solid var(--ah-line);
-  border-radius: var(--ah-radius);
+  /* A skeleton stands in for a row, so it takes the row's geometry rather than
+     its own: the list item's rest corner (4px) and one-line height (56px).
+     Measured before: 44px at a 12px corner, standing in for a 56px row at 4 —
+     so the page jumped when the content arrived, which is the one thing a
+     skeleton exists to prevent. The call sites no longer set a height. */
+  border-radius: var(--ah-c-list-item-shape-rest);
+  min-height: var(--ah-c-list-item-height-one-line);
 }
 
-/* Tactile interaction spec: every pressable answers within ~100ms --------- */
+/* Tactile interaction spec: every pressable answers within ~100ms.
+   `opacity` is in the list because an unlayered element rule beats *every*
+   cascade layer regardless of specificity, so this shorthand also decides
+   whether a Tailwind utility such as `transition-opacity` can animate at all
+   on a button. Omit it and the copy button's hover fade snaps. */
 button,
 [role="button"],
 select,
 input[type="range"] {
   transition:
-    transform 120ms ease,
-    filter 120ms ease,
-    background-color 150ms ease,
-    color 150ms ease,
-    border-color 150ms ease,
-    box-shadow 150ms ease;
+    transform var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    /* border-radius is here because the M3E press *is* a radius change on a
+       button: leaving it out would snap the shape while the rest eases. */
+    border-radius var(--ah-dur-fast-spatial) var(--ah-ease-fast-spatial),
+    opacity var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    border-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    box-shadow var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
 }
 
+/* Press is M3's 12% state layer plus the M3E scale, not a brightness filter:
+   `brightness(0.9)` darkens a light surface and lifts a dark one, which is the
+   wrong direction in exactly one of the two themes and is not what M3 specifies. */
 button:active:not(:disabled),
 [role="button"]:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.9);
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-pressed), transparent);
 }
 
 button:disabled {
-  opacity: 0.55;
+  opacity: var(--ah-state-disabled-content);
   cursor: not-allowed;
 }
 
-/* Keyboard focus must be visible on both themes. */
-:focus-visible {
-  outline: 2px solid var(--ah-accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+/* Keyboard focus is material-web's focus ring, not one we drew by eye: 3px of
+   `secondary` at a 2px outward offset, which grows to 8px over the first quarter
+   of `duration-long4` and settles back over the remaining three quarters on the
+   emphasized curve (`focus/internal/_focus-ring.scss`). M3 pairs the ring with
+   the 12% focus layer and does not replace it, so both are here.
+
+   The ring is an `outline` rather than a second `box-shadow`. An outline never
+   affects layout, and it composes with whatever shadow the host already has —
+   material-web draws its ring as a sibling element for the same reason. The one
+   thing `outline` cannot do is grow the corner radius by the outward offset the
+   way the official `calc($end-end + $outward-offset)` does; it follows the host
+   radius exactly. That 2px delta is in `docs/theming.md` rather than hidden.
+
+   Two things here are corrections, and both were measured before they were
+   changed:
+
+   1. No `border-radius`. The first version set `border-radius: 4px` on any
+      focused element, which squared the slider handle's circular ring and
+      squircle-d the radius of three other targets (`.ah-searchbar__input`,
+      `.ant-select-input` ×2) from 0 to 4.
+   2. The `:not(:disabled)` arms. antd's own
+      `:where(.hash).ant-btn:not(:disabled):focus-visible` is (0,3,0) and paints
+      a 3px outline in `--ant-color-primary-border` — a colour its algorithm
+      derives, so `rgb(194, 189, 201)` in *both* themes. It won on 17 of the 49
+      focusable elements the app sweep touches. Matching its specificity here
+      (three pseudo-classes) and sitting later in the document is what makes the
+      official ring the only one on screen; `scripts/audit_component_rules.py
+      --focus` fails if a new antd family arrives without an arm.
+
+   3. The `:has()` arms. A focusable node is often not the box the reader sees: a
+      Select's input measures 132x30 inside a 176x50 chip, a search bar's input
+      280x24 at radius 0 inside a 340x56 pill, and antd's segmented item input is
+      0x0 with `opacity: 0` — the ring was drawn on it and never appeared, while
+      antd's own grey ring showed on the 52x38 item. `:has()` moves both the ring
+      and the layer to the box the reader sees, and stays keyboard-only, because
+      a pointer click focuses an input without matching `:focus-visible` for the
+      controls here that are not text fields.
+
+   4. The `(0,4,0)` arms. antd writes its focus rules with `:where()`, but that
+      only removes the *hash* class from the count: its dropdown item rule is
+      `.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible`,
+      which is (0,4,0), and its Select halo is the same. Measured on a real Tab
+      walk into an open menu: `rgb(194, 189, 201)` — antd's derived colour, on a
+      menu item, while our ring was computed on nothing. The two long arms below
+      match that specificity and sit later in the document; the segmented arm is
+      (0,2,0) against antd's (0,2,0), which is also enough.
+
+   5. The link arm. antd's reset paints `a:focus-visible` at (0,1,1), one class
+      more than the bare `:focus-visible` above, so a Markdown link - the one
+      focusable thing on a rendered message that is not an antd control - kept
+      antd's `rgb(194, 189, 201)` ring at a 1px offset in both themes.
+      `.ah-md a.ah-link:focus-visible` is (0,3,1), so it wins on specificity and
+      does not depend on which of the two stylesheets the runtime injects last. */
+:focus-visible,
+.ant-btn:focus-visible:not(:disabled),
+.ant-switch:focus-visible:not(:disabled),
+.ant-segmented:focus-visible:not(:disabled),
+.ant-slider-handle:focus-visible:not(:disabled),
+.ant-select.ah-select-chip:has(:focus-visible),
+.ah-searchbar:has(:focus-visible),
+.ah-md a.ah-link:focus-visible,
+.ant-segmented .ant-segmented-item-focused,
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:focus-visible,
+/* antd's pagination is (0,4,0) the same way:
+   `:where(.hash).ant-pagination:not(.ant-pagination-disabled)
+   .ant-pagination-item:focus-visible { outline: var(--ant-pagination-line-width-focus)
+   solid var(--ant-color-primary-border); outline-offset: 1px }`. Reached only
+   after this sweep learned to visit a session-detail route: a keyboard user saw
+   `rgb(194, 189, 201)` at 1px on the pager, drawn at whatever width our own
+   grow animation was passing through at the time. */
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-item:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-prev:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-next:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-jump-prev:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-jump-next:focus-visible,
+.ant-pagination:not(.ant-pagination-disabled) .ant-pagination-item-link:focus-visible {
+  outline: var(--ah-c-focus-ring-width) solid var(--ah-c-focus-ring-color);
+  outline-offset: var(--ah-c-focus-ring-outward-offset);
+  animation-name: ah-focus-grow, ah-focus-shrink;
+  animation-duration: calc(var(--ah-c-focus-ring-duration) * 0.25),
+    calc(var(--ah-c-focus-ring-duration) * 0.75);
+  animation-delay: 0s, calc(var(--ah-c-focus-ring-duration) * 0.25);
+  animation-timing-function: var(--ah-c-focus-ring-easing);
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-focus), transparent);
+}
+
+/* The nodes that keep the behaviour and give up the paint. Each is focusable and
+   is not the box the reader sees — antd's segmented input is 0x0 and `opacity: 0`,
+   and the text fields here sit inside a pill that is larger and rounder than they
+   are — so their ring and layer are drawn by the `:has()` arms above. Without
+   this, the segmented item showed *two* rings (ours on a 0x0 box, antd's on the
+   item) and the search bar showed a square-cornered rectangle inside its pill. */
+.ant-segmented-item-input:focus-visible,
+.ah-searchbar input:focus-visible,
+.ant-select.ah-select-chip .ant-select-input:focus-visible {
+  outline: none;
+  animation: none;
+  box-shadow: none;
+}
+
+@keyframes ah-focus-grow {
+  from {
+    outline-width: 0;
+  }
+  to {
+    outline-width: var(--ah-c-focus-ring-active-width);
+  }
+}
+
+/* No `to`: the official shrink animates back to the element's own outline-width,
+   which is the ring's resting width. Keeping the keyframe open is what makes this
+   the published choreography rather than a second guess at the same number. */
+@keyframes ah-focus-shrink {
+  from {
+    outline-width: var(--ah-c-focus-ring-active-width);
+  }
 }
 
 /* View switch + list stagger. */
@@ -325,8 +616,11 @@ button:disabled {
   }
 }
 
+/* A view change is a "fade through": the new surface rises the M3 emphasized
+   way while the old one is gone. medium2 + emphasized-decelerate is the M3
+   pairing for a surface of this size — short durations are for chips. */
 .view-enter {
-  animation: view-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: view-in var(--ah-dur-view-spatial) var(--ah-ease-view-spatial) both;
 }
 
 /* User-authored text (memory-export entries, completeness notes).
@@ -354,9 +648,21 @@ button:disabled {
   }
 }
 
+/* A list reads as a list when its rows arrive in order. The step is ours (M3
+   publishes no stagger token) and it is capped at the eighth row of a list:
+   past that a delay stops being a flourish and becomes a wait. Pure CSS
+   (nth-child), so no component has to know about it. The counter is per <ul>,
+   so a domain-grouped view restarts the rhythm at each group. */
 .row-enter {
-  animation: row-in 160ms ease-out both;
+  animation: row-in var(--ah-dur-default-spatial) var(--ah-ease-default-spatial) both;
 }
+.row-enter:nth-child(2) { animation-delay: calc(var(--ah-motion-stagger-row) * 1); }
+.row-enter:nth-child(3) { animation-delay: calc(var(--ah-motion-stagger-row) * 2); }
+.row-enter:nth-child(4) { animation-delay: calc(var(--ah-motion-stagger-row) * 3); }
+.row-enter:nth-child(5) { animation-delay: calc(var(--ah-motion-stagger-row) * 4); }
+.row-enter:nth-child(6) { animation-delay: calc(var(--ah-motion-stagger-row) * 5); }
+.row-enter:nth-child(7) { animation-delay: calc(var(--ah-motion-stagger-row) * 6); }
+.row-enter:nth-child(8) { animation-delay: calc(var(--ah-motion-stagger-row) * 7); }
 
 @keyframes shimmer {
   0% {
@@ -371,7 +677,25 @@ button:disabled {
 }
 
 .ah-skeleton {
-  animation: shimmer 1.1s ease-in-out infinite;
+  animation: shimmer var(--ah-motion-duration-extra-long4) var(--ah-motion-easing-linear) infinite;
+}
+
+/* Sub-sessions unfolding under a row. The region is conditionally mounted (there
+   is no collapsed height to interpolate), so the arriving container animates on
+   our overshoot curve instead of a grid-template-rows transition. */
+@keyframes expand-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ah-expand {
+  animation: expand-in var(--ah-dur-expand-spatial) var(--ah-ease-expand-spatial) both;
 }
 
 /* Live freshness dot: deliberately NOT animated. A permanently moving element
@@ -385,31 +709,113 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Reduced motion: respect the OS setting, no exceptions. */
+/* Reduced motion: respect the OS setting, no exceptions. Durations collapse
+   *and* the list stagger is zeroed — a delay is a wait even when the animation
+   is instant. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
 }
 
-/* Progress bar for the search index build. */
-.ah-progress {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--ah-surface-2);
-  overflow: hidden;
+/* ── The device's other requests ─────────────────────────────────────────────
+   `prefers-reduced-motion` is handled above. Two more signals a device can send,
+   both measured before they were written:
+
+   **forced-colors: active** (Windows high contrast, and the high-contrast
+   extension). The state layer is an inset `box-shadow`, and this mode forces
+   `box-shadow: none` — measured: every control answered the pointer with
+   `sh: none`, so hover and press produced nothing but the M3E shape morph. The
+   affordance moves to an outline in *system* colours: the brand palette is
+   supposed to disappear in this mode, the feedback is not. Everything else
+   degrades well and was checked rather than assumed — the focus ring survives
+   (`rgb(55, 0, 110) solid 3px at a 2px offset`, the UA's `Highlight`), the tab
+   indicator survives as a 3px system-coloured bar, and a selected segment still
+   differs from an unselected one by its forced fill.
+
+   **prefers-contrast: more.** The palette is already WCAG-AA, so the honest
+   response is not a new palette but stronger *separators*: the border token
+   moves from `outline-variant` to `outline`, which is the published rung above it
+   in both themes (`#cac4d0` → `#79747e` light, `#49454f` → `#938f99` dark). No
+   opacity is invented and the official 8%/12% state layers are left alone. */
+@media (forced-colors: active) {
+  /* The list is every family that carries a state layer, ours *and* antd's: the
+     first version named only `.ah-*` and measured no effect at all, because most
+     buttons in this app are antd `Button`s that never carry the `.ah-` class. */
+  :is(
+      .ah-btn,
+      .ant-btn,
+      .ah-iconbtn,
+      .ant-btn-icon-only,
+      .ah-fab,
+      .ah-mchip,
+      .ah-filterchip,
+      .ah-row,
+      .ah-tab,
+      .ant-segmented-item,
+      .ant-dropdown-menu-item,
+      .ant-switch,
+      .ant-slider-handle,
+      .ah-select-chip,
+      .ant-select.ah-select-chip,
+      .ant-pagination-item,
+      .ant-pagination-prev,
+      .ant-pagination-next,
+      .ant-pagination-jump-prev,
+      .ant-pagination-jump-next
+    ):hover:not(:disabled):not([aria-disabled="true"]) {
+    outline: 1px solid CanvasText;
+    outline-offset: -2px;
+  }
+
+  :is(
+      .ah-btn,
+      .ant-btn,
+      .ah-iconbtn,
+      .ant-btn-icon-only,
+      .ah-fab,
+      .ah-mchip,
+      .ah-filterchip,
+      .ah-row,
+      .ah-tab,
+      .ant-segmented-item,
+      .ant-dropdown-menu-item,
+      .ant-switch,
+      .ant-slider-handle,
+      .ah-select-chip,
+      .ant-select.ah-select-chip,
+      .ant-pagination-item,
+      .ant-pagination-prev,
+      .ant-pagination-next,
+      .ant-pagination-jump-prev,
+      .ant-pagination-jump-next
+    ):active:not(:disabled):not([aria-disabled="true"]) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
-.ah-progress > i {
-  display: block;
-  height: 100%;
-  background: var(--ah-accent);
-  transition: width 250ms ease;
+@media (prefers-contrast: more) {
+  /* `html:root[data-theme]` is (0,2,1) against the injected `:root[data-theme="…"]`
+     at (0,2,0), and the injected stylesheet is appended at runtime — so a plain
+     `:root` rule here loses twice. */
+  html:root[data-theme] {
+    --ah-line: var(--ah-line-strong);
+  }
+}
+
+/* The budget gauge is the same "surface resizing" case as the progress bar: the
+   fill is sized inline by React, so easing the width is what makes a sampling
+   update read as the gauge moving rather than jumping between two numbers. */
+.ah-gauge-fill {
+  transition: width var(--ah-dur-default-spatial) var(--ah-ease-default-spatial);
 }
 
 /* ── Responsive rules ───────────────────────────────────────────────────────
@@ -419,19 +825,16 @@ html {
 
 .ah-shell {
   display: grid;
-  gap: 12px;
   grid-template-columns: 1fr;
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  padding: 12px;
+  /* gap and padding live in m3.css, off the M3 spacing scale. */
 }
 
 @media (min-width: 1200px) {
   .ah-shell {
     grid-template-columns: minmax(0, 1fr) 400px;
-    padding: 16px;
-    gap: 16px;
   }
 }
 
@@ -494,7 +897,9 @@ html {
 }
 
 /* ---- Rich markdown in transcripts (agent-grade rendering) ---- */
-.ah-md { font-size: 13px; line-height: 1.65; word-break: break-word;
+.ah-md { font-size: var(--ah-type-body-medium-size);
+  line-height: var(--ah-type-body-medium-line);
+  letter-spacing: var(--ah-type-body-medium-tracking); word-break: break-word;
   /* L3 layout rules: UAX #14 kinsoku (no CJK punctuation leading a line),
      long unbreakable tokens wrap instead of clipping, and an RTL span
      cannot reorder the surrounding line (bidi isolation). */
@@ -503,17 +908,18 @@ html {
 .ah-md > *:last-child { margin-bottom: 0; }
 .ah-md p { margin: 0.4em 0; }
 .ah-md h1, .ah-md h2, .ah-md h3, .ah-md h4 {
-  margin: 0.8em 0 0.4em; font-weight: 600; line-height: 1.35;
+  margin: 0.8em 0 0.4em; font-weight: var(--ah-type-label-large-weight); line-height: 1.35;
   color: var(--ah-text-1);
 }
-.ah-md h1 { font-size: 1.12em; } .ah-md h2 { font-size: 1.06em; }
-.ah-md h3, .ah-md h4 { font-size: 1em; }
+.ah-md h1 { font-size: var(--ah-type-title-medium-size); line-height: var(--ah-type-title-medium-line); }
+.ah-md h2 { font-size: var(--ah-type-label-large-size); }
+.ah-md h3, .ah-md h4 { font-size: var(--ah-type-label-large-size); }
 .ah-md ul, .ah-md ol { margin: 0.4em 0; padding-left: 1.4em; }
 .ah-md ul { list-style: disc; } .ah-md ol { list-style: decimal; }
 .ah-md li { margin: 0.15em 0; }
 .ah-md li > p { margin: 0.2em 0; }
 .ah-md a.ah-link { color: var(--ah-accent); text-decoration: underline; text-underline-offset: 2px; }
-.ah-md strong { color: var(--ah-text-1); font-weight: 600; }
+.ah-md strong { color: var(--ah-text-1); font-weight: var(--ah-type-label-large-weight); }
 .ah-md blockquote {
   margin: 0.5em 0; padding: 0.2em 0.8em; border-left: 3px solid var(--ah-line-strong);
   color: var(--ah-text-2);
@@ -521,9 +927,9 @@ html {
 .ah-md hr { border: 0; border-top: 1px solid var(--ah-line); margin: 0.8em 0; }
 .ah-md del { color: var(--ah-text-3); }
 /* GFM tables */
-.ah-md table { border-collapse: collapse; margin: 0.6em 0; font-size: 12.5px; display: block; overflow-x: auto; max-width: 100%; }
+.ah-md table { border-collapse: collapse; margin: 0.6em 0; font-size: var(--ah-type-body-small-size); display: block; overflow-x: auto; max-width: 100%; }
 .ah-md th, .ah-md td { border: 1px solid var(--ah-line); padding: 4px 9px; text-align: left; }
-.ah-md th { background: var(--ah-surface-2); color: var(--ah-text-1); font-weight: 600; }
+.ah-md th { background: var(--ah-surface-2); color: var(--ah-text-1); font-weight: var(--ah-type-label-large-weight); }
 .ah-md tbody tr:nth-child(even) { background: color-mix(in srgb, var(--ah-surface-2) 45%, transparent); }
 /* Inline code */
 .ah-md :not(pre) > code {
@@ -533,7 +939,16 @@ html {
 /* Code block shell */
 .ah-codeblock pre { background: var(--ah-code-bg); border: 1px solid var(--ah-line); margin: 0; }
 .ah-copybtn { background: var(--ah-surface-2); border: 1px solid var(--ah-line-strong); color: var(--ah-text-2); }
-.ah-copybtn:hover { color: var(--ah-text-1); border-color: var(--ah-accent); }
+/* Tailwind's `rounded-full` is `calc(infinity * 1px)` in v4, which is a literal
+   our shape gate cannot see and the browser reports as 33554432px; this class is
+   the same circle made of `--ah-shape-full`. */
+.ah-round { border-radius: var(--ah-shape-full); }
+.ah-copybtn:hover {
+  color: var(--ah-text-1);
+  border-color: var(--ah-accent);
+  box-shadow: inset 0 0 0 9999px
+    color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-hover), transparent);
+}
 /* Syntax theme base: highlight.js github-dark is imported; tune its backdrop
    to our code surface and brighten it for the light theme. */
 /* Dark theme uses the imported github-dark palette; for light we re-map the

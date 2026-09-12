@@ -32,11 +32,12 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
     <div className="ah-codeblock group/code relative my-2">
       <button
         onClick={copy}
-        className="ah-copybtn absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 font-mono text-[11px] opacity-0 transition-opacity group-hover/code:opacity-100"
+        aria-label={t("copy")}
+        className="ah-copybtn absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 font-mono text-[11px] opacity-0 transition-opacity group-hover/code:opacity-100 group-focus-within/code:opacity-100 focus:opacity-100"
       >
         {t("copy")}
       </button>
-      <pre ref={ref} className="overflow-x-auto rounded-md p-3 text-[12.5px] leading-relaxed">
+      <pre ref={ref} className="overflow-x-auto rounded-md p-3 text-[12px] leading-relaxed">
         {children}
       </pre>
     </div>

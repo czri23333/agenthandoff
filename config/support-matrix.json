@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-09",
+  "generated": "2026-09-12",
   "rows": [
     {
       "cli": "zcode",
@@ -30,7 +30,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "no Claude Code store on the machine that built the fixtures (`~/.claude/projects`); run `python scripts/sanitize_fixtures.py --cli claude` where one exists"
+      ]
     },
     {
       "cli": "codebuddy",
@@ -62,7 +64,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "no CN CodeBuddy store here (`~/.codebuddy` is the international one); the parser is pinned to CodeBuddy's shape by `tests/test_edition_parity.py`, and `python scripts/sanitize_fixtures.py --cli codebuddy-cn` closes it on a machine with the CN store"
+      ]
     },
     {
       "cli": "qoderwork",
@@ -115,7 +119,7 @@
     },
     {
       "cli": "qoder-ide",
-      "store": "unknown",
+      "store": "Electron leveldb",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -126,7 +130,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "Qoder IDE keeps sessions in an Electron leveldb and this machine has no session files on disk; run `python scripts/sanitize_fixtures.py --cli qoder-ide` where the IDE has been used"
+      ]
     },
     {
       "cli": "qwenwork",
@@ -145,18 +151,20 @@
     },
     {
       "cli": "workbuddy",
-      "store": "unknown",
+      "store": "JSONL dir + SQLite title index",
       "reader": true,
-      "fixtures": 0,
-      "fixture_sessions": 0,
-      "fixture_messages": 0,
-      "fixture_ok": false,
+      "fixtures": 23,
+      "fixture_sessions": 14,
+      "fixture_messages": 586,
+      "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,
-      "conformance": false,
+      "conformance": true,
       "empty_store": false,
-      "status": "unverified",
-      "notes": []
+      "status": "stable",
+      "notes": [
+        "record-sampled"
+      ]
     },
     {
       "cli": "dsh",
@@ -209,7 +217,7 @@
     },
     {
       "cli": "opencode",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -220,11 +228,13 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "no OpenCode store here and its storage layout is undocumented upstream; run `python scripts/sanitize_fixtures.py --cli opencode` with a store present, then record what the layout turned out to be"
+      ]
     },
     {
       "cli": "qoderwake",
-      "store": "unknown",
+      "store": "SQLite daemon store + shared JSONL",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -235,26 +245,28 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "the shared `~/.qoder/projects` store reads fine but holds 0 transcript files (the CN sibling has 132 and is proven, which is why the parser is pinned by `tests/test_edition_parity.py`); run `python scripts/sanitize_fixtures.py --cli qoderwake` once it holds a session"
+      ]
     },
     {
       "cli": "qoderwake-cn",
-      "store": "unknown",
+      "store": "SQLite daemon store + shared JSONL",
       "reader": true,
-      "fixtures": 0,
-      "fixture_sessions": 0,
-      "fixture_messages": 0,
-      "fixture_ok": false,
+      "fixtures": 11,
+      "fixture_sessions": 8,
+      "fixture_messages": 21,
+      "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,
-      "conformance": false,
+      "conformance": true,
       "empty_store": false,
-      "status": "unverified",
+      "status": "stable",
       "notes": []
     },
     {
       "cli": "qoderwork-app",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 1,
@@ -269,7 +281,7 @@
     },
     {
       "cli": "qoderwork-cn-app",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 2,
@@ -284,7 +296,7 @@
     },
     {
       "cli": "qwenwork-app",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 0,
       "fixture_sessions": 0,
@@ -295,11 +307,13 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "the store exists (`AppData/Roaming/QwenWorkCN/data/agents.db`) and is readable, but holds 0 message rows, so there is nothing to sample and the honest result is shape-only at best; re-run `python scripts/sanitize_fixtures.py --cli qwenwork-app` after it has been used"
+      ]
     },
     {
       "cli": "cherrystudio",
-      "store": "unknown",
+      "store": "SQLite (read-only URI)",
       "reader": true,
       "fixtures": 2,
       "fixture_sessions": 3,

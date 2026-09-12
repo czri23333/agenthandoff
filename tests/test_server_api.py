@@ -10,6 +10,9 @@ shape decisions that exist for honesty/REST reasons:
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import pytest
 
 # Guard before import: without the [server] extra this module must skip, not fail
@@ -270,3 +273,244 @@ def test_sessions_delta_and_etag(client, monkeypatch):
     d = client.get("/api/sessions", params={"since": "2026-06-01T00:00:00+00:00"}).json()
     assert sorted(d.keys()) == ["changed", "snapshot"]
     assert [s["session_id"] for s in d["changed"]] == ["s-new"]
+
+
+# ── The list cache: one build at a time, and a stale answer beats a queue ────
+#
+# Measured on the maintainer's machine before this: a cold build was 5.7s of CPU
+# over 802 metas, the frontend polls every 30s per open tab, and nothing stopped
+# two requests from building at once. A handful of tabs kept several builds in
+# flight, the thread pool saturated, and `/api/stores` — which does nothing —
+# took 8.7s to answer while `/api/sessions` timed out at 150s.
+
+
+@pytest.fixture
+def clean_session_cache():
+    from agent_handoff.server import app as A
+
+    A._sessions_cache.clear()
+    A._sessions_locks.clear()
+    yield A
+    A._sessions_cache.clear()
+    A._sessions_locks.clear()
+
+
+def test_concurrent_callers_share_one_session_build(clean_session_cache, monkeypatch):
+    import threading
+
+    A = clean_session_cache
+    calls: list[int] = []
+
+    def slow_build(cli, cwd, q):
+        calls.append(1)
+        time.sleep(0.3)
+        return [{"cli": "zcode", "session_id": "s1"}]
+
+    monkeypatch.setattr(A, "_build_session_roots", slow_build)
+    results: list[list] = []
+
+    def worker():
+        results.append(A._session_roots(None, None, None))
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1, f"expected one build, got {len(calls)}"
+    assert results and all(r == results[0] for r in results)
+    assert results[0] == [{"cli": "zcode", "session_id": "s1"}]
+
+
+def test_a_stale_list_answers_while_the_refresh_is_still_running(
+    clean_session_cache, monkeypatch
+):
+    import threading
+
+    A = clean_session_cache
+    stale = [{"cli": "zcode", "session_id": "old"}]
+    A._sessions_cache["None|None|None"] = (
+        time.monotonic() - A._CACHE_TTL - 1.0,
+        stale,
+    )
+    calls: list[int] = []
+
+    def slow_build(cli, cwd, q):
+        calls.append(1)
+        time.sleep(0.5)
+        return [{"cli": "zcode", "session_id": "new"}]
+
+    monkeypatch.setattr(A, "_build_session_roots", slow_build)
+    refresh = threading.Thread(target=lambda: A._session_roots(None, None, None))
+    refresh.start()
+    time.sleep(0.08)  # let the refreshing caller take the lock
+
+    started = time.perf_counter()
+    answer = A._session_roots(None, None, None)
+    elapsed = time.perf_counter() - started
+    refresh.join()
+
+    assert answer == stale, "a second caller should be served the cached list"
+    assert elapsed < 0.2, f"it waited {elapsed:.2f}s for someone else's build"
+    assert len(calls) == 1, f"expected one refresh, got {len(calls)}"
+
+
+# ── The thread view: an answer, with a number attached ──────────────────────
+#
+# Clustering needs each session's touched files, which costs one full `load()`
+# per session: measured 189ms each over 802 sessions, ~150s, and the view sat on
+# "clustering…" for two minutes because of it. The pass now runs under a budget
+# and reports what it covered, so these two tests are about the budget and the
+# increment, not about the clustering algorithm.
+
+
+def test_threads_respect_the_time_budget_and_say_what_they_covered(
+    client, monkeypatch, clean_session_cache
+):
+    from agent_handoff import model as M
+    from agent_handoff.server import app as A
+
+    A._threads_cache.clear()
+    A._files_cache.clear()
+    monkeypatch.setattr(A, "_THREADS_BUDGET", 0.25)
+
+    metas = [
+        M.SessionMeta(
+            cli="zcode",
+            session_id=f"s{i:02d}",
+            title=f"task {i}",
+            cwd="D:/d",
+            updated_at=f"2026-09-{i + 1:02d}T00:00:00+00:00",
+        )
+        for i in range(20)
+    ]
+    loads: list[str] = []
+
+    class SlowParser:
+        cli = "zcode"
+
+        def list_sessions(self):
+            return metas
+
+        def load(self, sid):
+            loads.append(sid)
+            time.sleep(0.05)
+            return None  # no files; the point here is the cost, not the content
+
+        def peek_status(self, sid):
+            return None
+
+        def peek_needs_reply(self, sid):
+            return None
+
+    monkeypatch.setattr(A, "all_parsers", lambda: [SlowParser()])
+    monkeypatch.setattr(A, "build_threads", lambda nodes, **kw: [])
+
+    body = client.get("/api/threads").json()
+    coverage = body["coverage"]
+    assert coverage["sessions"] == 20
+    assert 0 < coverage["with_files"] < 20, coverage
+    assert coverage["budget_hit"] is True
+    assert coverage["seconds"] <= 2.0, coverage
+    first_batch = list(loads)
+    assert len(first_batch) == coverage["with_files"]
+
+    # The second call pays only for what it had not read yet: the first batch is
+    # cached, so `loads` grows by another batch rather than repeating the first.
+    more = client.get("/api/threads/refresh").json()["coverage"]
+    assert more["with_files"] > coverage["with_files"], (coverage, more)
+    assert loads[: len(first_batch)] == first_batch
+
+
+def test_threads_reuse_the_file_cache_across_calls(client, monkeypatch, clean_session_cache):
+    from agent_handoff import model as M
+    from agent_handoff.server import app as A
+
+    A._threads_cache.clear()
+    A._files_cache.clear()
+    metas = [
+        M.SessionMeta(
+            cli="zcode", session_id="s1", title="t", cwd="D:/d",
+            updated_at="2026-09-01T00:00:00+00:00",
+        )
+    ]
+    loads: list[str] = []
+
+    class TinyParser:
+        cli = "zcode"
+
+        def list_sessions(self):
+            return metas
+
+        def load(self, sid):
+            loads.append(sid)
+            return None
+
+        def peek_status(self, sid):
+            return None
+
+        def peek_needs_reply(self, sid):
+            return None
+
+    monkeypatch.setattr(A, "all_parsers", lambda: [TinyParser()])
+    monkeypatch.setattr(A, "build_threads", lambda nodes, **kw: [])
+    client.get("/api/threads")
+    assert loads == ["s1"]
+    client.get("/api/threads/refresh")
+    assert loads == ["s1"], "a second pass must not re-read a cached session"
+
+
+def test_git_info_reads_head_instead_of_spawning_git(tmp_path):
+    """The branch is a line in `.git/HEAD`; the old code spawned two processes."""
+    from agent_handoff.server import app as A
+
+    repo = tmp_path / "plain"
+    (repo / ".git" / "refs" / "heads").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    assert A._git_info_from_files(str(repo)) == {"branch": "main"}
+
+    # A linked worktree: `.git` is a file, and `commondir` points at the host.
+    host = tmp_path / "host"
+    (host / ".git" / "worktrees" / "wt1").mkdir(parents=True)
+    (host / ".git" / "worktrees" / "wt2").mkdir(parents=True)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    gitfile = wt / ".git"
+    gitfile.write_text(
+        f"gitdir: {(host / '.git' / 'worktrees' / 'wt1').as_posix()}\n",
+        encoding="utf-8",
+    )
+    (host / ".git" / "worktrees" / "wt1" / "HEAD").write_text(
+        "ref: refs/heads/feature/x\n", encoding="utf-8"
+    )
+    (host / ".git" / "worktrees" / "wt1" / "commondir").write_text(
+        "../..\n", encoding="utf-8"
+    )
+    assert A._git_info_from_files(str(wt)) == {
+        "branch": "feature/x",
+        "worktree_count": 3,
+    }
+
+    # Detached HEAD answers exactly what `git branch --show-current` answers.
+    detached = tmp_path / "detached"
+    (detached / ".git").mkdir(parents=True)
+    (detached / ".git" / "HEAD").write_text(
+        "0123456789abcdef0123456789abcdef01234567\n", encoding="utf-8"
+    )
+    assert A._git_info_from_files(str(detached)) == {}
+
+    # Shapes the fast path declines, so `git` still gets asked.
+    assert A._git_info_from_files(str(tmp_path / "missing")) == {}
+    assert A._git_info_from_files("relative/path") == {}
+    packed = tmp_path / "packed"
+    (packed / ".git").mkdir(parents=True)
+    (packed / ".git" / "HEAD").write_text("ref: refs/tags/v1\n", encoding="utf-8")
+    assert A._git_info_from_files(str(packed)) is None
+
+    # And on this repository: the shape is understood (not declined), and if it
+    # names a branch that branch is a non-empty string.
+    here = A._git_info_from_files(str(Path(__file__).resolve().parent.parent))
+    assert here is not None
+    if "branch" in here:
+        assert here["branch"]

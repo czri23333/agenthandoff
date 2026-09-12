@@ -195,6 +195,16 @@ def main(argv: list[str] | None = None) -> int:
     gaps = unproven_clis()
     if gaps:
         print(f"unproven readers (no fixture): {', '.join(gaps)}")
+        # A gap that does not say why it is a gap costs the next reader the whole
+        # investigation. `matrix.UNPROVEN` carries the reason and the command;
+        # `tests/test_reader_lockstep.py` fails if one of them is missing.
+        by_cli = {row.cli: row for row in rows}
+        for cli in gaps:
+            reason = next(
+                (note for note in by_cli.get(cli, matrix.Row(cli, "", False)).notes), ""
+            )
+            if reason:
+                print(f"    {cli}: {reason}")
     if problems:
         print("Run `python -m agent_handoff.evidence --write` and commit the diff.")
         return 1

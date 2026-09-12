@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Segmented, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Segmented, Table, Tooltip, Typography } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import {
   api,
@@ -8,7 +8,15 @@ import {
   type SessionDetail as Detail,
   type TranscriptMessage,
 } from "../api";
-import { Bullets, CliBadge, CopyButton, InterruptionBanner, SectionCard, StatusTag } from "../components";
+import {
+  Bullets,
+  CliBadge,
+  CopyButton,
+  InterruptionBanner,
+  SectionCard,
+  StatusChip,
+  StatusTag,
+} from "../components";
 import { Markdown } from "../Markdown";
 import { BudgetGauge, TokenBars, TurnTimeline, type ChartLabels } from "../charts";
 import { formatNum, useT } from "../i18n";
@@ -92,6 +100,12 @@ function TranscriptRow({
   const shown = showRaw && m.raw_text ? m.raw_text : text;
   // Elapsed-time cost proxy (store clocks): "3.2s" when the store kept no
   // token billing for this turn. Verifiable, never estimated.
+  // Render rule #7: the official message area carries **no billing**. The
+  // measured duration is still available — it rides the row's hover tip and the
+  // model chip's title, which is where the asar-derived rule puts usage
+  // ("usage = header waterlevel hover") — but it is no longer a chip standing
+  // in the transcript. It used to be: `⏱ 1.2s` sat beside every assistant
+  // message that had no token rows, which is the deviation this closes.
   const durTip =
     typeof m.dur_ms === "number"
       ? m.dur_ms < 1000
@@ -135,14 +149,6 @@ function TranscriptRow({
       {!hasTokens && !hasCredits && hasEst ? (
         <span className="ah-faint">≈{m.tokens_estimated}</span>
       ) : null}
-      {!hasTokens && !hasCredits && !hasEst && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
-    </span>
-  ) : durTip ? (
-    <span
-      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-      title={`no model/token billing in store · measured +${durTip}`}
-    >
-      <span className="ah-faint">⏱ {durTip}</span>
     </span>
   ) : null;
 
@@ -204,9 +210,6 @@ function TranscriptRow({
                 {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
                 {!hasTokens && !hasCredits && hasEst ? (
                   <span className="ah-faint">≈{m.tokens_estimated}</span>
-                ) : null}
-                {!hasTokens && !hasCredits && !hasEst && durTip ? (
-                  <span className="ah-faint">⏱ {durTip}</span>
                 ) : null}
               </span>
             ) : null}
@@ -318,7 +321,7 @@ function TranscriptRow({
         <div className="mb-1 flex items-center gap-1.5">
           <span className="ah-label flex select-none items-center" style={{ textTransform: "none" }}>
             {expert?.avatar ? (
-              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 rounded-full align-[-2px]" loading="lazy" />
+              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 ah-round align-[-2px]" loading="lazy" />
             ) : (
               <span className="mr-1">🤖</span>
             )}
@@ -484,8 +487,13 @@ export default function SessionDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* agent identity bar — the thing that used to be 1.1:1 contrast */}
-      <div className="ah-bar flex flex-wrap items-center gap-3 px-5 py-2.5">
+      {/* agent identity bar — the thing that used to be 1.1:1 contrast.
+          DockedToolbarTokens: a 64dp `surface-container` strip, corner-none,
+          16dp leading and trailing. It was a `.ah-bar` (a 1px rule on a
+          *different* surface), which made the app bar and this row two stacked
+          bars with different fills; on the same container they read as one
+          two-line header, which is what a large M3 app bar is. */}
+      <div className="ah-docked-toolbar ah-detailbar">
         <Button type="text" size="small" onClick={onBack}>
           ← {t("back")}
         </Button>
@@ -564,7 +572,7 @@ export default function SessionDetail({
               <div className="mt-2 space-y-1.5 border-t border-[var(--ah-line)] pt-2">
                 <span className="ah-label">{t("topicSegments")}</span>
                 {b.topics.map((tp, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[12.5px]">
+                  <div key={i} className="flex items-start gap-2 text-[12px]">
                     <span className="ah-inset min-w-[20px] px-1 text-center font-mono text-[12px]">{i + 1}</span>
                     <span className="min-w-0 flex-1 text-[var(--ah-text-1)]">{tp.opener}</span>
                     <span className="ah-faint shrink-0 font-mono">
@@ -679,7 +687,7 @@ export default function SessionDetail({
                 moreLabel={t("showMore")}
                 row={(m, i) =>
                   m.role === "compaction" ? (
-                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12px]">
                       <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
                       <span className="ah-meta">{m.text}</span>
                     </li>
@@ -787,14 +795,12 @@ export default function SessionDetail({
                       render: (v: string | null, r) =>
                         r.error ? (
                           <Tooltip title={r.error}>
-                            <Tag color="red" className="mr-0!">
-                              {v ?? "error"}
-                            </Tag>
+                            <StatusChip tone="err">{v ?? "error"}</StatusChip>
                           </Tooltip>
                         ) : (
-                          <Tag color={v === "completed" ? "green" : undefined} className="mr-0!">
+                          <StatusChip tone={v === "completed" ? "ok" : "neutral"}>
                             {v ?? "—"}
-                          </Tag>
+                          </StatusChip>
                         ),
                     },
                     {
@@ -813,9 +819,7 @@ export default function SessionDetail({
                         v == null || v === 0 ? (
                           <span className="ah-faint">{v ?? "—"}</span>
                         ) : (
-                          <Tag color="red" className="mr-0!">
-                            {v}
-                          </Tag>
+                          <StatusChip tone="err">{v}</StatusChip>
                         ),
                     },
                     {
@@ -855,23 +859,29 @@ export default function SessionDetail({
                 />
               </span>
             }
-            extra={
-              <span className="flex items-center gap-1.5">
-                <Button
-                  size="small"
-                  href={api.rawUrl(cli, sid)}
-                  target="_blank"
-                  title={t("rawArchiveTitle")}
-                >
-                  {t("downloadRaw")}
-                </Button>
-                <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
-                  {t("downloadBrief")}
-                </Button>
-                <CopyButton text={shownBrief} label={t("copyBrief")} />
-              </span>
-            }
           >
+            {/* The three transport actions used to live in the card's `extra`,
+                beside a title that already carried the 摘要/全文 switch. The rail
+                is 400px wide and the two groups came to ~450px, so antd's
+                single-row head painted them on top of each other — measured: the
+                `.zip` button (x 1081–1187) over the segmented control (x
+                1109–1213) and over the title. M3's card header carries a title
+                and one trailing affordance; the actions that operate on the body
+                belong in the body, where they can also wrap on a narrower rail. */}
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <Button
+                size="small"
+                href={api.rawUrl(cli, sid)}
+                target="_blank"
+                title={t("rawArchiveTitle")}
+              >
+                {t("downloadRaw")}
+              </Button>
+              <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
+                {t("downloadBrief")}
+              </Button>
+              <CopyButton text={shownBrief} label={t("copyBrief")} />
+            </div>
             {briefMode === "full" && fullBrief && (
               <div className="ah-faint mb-1.5 font-mono text-[11px]">
                 {t("fullBriefMeta")
@@ -913,7 +923,7 @@ export default function SessionDetail({
                   </p>
                 )}
                 {launcher.kind === "unverified" && (
-                  <p className="ah-warn mb-0 text-[12.5px]">{t("unverifiedHint")}</p>
+                  <p className="ah-warn mb-0 text-[12px]">{t("unverifiedHint")}</p>
                 )}
               </div>
             ) : (
@@ -960,9 +970,9 @@ export default function SessionDetail({
               )}
               {meta.permission && (
                 <Descriptions.Item label={t("permission")}>
-                  <Tag color={meta.permission === "yolo" ? "red" : "blue"} className="mr-0 font-mono!">
+                  <StatusChip tone={meta.permission === "yolo" ? "warn" : "accent"}>
                     {meta.permission}
-                  </Tag>
+                  </StatusChip>
                 </Descriptions.Item>
               )}
               {meta.parent_session_id && (
