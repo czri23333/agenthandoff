@@ -1014,6 +1014,117 @@ def run_dialog_sweep(page, base: str, theme: str) -> dict:
     }
 
 
+def run_snackbar_sweep(page, base: str, theme: str) -> dict:
+    """Read the snackbar's transition in both phases, while each is running.
+
+    The gallery raises one `message.success` on mount, so the appear phase is
+    there to read; the leave phase needs waiting for antd's own 3s timer, which is
+    the only way to see the curve a reader gets when it is dismissed.
+    """
+
+    page.goto(f"{base}?theme={theme}", wait_until="domcontentloaded")
+    page.wait_for_selector(".ant-message-notice", state="attached", timeout=8000)
+    page.wait_for_timeout(120)
+    tokens = page.evaluate(
+        """() => {
+      const s = getComputedStyle(document.documentElement);
+      return {
+        enter: s.getPropertyValue('--ah-motion-duration-medium2').trim(),
+        enterCurve: s.getPropertyValue('--ah-motion-easing-emphasized-decelerate').trim(),
+        leave: s.getPropertyValue('--ah-motion-duration-short4').trim(),
+        leaveCurve: s.getPropertyValue('--ah-motion-easing-emphasized-accelerate').trim(),
+      };
+    }"""
+    )
+    read = """() => {
+      const notice = document.querySelector('.ant-message-notice');
+      if (!notice) return null;
+      const cs = getComputedStyle(notice);
+      const split = (text) => {
+        const out = []; let depth = 0; let current = '';
+        for (const ch of text) {
+          if (ch === '(') depth += 1;
+          if (ch === ')') depth -= 1;
+          if (ch === ',' && depth === 0) { out.push(current.trim()); current = ''; continue; }
+          current += ch;
+        }
+        if (current.trim()) out.push(current.trim());
+        return out;
+      };
+      const props = split(cs.transitionProperty);
+      const opacity = props.indexOf('opacity');
+      return {
+        cls: String(notice.className),
+        property: props[opacity] || null,
+        duration: split(cs.transitionDuration)[opacity] || null,
+        timing: split(cs.transitionTimingFunction)[opacity] || null,
+      };
+    }"""
+    appear = page.evaluate(read)
+    # antd's own timer dismisses it; poll for the leave class rather than
+    # guessing a duration.
+    leave = None
+    for _ in range(40):
+        page.wait_for_timeout(150)
+        candidate = page.evaluate(read)
+        if candidate and "leave" in candidate["cls"]:
+            leave = candidate
+            break
+    return {
+        "rows": [
+            {
+                "label": "snackbar",
+                "theme": theme,
+                "tokens": tokens,
+                "appear": appear,
+                "leave": leave,
+            }
+        ]
+    }
+
+
+def snackbar_defects(rows: list[dict]) -> list[str]:
+    """Both phases have to run on the published system tokens, not antd's curve."""
+
+    defects: list[str] = []
+    for row in rows:
+        where = f"snackbar ({row['theme']})"
+        tokens = row.get("tokens") or {}
+        for phase, duration_key, curve_key in (
+            ("appear", "enter", "enterCurve"),
+            ("leave", "leave", "leaveCurve"),
+        ):
+            seen = row.get(phase)
+            if not seen:
+                defects.append(
+                    f"{where}: the {phase} phase was never observed, so the snackbar's "
+                    f"{phase} curve is unmeasured"
+                )
+                continue
+            if seen.get("property") != "opacity":
+                defects.append(
+                    f"{where}: nothing transitions the {phase} opacity "
+                    f"(property list has {seen.get('property')!r})"
+                )
+                continue
+            expected = str(tokens.get(duration_key, "")).strip()
+            measured = str(seen.get("duration", "")).strip()
+            if expected:
+                got, want = _seconds(measured), _seconds(expected)
+                if got is None or want is None or got != want:
+                    defects.append(
+                        f"{where}: the {phase} takes {measured}, but the token says "
+                        f"{expected}"
+                    )
+            curve = str(tokens.get(curve_key, "")).strip()
+            timing = str(seen.get("timing", "")).strip()
+            if curve and " ".join(timing.split()) != " ".join(curve.split()):
+                defects.append(
+                    f"{where}: the {phase} runs on {timing!r}, not {curve_key} {curve!r}"
+                )
+    return defects
+
+
 def dialog_defects(rows: list[dict]) -> list[str]:
     """Both springs: the published curve, the published duration, actually running."""
 
@@ -2888,12 +2999,15 @@ def main() -> int:
             disabled: dict = {"rows": [], "examined": 0}
             morph: dict = {"rows": []}
             dialogs: dict = {"rows": []}
+            snacks: dict = {"rows": []}
             if args.morph and not args.app_only:
                 for theme in ("light", "dark"):
                     found_morph = run_morph_sweep(page, base, theme)
                     morph["rows"].extend(found_morph["rows"])
                     found_dialog = run_dialog_sweep(page, base, theme)
                     dialogs["rows"].extend(found_dialog["rows"])
+                    found_snack = run_snackbar_sweep(page, base, theme)
+                    snacks["rows"].extend(found_snack["rows"])
             if args.disabled and not args.app_only:
                 for theme in ("dark", "light"):
                     found = run_disabled_sweep(page, base, theme)
@@ -3014,7 +3128,11 @@ def main() -> int:
     eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
     morph_failures = morph_defects(morph["rows"]) if args.morph else []
     if args.morph:
-        morph_failures = [*morph_failures, *dialog_defects(dialogs["rows"])]
+        morph_failures = [
+            *morph_failures,
+            *dialog_defects(dialogs["rows"]),
+            *snackbar_defects(snacks["rows"]),
+        ]
     eclipse_read = len(
         {r["label"] for r in eclipses["rows"] if r.get("computed") is not None}
     )
@@ -3124,6 +3242,16 @@ def main() -> int:
                         }
                         for r in dialogs["rows"]
                     ],
+                    "snackbars": [
+                        {
+                            "theme": r["theme"],
+                            "appear_duration": (r.get("appear") or {}).get("duration"),
+                            "appear_curve": (r.get("appear") or {}).get("timing"),
+                            "leave_duration": (r.get("leave") or {}).get("duration"),
+                            "leave_curve": (r.get("leave") or {}).get("timing"),
+                        }
+                        for r in snacks["rows"]
+                    ],
                 },
                 "focus_sweep": {
                     "enabled": args.focus,
@@ -3221,7 +3349,9 @@ def main() -> int:
             f"{len({r['theme'] for r in morph['rows']})} themes; every corner at "
             "rest, while held and after release equals the shape token it names, "
             "and every move runs on the M3E spatial curve. Dialog enter and exit "
-            f"were read while running in {len(dialogs['rows'])} theme(s)."
+            f"were read while running in {len(dialogs['rows'])} theme(s), and so "
+            f"were the snackbar's appear and leave transitions "
+            f"({len(snacks['rows'])} theme(s))."
         )
     if app_allowed:
         print(

@@ -248,6 +248,18 @@ the node at about 240ms and a check that waits for the exit would find nothing t
 compare. antd's own zoom classes are present in the DOM and compute
 `animation-name: none`, so the two systems are not fighting over the panel.
 
+The snackbar is the one surface where the motion is **ours by necessity**:
+`SnackbarTokens.kt` publishes no duration or easing, so what a reader saw was
+antd's `0.2s` on `cubic-bezier(0.645, 0.045, 0.355, 1)`. It now appears on the
+system token `--ah-motion-duration-medium2` (300ms) with
+`--ah-motion-easing-emphasized-decelerate`, and leaves on
+`--ah-motion-duration-short4` (200ms) with
+`--ah-motion-easing-emphasized-accelerate` 鈥?a surface that arrives and is
+dismissed. Which pair to spend is a judgement M3 does not make for us, so the
+register below records it, and `--morph` asserts the computed transition of both
+phases against those tokens: `0.3s` + `cubic-bezier(0.05, 0.7, 0.1, 1)` to
+appear, `0.2s` + `cubic-bezier(0.3, 0, 0.8, 0.15)` to leave, in both themes.
+
 ### Where this deliberately differs from Google
 
 "Official" needs a "where we differ, and why" beside it, or the next reader has to
@@ -980,3 +992,5 @@ change at all.
 | a rule that matches is a rule that applies | a rule that matches has to *win* | antd writes its popup rules at (0,3,0) with `:where()` dropping the hash, and injects them after this bundle, so a (0,2,0) arm of ours matched, was reported as reaching an element, and lost: the display-settings menu rendered at antd's 14px/22px with antd's 8px corner. Ours is now (0,4,0) and `--eclipse` asserts the computed value on the rendered element equals the token it names |
 
 `tokens.json` is **generated**. Edit `scripts/gen_tokens.py`, then:
+| a rule that matches is a rule that applies | a rule that matches has to *win* | antd writes its popup rules at (0,3,0) with `:where()` dropping the hash, and injects them after this bundle, so a (0,2,0) arm of ours matched, was reported as reaching an element, and lost: the display-settings menu rendered at antd's 14px/22px with antd's 8px corner. Ours is now (0,4,0) and `--eclipse` asserts the computed value on the rendered element equals the token it names |
+| `SnackbarTokens.kt` publishes no motion | the system pair `medium2` + `emphasized-decelerate` to appear and `short4` + `emphasized-accelerate` to leave | M3 names a curve for a dialog's enter and exit and none for a snackbar's, so the pair is our choice among the system tokens rather than a published one; `--morph` measures both phases against those tokens, and the register says so here rather than letting antd's `cubic-bezier(0.645, 0.045, 0.355, 1)` be the silent answer |

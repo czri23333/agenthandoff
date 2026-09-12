@@ -1020,6 +1020,36 @@
   color: inherit;
 }
 
+/* The snackbar's *motion*. `SnackbarTokens.kt` publishes none 鈥?checked in the
+   vendored file, which has no Motion/Duration/Easing entries at all 鈥?so antd's
+   own 0.2s `cubic-bezier(0.645, 0.045, 0.355, 1)` was what a reader actually
+   saw. This spends the system motion tokens instead: the published
+   `medium2` (300ms) on `emphasized-decelerate` to appear, and the published
+   `short4` (200ms) on `emphasized-accelerate` to leave, which is the usual
+   asymmetric pair for a surface that arrives and is dismissed. The choice of
+   *which* system pair is ours (M3 names none), so `docs/theming.md` records it,
+   and `--morph` asserts the computed transition equals these tokens.
+
+   All four of antd's properties are kept: it also animates `inset` and
+   `clip-path` while the stack reflows, and dropping them would make a second
+   snackbar jump into place. */
+:root .ant-message .ant-message-notice.ant-message-fade-appear,
+:root .ant-message .ant-message-notice.ant-message-fade-enter {
+  transition:
+    transform var(--ah-motion-duration-medium2) var(--ah-motion-easing-emphasized-decelerate),
+    inset var(--ah-motion-duration-medium2) var(--ah-motion-easing-emphasized-decelerate),
+    clip-path var(--ah-motion-duration-medium2) var(--ah-motion-easing-emphasized-decelerate),
+    opacity var(--ah-motion-duration-medium2) var(--ah-motion-easing-emphasized-decelerate);
+}
+
+:root .ant-message .ant-message-notice.ant-message-fade-leave {
+  transition:
+    transform var(--ah-motion-duration-short4) var(--ah-motion-easing-emphasized-accelerate),
+    inset var(--ah-motion-duration-short4) var(--ah-motion-easing-emphasized-accelerate),
+    clip-path var(--ah-motion-duration-short4) var(--ah-motion-easing-emphasized-accelerate),
+    opacity var(--ah-motion-duration-short4) var(--ah-motion-easing-emphasized-accelerate);
+}
+
 /* ── Layout ──────────────────────────────────────────────────────────────────
    TopAppBarSmallTokens: a 64px bar. The shell's gaps and padding come off the
    4dp spacing scale so the page cannot invent a 10px gutter. */

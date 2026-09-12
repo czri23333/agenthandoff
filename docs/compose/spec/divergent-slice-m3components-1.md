@@ -649,6 +649,34 @@ could not be read", which sounds like a limitation of the check. It is not 鈥?a
 dialog that leaves on `ease` is the defect 鈥?so the message now names the curve
 it actually found.
 
+### Round 25 鈥?the snackbar enters on M3 motion, not on antd's curve
+
+The snackbar had our colours, our corner and our elevation, and antd's *motion*:
+measured on the gallery, `.ant-message-notice` transitioned `transform`, `inset`,
+`clip-path` and `opacity` over `0.2s` on `cubic-bezier(0.645, 0.045, 0.355, 1)`
+鈥?antd's own curve, in both themes, with no token anywhere near it. That is the
+same "half antd" shape as round 20's menu item, one layer down: the paint was
+ours and the movement was not.
+
+`SnackbarTokens.kt` publishes no motion (the vendored file has no
+Motion/Duration/Easing entry at all), so there is no official snackbar curve to
+adopt. What the sheet spends instead is the **system** token pair that says what
+it means 鈥?a surface that arrives and is dismissed:
+
+| Phase | Now | Was |
+|---|---|---|
+| appear | `--ah-motion-duration-medium2` (300ms) on `--ah-motion-easing-emphasized-decelerate` | antd's `0.2s` on `cubic-bezier(0.645, 0.045, 0.355, 1)` |
+| leave | `--ah-motion-duration-short4` (200ms) on `--ah-motion-easing-emphasized-accelerate` | the same antd curve |
+
+All four of antd's properties keep a transition, because `inset` and `clip-path`
+are what makes a second snackbar slide into place rather than jump.
+
+| Claim | Measured |
+|---|---|
+| both phases, both themes | `--morph` raises a message and waits for antd's own dismiss: **appear `0.3s` + `cubic-bezier(0.05, 0.7, 0.1, 1)`, leave `0.2s` + `cubic-bezier(0.3, 0, 0.8, 0.15)`**, in light and dark |
+| the gate reads the running phase | the appear phase is read 120ms in; the leave phase is polled for by class (`ant-message-fade-leave`) rather than by guessing antd's timer, and "never observed" is itself a defect |
+| it can fail | disabling the appear override made it report, in both themes: `snackbar (light): the appear takes 0.2s, but the token says 300ms` and `the appear runs on 'cubic-bezier(0.645, 0.045, 0.355, 1)', not enterCurve 'cubic-bezier(0.05, 0.7, 0.1, 1)'` |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
