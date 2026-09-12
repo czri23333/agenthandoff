@@ -1029,19 +1029,24 @@
   padding-block: 0;
 }
 
-/* The official small app bar is one 64dp row, and that is what the height above
-   is. This bar also carries the search field, two Selects and the display menu,
-   which M3 would put in a docked toolbar under it; below ~1200px they cannot fit
-   on one row, so the bar wraps and grows. The deviation is real and measured
-   rather than papered over: at 1440px it is exactly 64, at 1024 it is two rows.
-   The alternative — clipping controls — is worse than a taller bar. */
-@media (max-width: 1199px) {
-  .ah-appbar {
-    height: auto;
-    min-height: var(--ah-c-app-bar-small-height);
-    padding-block: var(--ah-c-spacing-steps-sm);
-  }
+/* Below ~700px the title is what gives way, the way M3's compact app bar
+   truncates its title: the tabs keep their own scroll container (`flex-1
+   min-w-0 overflow-x-auto` in the markup) and the two trailing items keep their
+   size. Wrapping instead would push the bar past its published height — measured
+   at 600px before this rule: 13 children outside a 64px bar. */
+.ah-appbar .ah-appbar__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+/* One row, the official height, at every width — measured at 1440, 1280, 1200,
+   1024 and 900 on 2026-09-12: 64px each time. What makes that possible is that
+   the tab row inside the bar is `min-w-0 flex-1 overflow-x-auto`: at narrow
+   widths the tabs scroll instead of pushing the bar taller. The tab row is the
+   one part of this header M3 would not draw here — a primary tab row is its own
+   48dp band under the app bar — and that arrangement is recorded in
+   `docs/theming.md` rather than hidden behind a taller bar. */
 
 /* ── Search bar (docked) ─────────────────────────────────────────────────────
    SearchBarTokens: a 56dp corner-full container on surface-container-high at

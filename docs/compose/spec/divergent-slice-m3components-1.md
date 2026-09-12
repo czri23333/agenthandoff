@@ -579,6 +579,33 @@ The bar's own padding is `16px` (the spacing scale's `lg`) and its title is
 title-large, both already token-driven; what was wrong was the height, and the
 fix is one declaration plus the removal of two Tailwind overrides.
 
+### Round 22 鈥?the bar is 64dp at every width, and the tabs scroll
+
+Round 21 made the top app bar 64px down to 1200px and recorded a deviation below
+that. The deviation was mine, not the layout's: the media query let the bar grow
+and the Tailwind `!flex-wrap` let its contents wrap. Both are gone.
+
+| Claim | Measured |
+|---|---|
+| the bar, six widths | 1440, 1280, 1200, 1024, 800, 600 鈫?**64px each**, `scrollHeight` equal to the rendered height, and `0` children outside the bar |
+| what gives way instead | the tab row keeps its own scroll container: at 600px it is 378px visible of 401 scrollable, and at 800px and above everything fits (519px visible of 519) |
+| the compact rule | the title truncates (`min-width: 0; overflow: hidden; text-overflow: ellipsis`), which is what M3's compact app bar does; before this rule, 600px put **13** children outside a 64px box |
+| the one arrangement deviation that stays | M3 draws a primary tab row as its own 48dp band under the app bar. This cockpit keeps the tabs in the bar row 鈥?a second band would cost 48px of transcript height on every screen 鈥?and `docs/theming.md` records it as an arrangement choice rather than a height one |
+
+One more thing this round found, in the tool rather than the product: a run on a
+loaded machine reported `:root .ant-select-item` and
+`:root .ant-tooltip .ant-tooltip-container` as **dead rules**. They are not 鈥?a
+direct probe of the product in the same minute found both, matching their rules,
+with `font-size: 16px` against the menu token and `border-radius: 4px` against
+the tooltip token. What happened is that the gallery sweep clicks the Select and
+hovers the tooltip to open them; under load both attempts timed out, its
+`except: pass` swallowed that, and `reachable()` then called the rules dead. The
+sweep now retries each surface twice (three attempts, 4s each), checks for the
+popup it was supposed to open, and reports a surface it could not open as
+**unverified** 鈥?`the sweep could not open the surface it lives in: a click or
+hover timed out, so this run does not know` 鈥?rather than as a defect. The
+re-run after the change: `249/309 reach an element; 0 are unverified`.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

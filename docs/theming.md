@@ -214,13 +214,19 @@ that the run prints. `--app-only` exists for a machine that cannot afford the
 gallery's Vite build, and its report says the gallery checks were not measured
 rather than implying they passed.
 
-One more measured deviation, on the shell rather than a control: the top app bar
-is the official 64dp (`AppBarSmallTokens.ContainerHeight`) at 1200px and wider,
-and 65px below that, where its search field, two Selects and display menu wrap to
-a second row. M3's answer is a docked toolbar under the bar
-(`DockedToolbarTokens`, 64dp with 16dp leading and trailing space); the cockpit
-keeps one bar until the layout is redesigned, and the number is measured in both
-states rather than described as "about 64".
+The shell is measured as well, because a header that is "about 64" is not the
+published 64. AppBarSmallTokens.ContainerHeight is the top app bar height, and
+the bar is exactly that at **every** width: measured at 1440, 1280, 1200, 1024,
+800 and 600 on 2026-09-12, 64px each time, with nothing spilling out of it. What
+makes that possible is that the tab row keeps its own scroll container (lex-1
+min-w-0 overflow-x-auto in the markup): at 600px it scrolls (378px visible of
+401) instead of pushing the bar taller. Two earlier states are worth recording,
+because both were measured: Tailwind overrides (!h-auto !py-2.5 !flex-wrap)
+rendered it at 69px, and a first fix that let it wrap below 1200px left 13
+children outside a 64px box at 600px. One arrangement deviation stays recorded:
+M3 draws a primary tab row as its own 48dp band under the app bar, and this
+cockpit keeps the tabs in the same row as the title, because a second 48dp band
+would cost that much transcript height on every screen.
 
 ### Where this deliberately differs from Google
 

@@ -159,7 +159,7 @@ export default function App() {
   return (
     <Layout className="mx-auto h-screen max-w-[1500px]">
       <Layout.Header
-        className="ah-appbar !flex !flex-wrap !items-center gap-x-4 gap-y-1.5 !px-4"
+        className="ah-appbar !flex !items-center gap-x-4 !px-4"
         style={{ borderBottom: "1px solid var(--ah-line)" }}
       >
         {/* An <h1> rather than antd's `Typography.Title level={5}`: the app bar's

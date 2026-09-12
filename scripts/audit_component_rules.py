@@ -983,7 +983,9 @@ def off_token(sweep: dict) -> tuple[list[str], list[str], list[str]]:
     return rows("colors"), rows("radii"), sorted(allowed)
 
 
-def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
+def reachable(
+    rows: list[dict], unopened: tuple[str, ...] = ()
+) -> tuple[list[str], list[str], list[str]]:
     """Split the audit into defects, unverified and fine.
 
     A rule is a **defect** when it reads component tokens, matches nothing, and
@@ -991,6 +993,14 @@ def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
     not mount. Everything else is reported rather than hidden: `unverified` is
     the honest middle, and a maintainer can move a name out of `UNMOUNTED` by
     mounting it.
+
+    `unopened` names rules whose surface the sweep tried and failed to open (a
+    click or a hover that timed out on a loaded machine). Those are **unverified**,
+    not dead: the gallery reported `:root .ant-select-item` and the tooltip
+    container as "dead rules" on a run where the machine was busy enough that the
+    popups never appeared, and the product proved both alive in the same minute.
+    A gate that calls a load flake a defect is worse than one that says it does
+    not know.
     """
     defects: list[str] = []
     unverified: list[str] = []
@@ -1004,6 +1014,11 @@ def reachable(rows: list[dict]) -> tuple[list[str], list[str], list[str]]:
         reason = next((v for k, v in UNMOUNTED.items() if k in rule), None)
         if reason:
             unverified.append(f"{rule}  ({reason})")
+        elif any(name in rule for name in unopened):
+            unverified.append(
+                f"{rule}  (the sweep could not open the surface it lives in: "
+                "a click or hover timed out, so this run does not know)"
+            )
         else:
             defects.append(rule)
     return defects, unverified, []
@@ -2406,6 +2421,13 @@ def main() -> int:
 
         rows: list[dict] = []
         sweep: dict[str, dict[str, int]] = {"weights": {}, "sizes": {}}
+        # Popups the gallery is supposed to open. If one does not appear, the
+        # rules that live inside it are unverified rather than dead.
+        unopened: list[str] = []
+        surfaces = (
+            (".ah-select-chip:not(.ant-select-disabled)", ".ant-select-dropdown", ".ant-select-item"),
+            ("#g-tooltip", ".ant-tooltip-container", ".ant-tooltip-container"),
+        )
         with sync_playwright() as pw:
             executable = chromium_path(pw)
             browser = pw.chromium.launch(
@@ -2431,20 +2453,32 @@ def main() -> int:
                     # disabled variant *before* the live ones, and clicking a
                     # disabled select opens nothing — which silently turned
                     # `:root .ant-select-item` into a "dead rule" the first time.
-                    for selector in (
-                        ".ah-select-chip:not(.ant-select-disabled)",
-                        "#g-tooltip",
-                    ):
-                        element = page.query_selector(selector)
-                        if element is None:
-                            continue
-                        try:
-                            element.scroll_into_view_if_needed()
-                            element.hover(timeout=1500)
-                            element.click(timeout=1500)
-                        except Exception:  # noqa: BLE001 - the audit reports, it does not fail
-                            pass
-                        page.wait_for_timeout(700)
+                    for trigger, marker, _ in surfaces:
+                        for attempt in range(3):
+                            element = page.query_selector(trigger)
+                            if element is None:
+                                break
+                            try:
+                                element.scroll_into_view_if_needed(timeout=2000)
+                                element.hover(timeout=2000)
+                                element.click(timeout=2000)
+                            except Exception:  # noqa: BLE001 - reported below, not raised
+                                pass
+                            try:
+                                page.wait_for_selector(marker, state="attached", timeout=4000)
+                                break
+                            except Exception:  # noqa: BLE001
+                                if attempt == 2:
+                                    break
+                                page.wait_for_timeout(800)
+                        page.wait_for_timeout(400)
+                    for trigger, marker, rule_part in surfaces:
+                        if page.query_selector(marker) is None and rule_part not in unopened:
+                            unopened.append(rule_part)
+                            print(
+                                f"  the gallery did not open {trigger} this run: rules "
+                                f"reading {rule_part} are unverified, not dead"
+                            )
                 rows.extend(page.evaluate(AUDIT_JS, scope))
                 found = page.evaluate(SWEEP_JS)
                 for bucket, entries in found.items():
@@ -2548,7 +2582,7 @@ def main() -> int:
         if row["rule"] not in best or row["matched"] > best[row["rule"]]["matched"]:
             best[row["rule"]] = row
     rows = list(best.values())
-    defects, unverified, _ = reachable(rows)
+    defects, unverified, _ = reachable(rows, tuple(unopened))
     matched = sum(1 for r in rows if r["matched"] > 0)
     gallery_skipped = bool(args.app_only)
     off_weight, off_size = off_scale(sweep)
