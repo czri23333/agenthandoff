@@ -119,3 +119,35 @@ def test_every_reachable_reader_has_a_doctor_probe(cli: str):
     assert cli in _probed_clis(), (
         f"handoff doctor cannot report {cli}: add a probe to locations.discover()"
     )
+
+
+def test_every_unproven_reader_says_what_would_prove_it():
+    """`unverified` on its own is a dead end for whoever picks the work up.
+
+    The row has to name why the reader is unproven *here* and the command that
+    would close it, because "no fixture" is a fact about the machine that built
+    the fixtures rather than about the reader. `matrix.UNPROVEN` also has to stay
+    free of entries for readers that have since been proven 鈥?a reason that
+    outlives its gap is the same defect in the other direction.
+    """
+
+    rows = matrix.build_rows()
+    unproven = [row for row in rows if row.status == "unverified"]
+    # No `assert unproven`: all readers proven is the *good* outcome, and a gate
+    # that fails on it would punish the work it is asking for.
+    unexplained = [row.cli for row in unproven if not row.notes]
+    assert not unexplained, (
+        f"{unexplained} are unverified with no reason: add them to matrix.UNPROVEN "
+        "with what would prove them"
+    )
+    for row in unproven:
+        text = " ".join(row.notes)
+        assert "scripts/sanitize_fixtures.py" in text, (
+            f"{row.cli}'s reason does not name the command that would prove it: {text}"
+        )
+
+    proven = {row.cli for row in rows if row.status in {"stable", "shape-only"}}
+    stale = sorted(proven & set(matrix.UNPROVEN))
+    assert not stale, (
+        f"{stale} have fixtures now, so their UNPROVEN reason is stale: delete it"
+    )

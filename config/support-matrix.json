@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-11",
+  "generated": "2026-09-12",
   "rows": [
     {
       "cli": "zcode",
@@ -30,7 +30,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "no Claude Code store on the machine that built the fixtures (`~/.claude/projects`); run `python scripts/sanitize_fixtures.py --cli claude` where one exists"
+      ]
     },
     {
       "cli": "codebuddy",
@@ -62,7 +64,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "no CN CodeBuddy store here (`~/.codebuddy` is the international one); the parser is pinned to CodeBuddy's shape by `tests/test_edition_parity.py`, and `python scripts/sanitize_fixtures.py --cli codebuddy-cn` closes it on a machine with the CN store"
+      ]
     },
     {
       "cli": "qoderwork",
@@ -126,7 +130,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "Qoder IDE keeps sessions in an Electron leveldb and this machine has no session files on disk; run `python scripts/sanitize_fixtures.py --cli qoder-ide` where the IDE has been used"
+      ]
     },
     {
       "cli": "qwenwork",
@@ -222,7 +228,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "no OpenCode store here and its storage layout is undocumented upstream; run `python scripts/sanitize_fixtures.py --cli opencode` with a store present, then record what the layout turned out to be"
+      ]
     },
     {
       "cli": "qoderwake",
@@ -237,7 +245,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "the shared `~/.qoder/projects` store reads fine but holds 0 transcript files (the CN sibling has 132 and is proven, which is why the parser is pinned by `tests/test_edition_parity.py`); run `python scripts/sanitize_fixtures.py --cli qoderwake` once it holds a session"
+      ]
     },
     {
       "cli": "qoderwake-cn",
@@ -297,7 +307,9 @@
       "conformance": false,
       "empty_store": false,
       "status": "unverified",
-      "notes": []
+      "notes": [
+        "the store exists (`AppData/Roaming/QwenWorkCN/data/agents.db`) and is readable, but holds 0 message rows, so there is nothing to sample and the honest result is shape-only at best; re-run `python scripts/sanitize_fixtures.py --cli qwenwork-app` after it has been used"
+      ]
     },
     {
       "cli": "cherrystudio",

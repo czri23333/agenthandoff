@@ -22,16 +22,27 @@ are that same output, and CI fails if they drift from it
 
 What that leaves, stated here rather than in the table:
 
-* **proven (9)**: `zcode`, `codebuddy`, `qoderwork`, `qoderwork-cn`,
-  `qodercn-ide`, `qwenwork`, `dsh`, `codex`, and `kimi` *shape-only* — each is a
-  sanitized sample of a real store that our parsers turn into sessions and
-  messages in CI.
-* **unverified (2)**: `claude`, `codebuddy-cn`. Readers exist, no store was ever
-  available to sample and no fixture ships, so nothing here proves they work.
+* **stable (13)**: `zcode`, `codebuddy`, `qoderwork`, `qoderwork-cn`,
+  `qodercn-ide`, `qwenwork`, `workbuddy`, `dsh`, `codex`, `qoderwake-cn`,
+  `qoderwork-app`, `qoderwork-cn-app` and `cherrystudio` — each is a sanitized
+  sample of a real store that our parsers turn into sessions and messages in CI.
+  `kimi` is **shape-only** (its store held one session with no dialogue), and
   `dsh` additionally needs the optional `zstd` extra; without it the matrix says
   `unavailable` instead of pretending the format is broken.
-* **roadmap (3)**: `opencode`, Qoder IDE (international, Electron leveldb),
-  Trae/IDE-family.
+* **unverified (6)**: `claude`, `codebuddy-cn`, `qoder-ide`, `opencode`,
+  `qoderwake`, `qwenwork-app`. Each one carries *why* it is unproven on this
+  machine and the command that would close it: `matrix.UNPROVEN` is the table,
+  `handoff evidence --check` prints every entry, the reasons ride in
+  `config/support-matrix.json` as a `notes` field, and
+  `tests/test_reader_lockstep.py` fails if an unverified reader has no reason or
+  if the reason stops naming `scripts/sanitize_fixtures.py`. Two of the six are
+  one machine away from proof rather than one investigation away: `qoderwake`
+  reads fine but holds 0 transcripts (its CN sibling has 132 and *is* proven),
+  and the `qwenwork-app` store is readable and holds 0 messages.
+* **roadmap (1)**: `trae`. The two that used to sit here (`opencode`, Qoder IDE)
+  have readers now, so they moved to the unverified list above — which is the
+  honest direction: a parser that exists but has never seen a store is not the
+  same claim as one that was never written.
 
 The fixtures were built on one Windows host on 2026-08-31 from
 `scripts/sanitize_fixtures.py`, and every `.fixture.json` says how much was
