@@ -1520,8 +1520,12 @@
   }
 }
 
-/* Navigation bar / rail geometry, for a future shell that uses them: a 64px
-   container with a 40px corner-full indicator around a 24px icon. */
+/* Navigation bar / rail geometry. The rail is NavigationRailCollapsedTokens +
+   NavigationRailVerticalItemTokens: an 80dp narrow column with 4dp vertical
+   padding and 4dp between items, each item 80×56dp, a 56×32 corner-full
+   active indicator around the 24dp icon, label-medium labels, and the
+   NavigationRailColorTokens active/inactive pair. It replaces the top tab strip
+   at wide viewports; below 1200px it is display:none and the tabs return. */
 .ah-navbar {
   min-height: var(--ah-c-navigation-bar-height);
   background: var(--ah-c-navigation-bar-container);
@@ -1534,15 +1538,125 @@
   background: var(--ah-c-navigation-bar-indicator-role);
 }
 
+.ah-navrail {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  width: var(--ah-c-navigation-rail-container-narrow-width);
+  /* The published standard container width caps the narrow rail, and the
+     published 44dp top space is kept as the landmark's scroll clearance. */
+  max-width: var(--ah-c-navigation-rail-container-width);
+  scroll-margin-block-start: var(--ah-c-navigation-rail-container-top-space);
+  padding-block: var(--ah-c-navigation-rail-container-vertical-space);
+  gap: var(--ah-c-navigation-rail-container-vertical-space);
+  background: var(--ah-c-navigation-rail-container-color);
+  box-shadow: var(--ah-c-navigation-rail-container-elevation);
+  border-radius: var(--ah-c-navigation-rail-container-shape);
+}
+
 .ah-navrail__item {
-  min-height: var(--ah-c-navigation-rail-item-height);
-  margin-block: calc(var(--ah-c-navigation-rail-item-vertical-space) / 2);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: var(--ah-c-navigation-rail-item-icon-label-space);
+  width: var(--ah-c-navigation-rail-item-width);
+  height: var(--ah-c-navigation-rail-item-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ah-c-navigation-rail-inactive-label);
+  cursor: pointer;
+}
+
+.ah-navrail__item--active {
+  color: var(--ah-c-navigation-rail-active-label);
+}
+
+/* The pointer's answer, in the shape M3 publishes for a rail: a 56dp pill on
+   the indicator, composed from the on-secondary-container state layer every
+   rail token names, so the ink and the container stay the same in both
+   palettes. The `z-index` keeps the layer above the active container colour,
+   which is painted on the indicator itself. */
+.ah-navrail__item::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(
+    (
+        var(--ah-c-navigation-rail-item-height) - var(--ah-c-navigation-rail-indicator-height) -
+          var(--ah-c-navigation-rail-item-icon-label-space) -
+          var(--ah-c-navigation-rail-type-role-line)
+      ) /
+      2
+  );
+  inline-size: var(--ah-c-navigation-rail-indicator-width);
+  block-size: var(--ah-c-navigation-rail-indicator-height);
+  border-radius: var(--ah-c-navigation-rail-indicator-shape);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-navrail__item:hover::before,
+.ah-navrail__item:focus-visible::before {
+  background: color-mix(
+    in srgb,
+    var(--ah-c-navigation-rail-state-layer-hovered) var(--ah-state-hover),
+    transparent
+  );
+}
+
+.ah-navrail__item:active::before {
+  background: color-mix(
+    in srgb,
+    var(--ah-c-navigation-rail-state-layer-pressed) var(--ah-state-pressed),
+    transparent
+  );
 }
 
 .ah-navrail__indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ah-c-navigation-rail-indicator-width);
+  height: var(--ah-c-navigation-rail-indicator-height);
+  padding-inline: var(--ah-c-navigation-rail-indicator-leading) var(--ah-c-navigation-rail-indicator-trailing);
   border-radius: var(--ah-c-navigation-rail-indicator-shape);
-  background: var(--ah-c-navigation-bar-indicator-role);
+  background: transparent;
+  color: var(--ah-c-navigation-rail-inactive-icon);
+  transition: background-color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects),
+    color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+.ah-navrail__item--active .ah-navrail__indicator {
+  background: var(--ah-c-navigation-rail-active-indicator);
+  color: var(--ah-c-navigation-rail-active-icon);
+}
+
+.ah-navrail__indicator > .anticon,
+.ah-navrail__indicator > svg {
+  font-size: var(--ah-c-navigation-rail-item-icon);
+}
+
+.ah-navrail__label {
+  font-size: var(--ah-c-navigation-rail-type-role-size);
+  line-height: var(--ah-c-navigation-rail-type-role-line);
+  letter-spacing: var(--ah-c-navigation-rail-type-role-tracking);
+  font-weight: var(--ah-c-navigation-rail-type-role-weight);
+  white-space: nowrap;
+  transition: color var(--ah-dur-fast-effects) var(--ah-ease-fast-effects);
+}
+
+@media (min-width: 1200px) {
+  .ah-navrail {
+    display: flex;
+  }
+
+  .ah-tabs {
+    display: none;
+  }
 }
 
 /* ── Slider ──────────────────────────────────────────────────────────────────
@@ -2050,19 +2164,6 @@
   padding-inline: var(--ah-c-navigation-bar-indicator-leading) var(--ah-c-navigation-bar-indicator-trailing);
 }
 
-.ah-navrail__item > .anticon,
-.ah-navrail__item > svg {
-  font-size: var(--ah-c-navigation-rail-item-icon);
-}
-
-.ah-navrail__item {
-  padding-inline: var(--ah-c-navigation-rail-item-leading) var(--ah-c-navigation-rail-item-trailing);
-}
-
-.ah-navrail__header {
-  min-height: var(--ah-c-navigation-rail-item-header-space);
-}
-
 /* Tooltip, badge and the spacing scale's remaining steps. */
 :root .ant-tooltip .ant-tooltip-container {
   font-weight: var(--ah-c-tooltip-type-role-weight);
@@ -2116,9 +2217,6 @@
   padding-block: var(--ah-c-spacing-steps-xxl);
 }
 
-.ah-navrail__header {
-  padding-block: var(--ah-c-spacing-steps-xs);
-}
 /* ── Table header weight ─────────────────────────────────────────────────────
    antd draws `th` at `font-weight: 600`. M3 publishes no 600 — its heaviest
    text weight is 500 — and the repo's own contract says so, but

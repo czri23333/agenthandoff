@@ -423,10 +423,21 @@ function Gallery() {
         </span>
       </div>
       <div className="ah-navbar ah-navbar--tall" id="g-ah-navbar-tall" />
-      <div className="ah-navrail__header" id="g-ah-navrail-header" />
-      <div className="ah-navrail__item" id="g-ah-navrail-item"><span className="anticon">+</span></div>
-      <div className="ah-navrail__item" id="g-ah-navrail-item-svg"><svg /></div>
-      <div className="ah-navrail__indicator" id="g-ah-navrail-indicator" />
+      {/* The rail in the shape the product renders it (App.tsx): a column of
+          items, an indicator that holds the icon, a label under it. The gallery
+          mounted the classes but not the composition, so the product's own
+          selectors had nothing to match here. */}
+      <div className="ah-navrail" id="g-ah-navrail">
+        <div className="ah-navrail__item" id="g-ah-navrail-item"><span className="anticon">+</span></div>
+        <div className="ah-navrail__item" id="g-ah-navrail-item-svg"><svg /></div>
+        <div className="ah-navrail__item ah-navrail__item--active" id="g-ah-navrail-item-active">
+          <span className="ah-navrail__indicator" id="g-ah-navrail-indicator">
+            <span className="anticon">+</span>
+            <svg />
+          </span>
+          <span className="ah-navrail__label" id="g-ah-navrail-label">label</span>
+        </div>
+      </div>
       <div className="ah-snackbar--two-line" id="g-ah-snackbar" />
       <span className="ah-snackbar__action" id="g-ah-snackbar-action">undo</span>
       <span className="ah-segmented__icon" id="g-ah-segmented-icon">+</span>
@@ -743,6 +754,71 @@ MORPH: tuple[dict[str, str], ...] = (
 MORPH_CURVE = "--ah-ease-fast-spatial"
 MORPH_DURATION = "--ah-dur-fast-spatial"
 
+LOADING: tuple[dict[str, str], ...] = (
+    {"label": "contained", "selector": "#g-ah-loading"},
+    {"label": "uncontained", "selector": "#g-ah-loading-u"},
+)
+LOADING_TURN = "--ah-motion-duration-extra-long4"
+
+LOADING_JS = """
+(selector) => {
+  const el = document.querySelector(selector);
+  if (!el) return null;
+  const root = getComputedStyle(document.documentElement);
+  const tokenText = root.getPropertyValue('--ah-motion-duration-extra-long4').trim();
+  const parseMs = (text) => {
+    text = String(text || '').trim();
+    for (const [suffix, scale] of [['ms', 1], ['s', 1000]]) {
+      if (text.endsWith(suffix)) {
+        const value = Number(text.slice(0, -suffix.length));
+        return Number.isFinite(value) ? value * scale : null;
+      }
+    }
+    return null;
+  };
+  const read = (pseudo) => el.getAnimations({subtree: true})
+    .filter((a) => {
+      const pe = a.effect && a.effect.pseudoElement;
+      return pseudo === '::after' ? pe === '::after' : !pe;
+    })
+    .map((a) => {
+      const timing = a.effect.getComputedTiming();
+      let easing = null;
+      try {
+        const frames = a.effect.getKeyframes();
+        for (const frame of frames) {
+          if (frame && frame.easing) { easing = frame.easing; break; }
+        }
+      } catch (err) {}
+      return {
+        name: a.animationName || null,
+        duration: timing.duration,
+        iterations: timing.iterations,
+        easing: easing || a.effect.getTiming().easing || null,
+        playState: a.playState,
+      };
+    });
+  const turn = read(null);
+  const after = read('::after');
+  const morphMs = after.length === 1 ? after[0].duration : null;
+  const sample = () => getComputedStyle(el, '::after').borderTopLeftRadius;
+  const before = sample();
+  const half = typeof morphMs === 'number' && Number.isFinite(morphMs) && morphMs > 0
+    ? Math.max(1, morphMs / 2)
+    : 0;
+  return new Promise((resolve) => {
+    setTimeout(() => resolve({
+      tokenText,
+      tokenMs: parseMs(tokenText),
+      turn,
+      after,
+      borderBefore: before,
+      borderAfter: sample(),
+    }), half);
+  });
+}
+"""
+
 
 def run_morph_sweep(page, url: str, theme: str) -> dict:
     """Press (or hover) each morphing family and read its corner at every step."""
@@ -952,6 +1028,286 @@ def _px(value: object) -> float | None:
         return float(value[:-2])
     except ValueError:
         return None
+
+
+def run_loading_sweep(page, url: str, theme: str) -> dict:
+    """Read the loading indicator's two animations while they are running.
+
+    The declared stylesheet is not consulted: the turn and the morph are read
+    from the Web Animations API, and the shape is sampled through its computed
+    border-radius at two moments half a morph period apart.
+    """
+
+    page.goto(f"{url}?theme={theme}", wait_until="domcontentloaded")
+    page.wait_for_selector("#ah-tokens", state="attached")
+    page.wait_for_timeout(1400)
+    rows: list[dict] = []
+    for entry in LOADING:
+        element = page.query_selector(entry["selector"])
+        if element is None:
+            rows.append({"label": entry["label"], "theme": theme, "missing": True})
+            continue
+        measurement = page.evaluate(LOADING_JS, entry["selector"])
+        if measurement is None:
+            rows.append({"label": entry["label"], "theme": theme, "missing": True})
+            continue
+        rows.append(
+            {
+                "label": entry["label"],
+                "theme": theme,
+                "token_text": measurement["tokenText"],
+                "token_ms": measurement["tokenMs"],
+                "turn": measurement["turn"],
+                "after": measurement["after"],
+                "border_before": measurement["borderBefore"],
+                "border_after": measurement["borderAfter"],
+            }
+        )
+    return {"rows": rows}
+
+
+def _finite(value: object) -> float | None:
+    """A finite number from a timing read, or None for a non-number/Infinity."""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number
+
+
+def loading_defects(rows: list[dict]) -> list[str]:
+    """The container turns once per the extra-long4 token, the shape morphs a
+    quarter as fast, both run forever, and the shape really changes."""
+
+    defects: list[str] = []
+    for row in rows:
+        where = f"{row['label']} ({row['theme']})"
+        if row.get("missing"):
+            defects.append(f"{where}: nothing matches the selector")
+            continue
+        turn = row.get("turn") or []
+        after = row.get("after") or []
+        if len(turn) != 1:
+            defects.append(
+                f"{where}: expected one live turn animation on the container, "
+                f"found {len(turn)}"
+            )
+        else:
+            if turn[0].get("name") != "ah-loading-turn":
+                defects.append(
+                    f"{where}: the container runs {turn[0].get('name')!r} "
+                    "instead of 'ah-loading-turn'"
+                )
+            if turn[0].get("iterations") != float("inf"):
+                defects.append(
+                    f"{where}: the turn iterates {turn[0].get('iterations')}, "
+                    "not infinite"
+                )
+        if len(after) != 1:
+            defects.append(
+                f"{where}: expected one live morph animation on ::after, "
+                f"found {len(after)}"
+            )
+        else:
+            if after[0].get("name") != "ah-loading-morph":
+                defects.append(
+                    f"{where}: ::after runs {after[0].get('name')!r} "
+                    "instead of 'ah-loading-morph'"
+                )
+            if after[0].get("iterations") != float("inf"):
+                defects.append(
+                    f"{where}: the morph iterates {after[0].get('iterations')}, "
+                    "not infinite"
+                )
+        if len(turn) == 1:
+            turn_ms = _finite(turn[0].get("duration"))
+            token_ms = _finite(row.get("token_ms"))
+            if turn_ms is not None and token_ms is not None and abs(turn_ms - token_ms) > 0.01:
+                defects.append(
+                    f"{where}: the turn lasts {turn_ms:g}ms, but "
+                    f"{LOADING_TURN} resolves to {token_ms:g}ms"
+                )
+        if len(turn) == 1 and len(after) == 1:
+            turn_ms = _finite(turn[0].get("duration"))
+            morph_ms = _finite(after[0].get("duration"))
+            if turn_ms is not None and morph_ms is not None and abs(morph_ms - turn_ms / 4) > 0.01:
+                defects.append(
+                    f"{where}: the morph period is {morph_ms:g}ms, not a quarter "
+                    f"of the {turn_ms:g}ms turn"
+                )
+        if row.get("border_before") == row.get("border_after"):
+            defects.append(
+                f"{where}: ::after border-radius is {row.get('border_before')!r} at "
+                "two samples half a morph period apart, so the shape does not move"
+            )
+    return defects
+
+
+# Navigation rail: the shell swaps a vertical rail for the top tab strip at the
+# large window size class. Measured against the tokens the sheet declares, so a
+# layout that disagrees with its own token is the defect.
+RAIL_VIEWPORTS: tuple[tuple[int, int, bool], ...] = (
+    (1440, 1000, True),
+    (900, 800, False),
+)
+
+RAIL_JS = """
+() => {
+  const px = (v) => { const n = parseFloat(String(v || '').trim()); return Number.isFinite(n) ? n : null; };
+  const root = getComputedStyle(document.documentElement);
+  const tok = (name) => px(root.getPropertyValue(name));
+  const box = (el) => { const r = el.getBoundingClientRect(); return {w: r.width, h: r.height}; };
+  const shown = (el) => !!el && getComputedStyle(el).display !== 'none';
+  const rail = document.querySelector('.ah-navrail');
+  const tabs = document.querySelector('.ah-tabs');
+  const out = {
+    rail_shown: shown(rail),
+    tabs_shown: shown(tabs),
+    tab_items: document.querySelectorAll('.ah-tabs .ah-tab').length,
+  };
+  if (!rail) return out;
+  const items = [...rail.querySelectorAll('.ah-navrail__item')];
+  out.items = items.length;
+  out.active_items = items.filter((i) => i.classList.contains('ah-navrail__item--active')).length;
+  out.rail_width = box(rail).w;
+  out.rail_padding_top = px(getComputedStyle(rail).paddingTop);
+  out.rail_padding_bottom = px(getComputedStyle(rail).paddingBottom);
+  out.rail_radius = px(getComputedStyle(rail).borderTopLeftRadius);
+  out.rail_shadow = getComputedStyle(rail).boxShadow;
+  if (items.length) {
+    out.item_width = box(items[0]).w;
+    out.item_height = box(items[0]).h;
+    const ind = items[0].querySelector('.ah-navrail__indicator');
+    if (ind) {
+      out.indicator_width = box(ind).w;
+      out.indicator_height = box(ind).h;
+      out.indicator_radius = px(getComputedStyle(ind).borderTopLeftRadius);
+    }
+  }
+  if (items.length > 1) {
+    const a = items[0].getBoundingClientRect(), b = items[1].getBoundingClientRect();
+    out.item_gap = b.top - a.bottom;
+  }
+  const active = rail.querySelector('.ah-navrail__item--active .ah-navrail__indicator');
+  if (active) out.active_indicator_bg = getComputedStyle(active).backgroundColor;
+  const label = rail.querySelector('.ah-navrail__label');
+  if (label) {
+    const cs = getComputedStyle(label);
+    out.label_size = px(cs.fontSize);
+    out.label_line = px(cs.lineHeight);
+  }
+  out.tokens = {
+    width: tok('--ah-c-navigation-rail-container-narrow-width'),
+    padding: tok('--ah-c-navigation-rail-container-vertical-space'),
+    item_width: tok('--ah-c-navigation-rail-item-width'),
+    item_height: tok('--ah-c-navigation-rail-item-height'),
+    indicator_width: tok('--ah-c-navigation-rail-indicator-width'),
+    indicator_height: tok('--ah-c-navigation-rail-indicator-height'),
+    label_size: tok('--ah-c-navigation-rail-type-role-size'),
+    label_line: tok('--ah-c-navigation-rail-type-role-line'),
+    active_indicator: root.getPropertyValue('--ah-c-navigation-rail-active-indicator').trim(),
+  };
+  return out;
+}
+"""
+
+
+def run_rail_sweep(page, url: str) -> dict:
+    """The rail at both window size classes, read off the running cockpit."""
+
+    rows: list[dict] = []
+    for width, height, wide in RAIL_VIEWPORTS:
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#ah-tokens", state="attached")
+        page.wait_for_timeout(1200)
+        found = page.evaluate(RAIL_JS)
+        found["width"] = width
+        found["wide"] = wide
+        rows.append(found)
+    return {"rows": rows}
+
+
+def rail_defects(rows: list[dict]) -> list[str]:
+    """The rail at the large size class, the tab strip below it, and rendered
+    geometry equal to the tokens the sheet declares."""
+
+    if not rows:
+        return ["the rail sweep measured nothing"]
+    out: list[str] = []
+    for row in rows:
+        where = f"{row['width']}px"
+        if row.get("wide"):
+            if not row.get("rail_shown"):
+                out.append(f"{where}: no navigation rail is rendered at the large size class")
+                continue
+            if row.get("tabs_shown"):
+                out.append(f"{where}: the rail and the top tab strip are both visible")
+            if int(row.get("items") or 0) != int(row.get("tab_items") or 0):
+                out.append(
+                    f"{where}: the rail offers {row.get('items')} views and the tab "
+                    f"strip {row.get('tab_items')}"
+                )
+            if int(row.get("active_items") or 0) != 1:
+                out.append(
+                    f"{where}: {row.get('active_items')} rail item(s) are marked active, want 1"
+                )
+            tokens = row.get("tokens") or {}
+            for field, key in (
+                ("rail_width", "width"),
+                ("rail_padding_top", "padding"),
+                ("rail_padding_bottom", "padding"),
+                ("item_width", "item_width"),
+                ("item_height", "item_height"),
+                ("indicator_width", "indicator_width"),
+                ("indicator_height", "indicator_height"),
+                ("label_size", "label_size"),
+                ("label_line", "label_line"),
+            ):
+                measured, declared = row.get(field), tokens.get(key)
+                if measured is None or declared is None:
+                    out.append(f"{where}: {field} was not measurable")
+                    continue
+                if abs(float(measured) - float(declared)) > 0.5:
+                    out.append(
+                        f"{where}: {field} renders {measured:g}px, but its token "
+                        f"declares {declared:g}px"
+                    )
+            gap, declared_gap = row.get("item_gap"), tokens.get("padding")
+            if gap is None or declared_gap is None:
+                out.append(f"{where}: the gap between two rail items was not measurable")
+            elif abs(float(gap) - float(declared_gap)) > 0.5:
+                out.append(
+                    f"{where}: the rail items are {gap:g}px apart, but the token "
+                    f"declares {declared_gap:g}px"
+                )
+            ind_h, ind_w = row.get("indicator_height"), row.get("indicator_width")
+            radius = row.get("indicator_radius")
+            if None not in (ind_h, ind_w, radius) and float(radius) < min(ind_h, ind_w) / 2 - 0.5:
+                out.append(
+                    f"{where}: the indicator's corner is {radius:g}px on a "
+                    f"{ind_w:g}x{ind_h:g} box, which is not corner-full"
+                )
+            declared_bg = (tokens or {}).get("active_indicator") or ""
+            want_bg = None
+            if declared_bg.startswith("#") and len(declared_bg) == 7:
+                n = int(declared_bg[1:], 16)
+                want_bg = f"rgb({(n >> 16) & 255}, {(n >> 8) & 255}, {n & 255})"
+            got_bg = row.get("active_indicator_bg")
+            if want_bg and got_bg != want_bg:
+                out.append(
+                    f"{where}: the active indicator is {got_bg}, but "
+                    f"--ah-c-navigation-rail-active-indicator is {want_bg}"
+                )
+        else:
+            if row.get("rail_shown"):
+                out.append(f"{where}: the rail is rendered below the large size class")
+            if not row.get("tabs_shown"):
+                out.append(f"{where}: neither the rail nor the tab strip is rendered")
+    return out
 
 
 def run_dialog_sweep(page, base: str, theme: str) -> dict:
@@ -1660,19 +2016,39 @@ FOCUS_OVERLAY_SELECTOR = ".ant-dropdown-menu-item"
 OVERLAP_JS = r"""
 () => {
   const sel = 'a[href], button, input, select, textarea, [role="button"], .ant-segmented-item, [tabindex]:not([tabindex="-1"])';
-  const els = [...document.querySelectorAll(sel)].filter(e => {
+  // What a reader can actually see of an element: its box intersected with
+  // every ancestor that clips. Raw rects are not that. A link 9000px down
+  // inside a scrolled transcript still reports a rect, and on 2026-09-13 one
+  // "overlapped" a 原文 button in a row that was itself scrolled out of view -
+  // 12x16px of a pair nobody could see, which is what this returned.
+  const visibleBox = (el) => {
+    const r = el.getBoundingClientRect();
+    let x1 = r.left, y1 = r.top, x2 = r.right, y2 = r.bottom;
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      const c = getComputedStyle(n);
+      if (c.overflowX === 'visible' && c.overflowY === 'visible') continue;
+      const nr = n.getBoundingClientRect();
+      x1 = Math.max(x1, nr.left);
+      y1 = Math.max(y1, nr.top);
+      x2 = Math.min(x2, nr.right);
+      y2 = Math.min(y2, nr.bottom);
+      if (x2 <= x1 || y2 <= y1) return null;
+    }
+    return x2 > x1 && y2 > y1 ? {left: x1, top: y1, right: x2, bottom: y2} : null;
+  };
+  const els = [...document.querySelectorAll(sel)].flatMap(e => {
     const c = getComputedStyle(e);
-    if (c.display === 'none' || c.visibility === 'hidden' || c.opacity === '0') return false;
-    const r = e.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    if (c.display === 'none' || c.visibility === 'hidden' || c.opacity === '0') return [];
+    const box = visibleBox(e);
+    return box ? [{e, box}] : [];
   });
   const MIN = 4;
   const out = [];
   for (let i = 0; i < els.length; i++) {
     for (let j = i + 1; j < els.length; j++) {
-      const a = els[i], b = els[j];
+      const a = els[i].e, b = els[j].e;
       if (a.contains(b) || b.contains(a)) continue;
-      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const ra = els[i].box, rb = els[j].box;
       const ox = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
       const oy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
       if (ox > MIN && oy > MIN) {
@@ -2279,6 +2655,13 @@ def run_state_sweep(page, url: str, routes: list[str], forced: bool = False) -> 
                         continue
                     page.evaluate("(el) => { window.__stateEl = el; }", element)
                     page.mouse.move(5, 5)
+                    # A click from the family before this one can leave its popup
+                    # open: the display-settings Dropdown stayed up and its menu
+                    # covered the rail's first item, so the sweep measured a
+                    # hover layer of 0.000 on a control that answers the pointer
+                    # correctly. Each sample starts from a clean page instead.
+                    with contextlib.suppress(Exception):
+                        page.keyboard.press("Escape")
                     page.wait_for_timeout(30)
                     rest = page.evaluate(STATE_SNAP_JS)
                     page.mouse.move(
@@ -2958,6 +3341,25 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--loading",
+        action="store_true",
+        help=(
+            "also read the M3E loading indicator while it runs: the container's "
+            "turn and the shape's morph, their durations, easing and iteration "
+            "counts, and that the shape's border-radius really changes"
+        ),
+    )
+    parser.add_argument(
+        "--rail",
+        action="store_true",
+        help=(
+            "also measure the navigation rail in the running app at the large "
+            "window size class: its width, item height, indicator box and the gap "
+            "between items against the tokens the sheet declares, and that the "
+            "tab strip takes over below the breakpoint"
+        ),
+    )
+    parser.add_argument(
         "--app-only",
         action="store_true",
         help=(
@@ -3095,6 +3497,7 @@ def main() -> int:
             # way to cover the families.
             disabled: dict = {"rows": [], "examined": 0}
             morph: dict = {"rows": []}
+            loading: dict = {"rows": []}
             dialogs: dict = {"rows": []}
             snacks: dict = {"rows": []}
             tooltips: dict = {"rows": []}
@@ -3108,6 +3511,10 @@ def main() -> int:
                     snacks["rows"].extend(found_snack["rows"])
                     found_tip = run_tooltip_sweep(page, base, theme)
                     tooltips["rows"].extend(found_tip["rows"])
+            if args.loading and not args.app_only:
+                for theme in ("light", "dark"):
+                    found_loading = run_loading_sweep(page, base, theme)
+                    loading["rows"].extend(found_loading["rows"])
             if args.disabled and not args.app_only:
                 for theme in ("dark", "light"):
                     found = run_disabled_sweep(page, base, theme)
@@ -3134,6 +3541,7 @@ def main() -> int:
             }
             overlaps: list[str] = []
             overlap_examined = 0
+            rail: dict = {"rows": []}
             states: dict = {"rows": [], "examined": 0}
             eclipses: dict = {"rows": [], "examined": 0}
             for url in args.app:
@@ -3156,6 +3564,8 @@ def main() -> int:
                     )
                     overlaps.extend(found_overlaps)
                     overlap_examined += seen
+                if args.rail:
+                    rail["rows"].extend(run_rail_sweep(page, url)["rows"])
                 if args.focus:
                     focus.update(run_focus_sweep(page, url, args.route or ["#/"]))
                     forced_focus = run_focus_sweep(
@@ -3224,6 +3634,7 @@ def main() -> int:
             "a synthetic focus cannot judge were therefore never judged"
         )
     overlap_failures = overlaps if args.overlap else []
+    rail_failures = rail_defects(rail["rows"]) if args.rail else []
     state_failures = state_defects(states["rows"]) if args.states else []
     eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
     morph_failures = morph_defects(morph["rows"]) if args.morph else []
@@ -3234,6 +3645,13 @@ def main() -> int:
             *snackbar_defects(snacks["rows"]),
             *tooltip_defects(tooltips["rows"]),
         ]
+    loading_failures = loading_defects(loading["rows"]) if args.loading else []
+    if args.loading and len(loading["rows"]) < 2 * len(LOADING):
+        loading_failures.append(
+            f"the loading sweep examined {len(loading['rows'])} of "
+            f"{2 * len(LOADING)} indicator/theme combinations; the ones it never "
+            "reached are not evidence"
+        )
     eclipse_read = len(
         {r["label"] for r in eclipses["rows"] if r.get("computed") is not None}
     )
@@ -3366,6 +3784,40 @@ def main() -> int:
                         for r in tooltips["rows"]
                     ],
                 },
+                "loading_sweep": {
+                    "enabled": args.loading,
+                    "indicators_examined": len(loading["rows"]),
+                    "variants": len(LOADING),
+                    "defects": loading_failures,
+                    "measured": [
+                        {
+                            "label": r["label"],
+                            "theme": r["theme"],
+                            "token": r.get("token_text"),
+                            "token_ms": r.get("token_ms"),
+                            "turn": r.get("turn"),
+                            "after": r.get("after"),
+                            "border_before": r.get("border_before"),
+                            "border_after": r.get("border_after"),
+                        }
+                        for r in loading["rows"]
+                        if not r.get("missing")
+                    ],
+                },
+                "rail_sweep": {
+                    "enabled": args.rail,
+                    "viewports": [r["width"] for r in rail["rows"]],
+                    "defects": rail_failures,
+                    "measured": [
+                        {
+                            key: value
+                            for key, value in r.items()
+                            if key not in ("tokens",)
+                        }
+                        | {"tokens": r.get("tokens", {})}
+                        for r in rail["rows"]
+                    ],
+                },
                 "focus_sweep": {
                     "enabled": args.focus,
                     "elements_examined": focus["examined"],
@@ -3404,6 +3856,8 @@ def main() -> int:
         "focus": focus_failures,
         "eclipsed rules": eclipse_failures,
         "press morph": morph_failures,
+        "loading indicator": loading_failures,
+        "navigation rail": rail_failures,
         "overlapping controls": overlap_failures,
         "hover and press": state_failures,
         "disabled controls": disabled_failures,
@@ -3466,6 +3920,41 @@ def main() -> int:
             f"were the snackbar's appear and leave transitions "
             f"({len(snacks['rows'])} theme(s)) and the tooltip's two animations "
             f"({len(tooltips['rows'])} theme(s))."
+        )
+    if args.loading:
+        turns = [
+            r["turn"][0]["duration"]
+            for r in loading["rows"]
+            if r.get("turn") and len(r["turn"]) == 1
+        ]
+        morphs = [
+            r["after"][0]["duration"]
+            for r in loading["rows"]
+            if r.get("after") and len(r["after"]) == 1
+        ]
+        token = loading["rows"][0].get("token_text") if loading["rows"] else None
+        print(
+            f"Loading: {len(loading['rows'])} indicator/theme readings; the "
+            f"container turns in {', '.join(f'{v:g}ms' for v in turns)} against "
+            f"{LOADING_TURN} {token or '(unresolved)'}, the ::after shape morphs "
+            f"in {', '.join(f'{v:g}ms' for v in morphs)}, both run forever, and "
+            "the shape's border-radius changes between samples half a morph "
+            "period apart."
+        )
+    if args.rail and rail["rows"]:
+        wide = next((r for r in rail["rows"] if r.get("wide")), {})
+        narrow = next((r for r in rail["rows"] if not r.get("wide")), {})
+        print(
+            f"Rail: at {wide.get('width')}px the rail is {wide.get('rail_width')}px wide "
+            f"with {wide.get('items')} items of {wide.get('item_width')}x{wide.get('item_height')}px, "
+            f"{wide.get('item_gap')}px apart, an indicator of "
+            f"{wide.get('indicator_width')}x{wide.get('indicator_height')}px "
+            f"(corner {wide.get('indicator_radius')}px, ink {wide.get('active_indicator_bg')}), "
+            f"labels {wide.get('label_size')}px/{wide.get('label_line')}px, and the tab strip "
+            f"{'hidden' if not wide.get('tabs_shown') else 'ALSO SHOWN'}; at "
+            f"{narrow.get('width')}px the rail is "
+            f"{'shown' if narrow.get('rail_shown') else 'hidden'} and the tab strip "
+            f"{'shown' if narrow.get('tabs_shown') else 'HIDDEN'}."
         )
     if app_allowed:
         print(

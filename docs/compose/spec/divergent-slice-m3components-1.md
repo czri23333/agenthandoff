@@ -842,6 +842,56 @@ item by item rather than assuming it: 4 of 4 `McpToolCall` ids, 48 of 48
 `CollabAgentToolCall` ids and 1645 of 1645 `Reasoning` strings are already a row
 somewhere else.
 
+### Round 28 — the loader's rhythm, and the rail nobody ever mounted
+
+**Why this round exists.** Round 26 finished the motion work and left two items on
+the list: the loading indicator had an anatomy but no gate on its *rhythm*, and the
+navigation rail's geometry existed in `m3.css` with nothing mounting it.
+
+| Claim | Evidence |
+|---|---|
+| the loader's contract is written down | `web/src/m3.css`, the comment above `.ah-loading`: the container turns once per `--ah-motion-duration-extra-long4` on the linear easing, the `::after` shape morphs at a quarter of that period on the standard easing, both forever. `LoadingIndicatorTokens.kt` (vendored, consumed) publishes the anatomy: a 48dp corner-full container in `primary-container` around a 38dp active shape in `on-primary-container` |
+| nothing measured that rhythm | the audit's gates were `--focus`, `--overlap`, `--states`, `--disabled`, `--eclipse` and `--morph`; the gallery has mounted `#g-ah-loading` and `#g-ah-loading-u` all along |
+| the rail rules are measured, but only against a mock | `grep` for `ah-navrail` / `ah-navbar` over the product's own sources (`web/src`, `m3.css` aside) returns **nothing**; the only elements carrying those classes are the audit's own gallery (`scripts/audit_component_rules.py`, lines 414-429: `#g-ah-navrail-item`, `#g-ah-navrail-indicator`, `#g-ah-navbar`). So the geometry passes a check no user ever sees, and the comment above the rules still calls them "for a future shell that uses them" |
+| the tokens that geometry needs are vendored and unconsumed | `tests/fixtures/m3spec/androidx/NavigationRailCollapsedTokens.kt` publishes `ContainerWidth` 96dp, `NarrowContainerWidth` 80dp, `ItemVerticalSpace` 4dp, `TopSpace` 44dp, `ContainerShape` corner-none, `ContainerElevation` level0. `scripts/gen_tokens.py` reads only `NavigationRailBaselineItemTokens.kt` (item height 64, item vertical space 6, leading/trailing 16, icon-label 8, header space 40, 24dp icon, corner-full indicator) |
+| the two vendored rail files disagree | baseline says the item's vertical space is **6dp**, collapsed says **4dp**. The generator took the baseline value; the conflict is recorded here rather than silently resolved |
+
+**What was built.** `--loading`, a gate that reads the M3E indicator's two
+animations off the Web Animations API *while they run* and samples the shape's
+computed `border-radius` half a morph period apart, so a loader that stands still
+cannot pass; and a real navigation rail in the shell, built from three vendored
+androidx files instead of the two the generator was reading.
+
+| Claim | Measured |
+|---|---|
+| the loader's rhythm, read while running | `--loading` in both themes, both variants: the container turns in **1000ms** against `--ah-motion-duration-extra-long4` **1000ms**, the `::after` shape morphs in **250ms** (a quarter), both `Infinity` iterations, and the border-radius differs between the two samples in all four readings |
+| the gate can fail | on a `%TEMP%` copy whose morph duration was changed to the full turn period, `--loading` exits 1 with `the morph period is 1000ms, not a quarter of the 1000ms turn` for all four readings |
+| the 4dp/6dp argument, settled from the sources | both files are official (v0_11_0). `NavigationRailCollapsedTokens.ItemVerticalSpace` is the **4dp** the collapsed rail puts between items, and the upstream implementation agrees: `NavigationRail.kt` on `androidx-main` sets `internal val NavigationRailVerticalPadding = 4.dp` and uses it both as the rail's padding and as `Arrangement.spacedBy(NavigationRailVerticalPadding)`, with `NavigationRailItemWidth = NavigationRailCollapsedTokens.NarrowContainerWidth`. The baseline file's 6dp is `ContainerVerticalSpace` for the baseline item variant this rail does not render |
+| a third file the generator was missing | the implementation reads `NavigationRailVerticalItemTokens` for the indicator (`ActiveIndicatorWidth` 56dp, `ActiveIndicatorHeight` 32dp, `IconLabelSpace` 4dp, `LeadingSpace`/`TrailingSpace` 16dp, `LabelTextFont` label-medium). It is now vendored through `scripts/fetch_m3spec.py` and pinned in `PINS.tsv` |
+| the rail in the product | at 1440px: **80px** wide (the narrow container), **5** items of **80x56px** with **4px** between them and 4px of rail padding, an indicator of **56x32px** at `corner-full`, labels **12px/16px** (label-medium), the active indicator `rgb(232, 222, 248)` = `secondary-container`, and the top tab strip `display: none` |
+| the rail below the breakpoint | at 900px the rail is `display: none` and the tab strip is back; `--rail` fails if the rail renders below 1200px, if the tab strip renders above it, if the two disagree about how many views exist, or if any measured box differs from the token it declares |
+| what the gate cost the gallery | the reachability sweep is gallery-only, and the gallery had mounted `.ah-navrail__item` as a bare div with no wrapper, no label and no active variant — so the product's own selectors reached nothing. The gallery now mounts the rail in the shape `App.tsx` renders, and the sweep reports **253/316 rules reach an element, 0 unverified, no dead rules** |
+
+**Three gate defects this round had to fix first**, each found by measurement and
+each proven able to fail afterwards:
+
+| Gate | What it was doing | What it does now |
+|---|---|---|
+| `--overlap` | compared raw `getBoundingClientRect()`s, so a link 9000px down inside a scrolled transcript "overlapped" a 原文 button in a row that was itself scrolled out of view — `12x16px` of a pair nobody can see, on the live zcode session `sess_839f73cd` | intersects every box with its clipping ancestors and skips a control whose visible box is empty. Proof: on the unchanged page it reports **0 pairs over 18 visible controls**, two synthetic controls placed 40px apart are still reported (`40x30px`), and a third clipped 5000px inside an `overflow: hidden` box is not |
+| `--states` | clicked its way through the page and left the display-settings Dropdown open; the next sample's cursor landed on `LI.ant-dropdown-menu-item`, so the rail's first item read `hover layer is 0.000` while answering the pointer correctly (verified by hand: `color(srgb 0.11 0.098 0.169 / 0.08)`) | presses Escape before each sample, so every control is measured from a clean page. The same leak explained a second failure it reported in the same run (`ant-btn ... hover swaps bd to #79747e`), which is gone |
+| the rail's own state layer | — | the rail item answers the pointer with the layer `NavigationRailColorTokens` publishes (`ItemActive/InactiveHovered` and `-Pressed` are all `on-secondary-container`), composed at 8%/12% on a `::before` shaped like the indicator, plus the system-coloured outline the forced-colours pass needs. `--states` now reads 16 controls with a token-coloured layer at 8%/12% |
+
+**What is still ours.** `ContainerWidth` 96dp and `TopSpace` 44dp are published values
+the collapsed rail does not spend (upstream narrows to 80dp and pads 4dp), so they
+are carried as the landmark's `max-width` and `scroll-margin-block-start` with that
+reason written beside them rather than silently dropped. The rail "turns" nothing:
+its only motion is the state layer's 150ms fade, so the table above has no curve to
+report. Gates: `pytest tests/` **459 passed, 2 skipped** · `ruff check .` clean ·
+`gen_tokens.py --check` · `evidence --check` · `conformance --check` 14 CLIs ·
+`npx tsc -b` · `npm run build`. Full audit, exit 0: focus **862** elements with the
+ring at 3px/2px in both themes, overlap **112** controls with none hit-testing
+another, states **16**, disabled **72**, eclipse **25/17**, morph **16** readings,
+loading **4**, rail **2** window sizes.
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

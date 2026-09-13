@@ -266,6 +266,7 @@ _androidx(
     "NavigationBarHorizontalItemTokens.kt",
     "NavigationBarVerticalItemTokens.kt",
     "NavigationRailBaselineItemTokens.kt",
+    "NavigationRailVerticalItemTokens.kt",
     "NavigationRailCollapsedTokens.kt",
     "NavigationRailColorTokens.kt",
     "SearchBarTokens.kt",

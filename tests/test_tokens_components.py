@@ -277,8 +277,8 @@ def test_layout_structures_are_googles_heights():
     assert C["navigationBar"]["height"] == 64
     assert C["navigationBar"]["tallHeight"] == 80
     assert C["navigationBar"]["indicator"]["height"] == 40
-    assert C["navigationRail"]["item"]["height"] == 64
-    assert C["navigationRail"]["item"]["verticalSpace"] == 6
+    assert C["navigationRail"]["item"]["height"] == 56
+    assert C["navigationRail"]["container"]["verticalSpace"] == 4
 
 
 def test_every_family_names_its_source():

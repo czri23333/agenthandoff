@@ -575,34 +575,102 @@ MAPPING: dict[str, tuple[str, str]] = {
         "NavigationBarTokens.ItemInactiveLabelTextColor",
     ),
     # Navigation rail.
+    "navigationRail.container.width": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.ContainerWidth",
+    ),
+    "navigationRail.container.narrowWidth": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.NarrowContainerWidth",
+    ),
+    "navigationRail.container.verticalSpace": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.ItemVerticalSpace",
+    ),
+    "navigationRail.container.topSpace": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.TopSpace",
+    ),
+    "navigationRail.container.shape": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.ContainerShape",
+    ),
+    "navigationRail.container.elevation": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.ContainerElevation",
+    ),
+    "navigationRail.container.color": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.ContainerColor",
+    ),
+    "navigationRail.item.width": (
+        ANDROIDX + "NavigationRailCollapsedTokens.kt",
+        "NavigationRailCollapsedTokens.NarrowContainerWidth",
+    ),
     "navigationRail.item.height": (
-        ANDROIDX + "NavigationRailBaselineItemTokens.kt",
-        "NavigationRailBaselineItemTokens.ContainerHeight",
-    ),
-    "navigationRail.item.verticalSpace": (
-        ANDROIDX + "NavigationRailBaselineItemTokens.kt",
-        "NavigationRailBaselineItemTokens.ContainerVerticalSpace",
-    ),
-    "navigationRail.item.leading": (
-        ANDROIDX + "NavigationRailBaselineItemTokens.kt",
-        "NavigationRailBaselineItemTokens.ActiveIndicatorLeadingSpace",
-    ),
-    "navigationRail.item.trailing": (
-        ANDROIDX + "NavigationRailBaselineItemTokens.kt",
-        "NavigationRailBaselineItemTokens.ActiveIndicatorTrailingSpace",
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.ActiveIndicatorWidth",
     ),
     "navigationRail.item.iconLabelSpace": (
-        ANDROIDX + "NavigationRailBaselineItemTokens.kt",
-        "NavigationRailBaselineItemTokens.ActiveIndicatorIconLabelSpace",
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.IconLabelSpace",
     ),
-    "navigationRail.item.icon": (ANDROIDX + "NavigationRailBaselineItemTokens.kt", "NavigationRailBaselineItemTokens.IconSize"),
-    "navigationRail.item.headerSpace": (
+    "navigationRail.item.icon": (
         ANDROIDX + "NavigationRailBaselineItemTokens.kt",
-        "NavigationRailBaselineItemTokens.HeaderSpaceMinimum",
+        "NavigationRailBaselineItemTokens.IconSize",
+    ),
+    "navigationRail.indicator.height": (
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.ActiveIndicatorHeight",
+    ),
+    "navigationRail.indicator.width": (
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.ActiveIndicatorWidth",
+    ),
+    "navigationRail.indicator.leading": (
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.LeadingSpace",
+    ),
+    "navigationRail.indicator.trailing": (
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.TrailingSpace",
     ),
     "navigationRail.indicator.shape": (
         ANDROIDX + "NavigationRailBaselineItemTokens.kt",
         "NavigationRailBaselineItemTokens.ActiveIndicatorShape",
+    ),
+    "navigationRail.typeRole": (
+        ANDROIDX + "NavigationRailVerticalItemTokens.kt",
+        "NavigationRailVerticalItemTokens.LabelTextFont",
+    ),
+    "navigationRail.active.indicator": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemActiveIndicator",
+    ),
+    "navigationRail.active.icon": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemActiveIcon",
+    ),
+    "navigationRail.active.label": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemActiveLabelText",
+    ),
+    "navigationRail.inactive.icon": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemInactiveIcon",
+    ),
+    "navigationRail.inactive.label": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemInactiveLabelText",
+    ),
+    # Six state layers in the file, all OnSecondaryContainer; the sheet spends two.
+    "navigationRail.stateLayer.hovered": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemActiveHoveredStateLayer",
+    ),
+    "navigationRail.stateLayer.pressed": (
+        ANDROIDX + "NavigationRailColorTokens.kt",
+        "NavigationRailColorTokens.ItemActivePressedStateLayer",
     ),
     # Slider: the M3E handle is a bar, not a knob.
     "slider.handle.width": (ANDROIDX + "SliderTokens.kt", "SliderTokens.HandleWidth"),
@@ -880,7 +948,7 @@ OURS_FAMILIES = {
 # `CornerNone` is 0, and a seventh public `--ah-shape-*` for zero would be a
 # token in search of a reader. The mapping still points at the official member;
 # this set says the 0 and the `corner-none` are the same thing.
-ZERO_IS_CORNER_NONE = {"dockedToolbar.shape"}
+ZERO_IS_CORNER_NONE = {"dockedToolbar.shape", "navigationRail.container.shape"}
 
 CONFLICTS: dict[str, tuple[str, str, object]] = {
     "chip rest corner: per-variant files vs the M3E base": (

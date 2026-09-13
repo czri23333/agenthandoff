@@ -1,5 +1,6 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { App as AntApp, Dropdown, Layout, Tooltip, Typography } from "antd";
+import { ApartmentOutlined, AppstoreOutlined, DatabaseOutlined, InboxOutlined, MedicineBoxOutlined } from "@ant-design/icons";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
 import { getSeed, seeds, setSeed, setThemeMode, useTheme, type ThemeMode } from "./theme";
 import Dashboard from "./views/Dashboard";
@@ -22,12 +23,20 @@ type View =
   | { name: "doctor" }
   | { name: "memory" };
 
-const TABS: { id: View["name"]; key: string; labelKey: Parameters<ReturnType<typeof useT>>[0]; hash: string }[] = [
-  { id: "dashboard", key: "1", labelKey: "sessions", hash: "" },
-  { id: "threads", key: "2", labelKey: "threads", hash: "threads" },
-  { id: "inbox", key: "3", labelKey: "inbox", hash: "inbox" },
-  { id: "doctor", key: "4", labelKey: "doctor", hash: "doctor" },
-  { id: "memory", key: "5", labelKey: "memory", hash: "memory" },
+type TabDef = {
+  id: View["name"];
+  key: string;
+  labelKey: Parameters<ReturnType<typeof useT>>[0];
+  hash: string;
+  icon: ReactNode;
+};
+
+const TABS: TabDef[] = [
+  { id: "dashboard", key: "1", labelKey: "sessions", hash: "", icon: <AppstoreOutlined /> },
+  { id: "threads", key: "2", labelKey: "threads", hash: "threads", icon: <ApartmentOutlined /> },
+  { id: "inbox", key: "3", labelKey: "inbox", hash: "inbox", icon: <InboxOutlined /> },
+  { id: "doctor", key: "4", labelKey: "doctor", hash: "doctor", icon: <MedicineBoxOutlined /> },
+  { id: "memory", key: "5", labelKey: "memory", hash: "memory", icon: <DatabaseOutlined /> },
 ];
 
 const THEME_ORDER: ThemeMode[] = ["auto", "dark", "light"];
@@ -279,10 +288,31 @@ export default function App() {
         </Typography.Text>
       </Layout.Header>
 
-      <Layout.Content
-        className="min-h-0 flex-1 overflow-hidden"
-        key={view.name + (view.name === "detail" ? view.sid : "")}
-      >
+      <div className="flex min-h-0 flex-1">
+        <nav className="ah-navrail shrink-0" aria-label={t("navRail")}>
+          {TABS.map((tb) => {
+            const active = activeTabId === tb.id;
+            return (
+              <button
+                key={tb.id}
+                type="button"
+                className={`ah-navrail__item${active ? " ah-navrail__item--active" : ""}`}
+                aria-current={active ? "page" : undefined}
+                onClick={() => goTo(tb.id)}
+              >
+                <span className="ah-navrail__indicator" aria-hidden="true">
+                  {tb.icon}
+                </span>
+                <span className="ah-navrail__label">{t(tb.labelKey)}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <Layout.Content
+          className="min-h-0 flex-1 overflow-hidden"
+          key={view.name + (view.name === "detail" ? view.sid : "")}
+        >
         <div className="view-enter h-full">
           {view.name === "dashboard" && (
             <Dashboard onOpen={(cli, sid) => navigate({ name: "detail", cli, sid })} />
@@ -312,7 +342,8 @@ export default function App() {
             </Suspense>
           )}
         </div>
-      </Layout.Content>
+        </Layout.Content>
+      </div>
     </Layout>
   );
 }
