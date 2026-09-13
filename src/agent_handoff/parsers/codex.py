@@ -417,6 +417,18 @@ class CodexParser(Parser):
         # from the order of the messages instead of reading.
         aborts: list[dict] = []
         last_turn_end = ""
+        # A task_complete can carry the store's own error (a dict whose
+        # ``message`` may itself be a bare string, or a bare string). Keep the
+        # newest completion and count the failed ones; _end_state reads the
+        # newest end event, and the count becomes a `failed_turns:` note.
+        last_completion: dict | None = None
+        failed_completions = 0
+        # task_started names the collaboration posture. `default` is the
+        # ordinary mode and is not noted; anything else is a fact worth keeping.
+        collaboration_mode: str | None = None
+        # turn_id -> the latest assistant answer, so a completion's duration_ms
+        # can be attributed to the turn it measured without guessing.
+        last_assistant: dict[str, Message] = {}
         # The product's own compaction dividers, in order. Each one measures the
         # window it closed (the last request before it) against the window that
         # replaced it (the first request after it).
@@ -447,7 +459,7 @@ class CodexParser(Parser):
                 at: str | None,
                 raw: str | None = None,
                 model: str | None = None,
-            ) -> None:
+            ) -> Message | None:
                 """Append, dropping the duplicate an event stream always has.
 
                 Codex writes an assistant turn twice — once as ``response_item``
@@ -459,7 +471,7 @@ class CodexParser(Parser):
                 usage after the request it measures.
                 """
                 if not text:
-                    return
+                    return None
                 last = messages[-1] if messages else None
                 # The stream writes an assistant turn twice (response_item +
                 # event_msg); a tool card repeated twice is a tool the run
@@ -471,7 +483,7 @@ class CodexParser(Parser):
                     and not text.startswith(_HINT_PREFIXES)
                 )
                 if role == "assistant" and same:
-                    return
+                    return last
                 msg = self.msg(role, raw if raw is not None else text, text=text, at=at)
                 if role == "assistant":
                     if model:
@@ -484,6 +496,7 @@ class CodexParser(Parser):
                             msg.tokens_reasoning = pending.get("reasoning")
                             pending_tokens.pop("pending", None)
                 messages.append(msg)
+                return msg
 
             if rtype == "session_meta":
                 # Facts about the *session* that no later row repeats: where the
@@ -516,9 +529,25 @@ class CodexParser(Parser):
                 if ptype == "task_started":
                     window = payload.get("model_context_window")
                     context_window = window if isinstance(window, int) else None
+                    collab = payload.get("collaboration_mode_kind")
+                    if collab and collab != "default":
+                        collaboration_mode = str(collab)[:80]
                 elif ptype == "task_complete":
+                    completion = payload if isinstance(payload, dict) else {}
+                    last_completion = completion
                     saw_completion = True
                     last_turn_end = "complete"
+                    if self._completion_error(completion) is not None:
+                        failed_completions += 1
+                    # The store's own wall clock, attributed by turn_id to the
+                    # latest assistant answer. No match means drop it; never
+                    # guess which row owned the request.
+                    duration = completion.get("duration_ms")
+                    turn_id = str(completion.get("turn_id") or "").strip()
+                    if isinstance(duration, int) and turn_id in last_assistant:
+                        answer = last_assistant[turn_id]
+                        if answer.dur_ms is None:
+                            answer.dur_ms = duration
                 elif ptype == "turn_aborted":
                     # The product's own record that the user stopped a turn.
                     aborts.append(payload if isinstance(payload, dict) else {})
@@ -696,7 +725,7 @@ class CodexParser(Parser):
                     model = candidate
                 # The permissions this turn ran fenced with (what the app shows
                 # for the turn: sandbox/approval/collaboration posture).
-                for key in ("sandbox_policy", "approval_policy", "collaboration_mode"):
+                for key in ("sandbox_policy", "approval_policy"):
                     val = payload.get(key)
                     if val and key not in turn_policy:
                         # A dict here is a nested policy ({"type":
@@ -720,6 +749,12 @@ class CodexParser(Parser):
                 role = payload.get("role")
                 if role not in ("user", "assistant"):
                     continue  # developer/system rows are harness injections
+                passthrough = payload.get("internal_chat_message_metadata_passthrough")
+                turn_id = (
+                    str(passthrough.get("turn_id") or "").strip()
+                    if isinstance(passthrough, dict)
+                    else ""
+                )
                 text, tool_blocks = as_text_blocks(payload.get("content"))
                 raw = text
                 text = self.clean_text(text)
@@ -728,7 +763,9 @@ class CodexParser(Parser):
                         files[instruction] += 1
                     continue
                 if text and not self.is_noise(text):
-                    push(str(role), text, when, raw, model=model)
+                    msg = push(str(role), text, when, raw, model=model)
+                    if msg is not None and role == "assistant" and turn_id:
+                        last_assistant[turn_id] = msg
                 for tb in tool_blocks:
                     name = str(tb.get("name") or "tool")
                     tools[name] += 1
@@ -858,6 +895,10 @@ class CodexParser(Parser):
             meta.notes = [*meta.notes, f"context_window:{context_window}"]
         for key, val in turn_policy.items():
             meta.notes = [*meta.notes, f"{key}:{val}"]
+        if failed_completions:
+            meta.notes = [*meta.notes, f"failed_turns:{failed_completions}"]
+        if collaboration_mode:
+            meta.notes = [*meta.notes, f"collaboration_mode:{collaboration_mode}"]
         if rate_limits:
             claims = ", ".join(f"{k}={v}" for k, v in rate_limits.items())
             meta.notes = [*meta.notes, f"rate_limits:{claims}"]
@@ -869,6 +910,7 @@ class CodexParser(Parser):
             last_tokens,
             aborts,
             last_turn_end,
+            last_completion,
         )
         self._usage_cache[meta.session_id] = {
             "last_tokens": last_tokens,
@@ -962,16 +1004,56 @@ class CodexParser(Parser):
             return head
         return f"{head}\n{body[:600]}"
 
-    def _end_state(self, meta, messages, saw_completion, window, tokens, aborts, last_kind):
-        """Codex records no explicit error; infer only from hard evidence."""
+    @staticmethod
+    def _completion_error(payload: dict):
+        """The non-empty error a task_complete can carry, or None.
+
+        Codex writes the error as either a bare string or a dict whose
+        ``message`` is itself a bare string (and may sit beside a
+        ``codex_error_info``). Both are the store's own record, not an
+        inference.
+        """
+        err = payload.get("error")
+        if isinstance(err, str):
+            return err.strip() or None
+        if isinstance(err, dict) and err:
+            return err
+        return None
+
+    @staticmethod
+    def _completion_error_detail(err) -> str:
+        """The store's error text, flattened and truncated, plus any extra info."""
+        if isinstance(err, dict):
+            message = err.get("message")
+            info = err.get("codex_error_info")
+        else:
+            message = err
+            info = None
+        text = " ".join(str(message or "").split())
+        if not text and isinstance(err, dict):
+            parts = [str(v) for v in err.values() if v]
+            text = " ".join(" ".join(str(part).split()) for part in parts)
+        detail = text[:400]
+        flat_info = " ".join(str(info).split()) if info else ""
+        if flat_info:
+            suffix = f"codex_error_info: {flat_info[:200]}"
+            detail = f"{detail} ({suffix})" if detail else suffix
+        return detail or "task_complete recorded an error"
+
+    def _end_state(
+        self,
+        meta,
+        messages,
+        saw_completion,
+        window,
+        tokens,
+        aborts,
+        last_kind,
+        last_completion=None,
+    ):
+        """Explicit records beat inference; a user abort is the highest record."""
         from agent_handoff.model import Interruption
 
-        used = tokens.get("total_tokens") or tokens.get("input_tokens")
-        if window and used and used >= int(window * 0.95):
-            return Interruption(
-                kind="context_exceeded",
-                detail=f"last recorded usage {used} of a {window}-token window",
-            )
         if aborts and last_kind == "aborted":
             # The store said so: the newest turn ended with turn_aborted, which
             # is the user stopping it. Reading the message order instead called
@@ -987,6 +1069,28 @@ class CodexParser(Parser):
             return Interruption(
                 kind="cancelled",
                 detail=f"{how}{ran} (store reason: {last.get('reason') or 'unknown'})",
+            )
+        if last_kind == "complete" and isinstance(last_completion, dict):
+            err = self._completion_error(last_completion)
+            if err is not None:
+                # The explicit store error wins over the 95% window heuristic,
+                # but a dangling user instruction is still worth carrying into
+                # the handoff: set the same 400-char field user_pending uses.
+                pending = (
+                    messages[-1].text[:400]
+                    if messages and messages[-1].role == "user"
+                    else ""
+                )
+                return Interruption(
+                    kind="error",
+                    detail=self._completion_error_detail(err),
+                    pending_user_text=pending,
+                )
+        used = tokens.get("total_tokens") or tokens.get("input_tokens")
+        if window and used and used >= int(window * 0.95):
+            return Interruption(
+                kind="context_exceeded",
+                detail=f"last recorded usage {used} of a {window}-token window",
             )
         if messages and messages[-1].role == "user":
             return Interruption(

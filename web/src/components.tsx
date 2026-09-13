@@ -73,7 +73,7 @@ export function InterruptionBanner({ it }: { it: Interruption }) {
               <span dir="auto">{it.detail}</span>
             </div>
           )}
-          {it.kind === "user_pending" && it.pending_user_text && (
+          {it.pending_user_text && (
             <div className="ah-code mt-1.5 px-2 py-1.5 text-[12px]">
               <span className="ah-label">{t("pendingDirective")}</span>
               <div className="whitespace-pre-wrap break-words">{it.pending_user_text}</div>

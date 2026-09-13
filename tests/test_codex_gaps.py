@@ -13,7 +13,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agent_handoff.model import Interruption, Message
 from agent_handoff.parsers.codex import CodexParser
+from agent_handoff.summarize import summarize
 
 SID = "019fac0f-0000-7000-8000-0000000000bb"
 CHILD = "019fb90d-d5b3-7f31-9380-8400b7cb1f23"
@@ -675,3 +677,165 @@ def test_the_answer_takes_the_billing_not_the_tool_or_thinking_row(tmp_path):
             continue
         assert row.tokens_in is None, row.text[:40]
         assert row.tokens_out is None, row.text[:40]
+
+# -- completion error / duration attribution ---------------------------------
+
+def _msg(role: str, text: str, turn_id: str = "", at: str = "2026-09-12T10:00:01.000Z") -> dict:
+    payload = {
+        "type": "message",
+        "role": role,
+        "content": [{"type": "output_text" if role == "assistant" else "input_text", "text": text}],
+    }
+    if turn_id:
+        payload["internal_chat_message_metadata_passthrough"] = {"turn_id": turn_id}
+    return _row("response_item", payload, at=at)
+
+
+def test_a_failed_completion_is_an_error(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("assistant", "i tried", turn_id="t1"),
+            _row(
+                "event_msg",
+                {
+                    "type": "task_complete",
+                    "turn_id": "t1",
+                    "duration_ms": 500,
+                    "error": {"message": "the model failed", "codex_error_info": "bad gateway"},
+                },
+            ),
+        ],
+    )
+    assert raw.interruption.kind == "error"
+    assert "the model failed" in raw.interruption.detail
+    assert "codex_error_info: bad gateway" in raw.interruption.detail
+
+
+def test_a_bare_string_error_is_also_an_error(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [_row("event_msg", {"type": "task_complete", "error": "quota exhausted"})],
+    )
+    assert raw.interruption.kind == "error"
+    assert "quota exhausted" in raw.interruption.detail
+
+
+def test_a_later_success_means_the_latest_completion_wins(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _row("event_msg", {"type": "task_complete", "error": {"message": "fail"}}),
+            _msg("assistant", "done", turn_id="t2"),
+            _row("event_msg", {"type": "task_complete", "turn_id": "t2", "duration_ms": 10}),
+        ],
+    )
+    assert raw.interruption.kind == "clean"
+
+
+def test_an_abort_after_a_failed_completion_is_cancelled(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _row("event_msg", {"type": "task_complete", "error": {"message": "fail"}}),
+            _row("event_msg", {"type": "turn_aborted", "reason": "interrupted"}),
+        ],
+    )
+    assert raw.interruption.kind == "cancelled"
+
+
+def test_duration_ms_lands_on_the_turn_answer_without_overwriting(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("assistant", "answer", turn_id="t1"),
+            _row("event_msg", {"type": "task_complete", "turn_id": "t1", "duration_ms": 100}),
+            _row("event_msg", {"type": "task_complete", "turn_id": "t1", "duration_ms": 200}),
+        ],
+    )
+    assert raw.messages[0].dur_ms == 100
+
+
+def test_a_completion_duration_is_dropped_without_a_turn_match(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("assistant", "answer", turn_id="t1"),
+            _row("event_msg", {"type": "task_complete", "turn_id": "other", "duration_ms": 100}),
+        ],
+    )
+    assert raw.messages[0].dur_ms is None
+
+
+def test_failed_turns_and_collaboration_mode_are_notes(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _row("event_msg", {"type": "task_started", "collaboration_mode_kind": "plan"}),
+            _msg("assistant", "try", turn_id="t1"),
+            _row(
+                "event_msg",
+                {"type": "task_complete", "turn_id": "t1", "error": {"message": "fail"}},
+            ),
+            _row("event_msg", {"type": "task_complete", "turn_id": "t1", "duration_ms": 10}),
+        ],
+    )
+    assert any(n == "failed_turns:1" for n in raw.meta.notes)
+    assert any(n == "collaboration_mode:plan" for n in raw.meta.notes)
+
+
+def test_default_collaboration_mode_is_not_a_note(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [_row("event_msg", {"type": "task_started", "collaboration_mode_kind": "default"})],
+    )
+    assert not any(n.startswith("collaboration_mode:") for n in raw.meta.notes)
+
+
+def test_a_failed_completion_keeps_the_unanswered_user_instruction(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("user", "please ship it", turn_id="t1"),
+            _row(
+                "event_msg",
+                {
+                    "type": "task_complete",
+                    "turn_id": "t1",
+                    "error": {"message": "the model failed", "codex_error_info": "bad gateway"},
+                },
+            ),
+        ],
+    )
+    assert raw.interruption.kind == "error"
+    assert raw.interruption.pending_user_text == "please ship it"
+
+
+def test_summarize_surfaces_the_pending_instruction_for_an_error(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("user", "please ship it", turn_id="t1"),
+            _row(
+                "event_msg",
+                {"type": "task_complete", "turn_id": "t1", "error": {"message": "fail"}},
+            ),
+        ],
+    )
+    bundle = summarize(raw)
+    assert bundle.next_steps[0] == "[pending from interrupted session] please ship it"
+
+
+def test_summarize_does_not_duplicate_a_pending_step(tmp_path):
+    _parser, raw = _load(tmp_path, [_row("event_msg", {"type": "task_complete"})])
+    raw.interruption = Interruption()
+    raw.messages = [
+        Message(role="assistant", text="reply", at="2026-09-12T10:00:01.000Z"),
+        Message(role="user", text="one more thing", at="2026-09-12T10:00:02.000Z"),
+    ]
+    bundle = summarize(raw)
+    pending_steps = [
+        s for s in bundle.next_steps if s.startswith("[pending from interrupted session]")
+    ]
+    assert len(pending_steps) == 1
+    assert pending_steps[0] == "[pending from interrupted session] one more thing"

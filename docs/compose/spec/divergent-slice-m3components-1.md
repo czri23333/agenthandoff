@@ -815,7 +815,7 @@ different things and the tool says so in its own header.
 |---|---|
 | thinking rows, whole store | **4581** `[思考]` turns over the 100 sessions the reader now lists (the 96-file census above found 4512 `response_item/reasoning` rows, 4456 of them carrying readable text) |
 | tool cards, whole store | **8238** `[工具]` turns |
-| the exit code that was spelled differently | the desktop build writes `Process exited with code 1`, not `Exit code: 1` — 267 of the eight-file session’s 271 failures were invisible for that reason, and a synthetic test pins the second spelling |
+| the exit code that was spelled differently | the desktop build writes `Process exited with code 1`, not `Exit code: 1` — 267 of the eight-file session's 271 failures were invisible for that reason, and a synthetic test pins the second spelling |
 | end states, whole store | **7 sessions `cancelled`** (from `turn_aborted`, `reason: interrupted`), 78 `clean`, 9 `user_pending`, 6 `unknown` |
 | store facts now visible | 11 sessions carry a `goal:` note, 24 a `provider:`, 18 a `service_tier:`, 19 a `world_state:` |
 | what the reader costs | the eight-file session now returns **4913** turns and **7.0 MB** of transcript JSON; the tool-card body is capped at 600 characters |
@@ -825,7 +825,7 @@ different things and the tool says so in its own header.
 Browser-measured on the built bundle (headless Chromium, the served cockpit):
 on the eight-file session the first page mounts **106 tool cards** and **45 folded
 thinking blocks**; clicking a thinking header opens `.ah-reasoning-content` with the
-model’s own words, clicking a tool head expands `.ah-toolcall-args` with the
+model's own words, clicking a tool head expands `.ah-toolcall-args` with the
 arguments JSON (▸ 🔧 navigate_to_codex_page · {"threadId": "01a0949d…"}), the
 session shows 3 compaction mentions, and the new store-facts list renders
 `context_window 950000`. On a session that spawned one, **2 sub-agent blocks**
@@ -834,7 +834,7 @@ render with a working child link (▸ 👥 子代理 · completed /root/echo_che
 `ruff check .` clean · `gen_tokens.py --check` · `evidence --check` ·
 `conformance --check` 14 CLIs · `npx tsc -b` · `npm run build`.
 
-Dropped on purpose, with the measurement that justifies it: `item_completed`’s
+Dropped on purpose, with the measurement that justifies it: `item_completed`'s
 `AgentMessage`/`UserMessage`/`Reasoning`/`CommandExecution`/`CollabAgentToolCall`/
 `ContextCompaction`/`McpToolCall`/`Plan` kinds and the `inter_agent_communication_metadata`
 row repeat a record already read above, and the round-27 census shows the overlap
@@ -1098,6 +1098,48 @@ keep the timestamp ordering, which is what the other parsers have always used.
 | the divider sits after its own turns | for the 8-file session: two dividers, `after_messages` **1719** and **3524**; in the served API they sit **1719** and **3525** rows from the oldest end — the second is one further because the first divider is itself a row above it |
 | the history marker is still first | inserted at the start of the oldest-first stream after the anchored dividers, so it stays the oldest row |
 | tests | the compaction case in `tests/test_codex_gaps.py` now writes two turns before the divider and asserts `after_messages == 2`, so a divider that loses its position fails |
+### Round 34 — a failed turn was reported as a clean end
+
+**Why this round exists.** The cockpit's promise is that it tells the next session
+how this one actually ended. For Codex the reader only asked whether `task_complete`
+existed — any completion meant "clean" — but the record itself carries the store's
+own `error`. On this machine (2026-09-13: 110 rollout files, 103 sessions): 218
+completions, **40 of them carrying a non-empty error** (a 402 quota death, a 502 from a local gateway, "The supported API model
+names are deepseek-flash, deepseek-v4-pro, but you passed gpt-6-astra"), and in
+**25 sessions the newest end event is one of those failures**. All 25 were reported
+as a clean end (17) or as an unanswered user message (8).
+
+| Claim | Measured |
+|---|---|
+| completions that carry an error | **40** of 218 |
+| sessions whose newest end event is an errored completion | **25** |
+| what those 25 sessions reported before | `clean` **17**, `user_pending` **8** |
+| what they report now | `error` **25**, each carrying the store's own message text |
+| the wall clock the reader dropped | `duration_ms` on 204 completions (176 ms … 10,949,490 ms) |
+| how that clock is attributed | the row's `internal_chat_message_metadata_passthrough.turn_id`: **203** of 218 completions match a message row; the rest are dropped, never guessed |
+| the client's own collaboration posture | `task_started.collaboration_mode_kind` (default 282, plan 3) becomes a `collaboration_mode:` fact when it is not `default` |
+
+**What was built.** `task_complete.error` is read in both shapes the store writes
+(a dict with a `message` beside a `codex_error_info`, or a bare string). The newest
+end event decides the kind, and the order is now explicit-record-first: a user
+`turn_aborted` still wins, then the store's error, and only then the 95%-of-window
+inference — two of the 25 sessions also trip that heuristic and now report the
+recorded error instead of our guess. `duration_ms` lands on that turn's own
+assistant message as `dur_ms` (the transcript already renders it as `+1.2s`), and a
+`failed_turns:<n>` fact counts the failures a session survived.
+
+An error is not the whole story: the instruction that turn died on is still un-run.
+The parser fills `pending_user_text` for exactly that case, `summarize` promotes it
+to `next_steps[0]`, and the banner, the markdown and the continuation brief now show
+pending text for **any** kind, not only `user_pending` — why a session stopped and
+what it still owes are two different facts.
+
+| Claim | Measured |
+|---|---|
+| the store's failure text survives verbatim | the 25 details carry the store's own bytes, e.g. `unexpected status 402 Payment Required: Insufficient Balance, url: https://api.deepseek.com/responses (codex_error_info: other)` |
+| the pending instruction still reaches the brief | a synthetic rollout in `tests/test_codex_gaps.py`: kind `error` with a dangling user turn ⇒ `next_steps[0]` starts with `[pending from interrupted session]`; a session that is already `user_pending` does not get the line twice |
+| tests | `tests/test_codex_gaps.py` gained 11 cases (dict and bare errors, a later success staying clean, an abort outranking an error, duration attribution and its refusal to overwrite, unmatched turn ids dropped, both notes); suite **486 passed, 2 skipped**, `ruff` clean |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

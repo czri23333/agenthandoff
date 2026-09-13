@@ -331,6 +331,29 @@ sampled away.
     *vertical* partition this web layout does not have; the rail's 96dp and 44dp
     describe a container the collapsed form does not render). All three are written
     down beside the tokens rather than dressed up as used.
+27. **The store times the first token; nothing spends it.** `task_complete` carries
+    `time_to_first_token_ms` on 174 of its 218 rows (443 ms … 11,262 ms) and no field,
+    column or fact reads it. `duration_ms` is now spent (the turn's `dur_ms`), but the
+    other half of the same record is what separates a turn that was slow to *think*
+    from one that was slow to *stream*, and this reader cannot yet say which happened.
+28. **`phase` separates a commentary turn from the final answer; the reader still
+    takes whichever came last.** Across the 103 sessions this store holds, the last
+    chat message is `commentary` in **21** of them, and the parser's literal last
+    assistant message is a tool card in **23** and a reasoning block in **1** — which
+    is what `summarize`'s `context_notes`, its `unfinished` tail and its "last answer"
+    are built from. Simulating a `phase == final_answer` pick changes `context_notes`
+    in **67** of 103 sessions and the last-answer text in **49**. The parser keeps
+    every phase row (2,226 commentary + 172 final_answer + 4 with none), so nothing is
+    lost — the *choice* is what is missing; `task_complete.last_agent_message` is not
+    a substitute (it is empty on 31 sessions, absent on 10, and points at an earlier
+    final answer than the newest one on at least 1).
+29. **A sub-agent's own message rows are read past.** `response_item/agent_message`
+    carries 215 rows in this store — the parent–child traffic of a multi-agent
+    session, with `author`, `recipient` and a `content` block — and the reader looks
+    for `text`/`message`, which those rows do not have, so all 215 become nothing.
+    The event pair they mirror (`event_msg/agent_message`) is read; the
+    `response_item` spelling is not, and neither is the addressing.
+
 ## How to check any of this yourself
 
 ```bash
