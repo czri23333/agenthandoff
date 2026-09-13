@@ -3183,10 +3183,18 @@ def run_eclipse_sweep(page, url: str, routes: list[str]) -> dict:
         wanted = group(state)
         if not wanted:
             continue
-        open_route(base)
-        prepare()
-        page.wait_for_timeout(500)
-        rows.extend(eclipse_rows(page, wanted))
+        # A popup that never opened is not evidence, and a busy machine used to
+        # turn that into a failed run: the first attempt at the select closed
+        # itself while the dashboard was still painting. One retry, and a popup
+        # that never appears still fails below.
+        for attempt in range(2):
+            open_route(base)
+            prepare()
+            page.wait_for_timeout(500)
+            found = eclipse_rows(page, wanted)
+            rows.extend(found)
+            if any(row.get("computed") is not None for row in found) or attempt:
+                break
     return {"rows": rows, "examined": len(rows)}
 
 

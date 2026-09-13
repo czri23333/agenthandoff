@@ -542,14 +542,24 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
             f"{c.pre_tokens if c.pre_tokens is not None else '?'} → "
             f"{c.post_tokens if c.post_tokens is not None else '?'} tokens",
             "at": c.at,
+            "after": c.after_messages,
         }
         for n, c in enumerate(raw.compactions, 1)
     ]
-    if markers:
+    # A divider is placed where it happened, not when: a store that writes every
+    # row inside one second (11 of the 14 Codex sessions with a divider) leaves a
+    # timestamp sort with nothing to go on. Events without a position keep the
+    # timestamp ordering the other parsers have always used.
+    placed = [m for m in markers if m["after"] is not None]
+    floating = [m for m in markers if m["after"] is None]
+    if floating:
         # Verbatim like the turns: a 1000-turn session must read as 1000
         # turns, not the last 400. Paging/virtualization is the frontend's
         # job; the API must not silently drop history.
-        stream = sorted(stream + markers, key=lambda x: x["at"] or "")
+        stream = sorted(stream + floating, key=lambda x: x["at"] or "")
+    for marker in sorted(placed, key=lambda m: m["after"], reverse=True):
+        stream.insert(min(int(marker["after"]), len(stream)), marker)
+
     if raw.history_start is not None:
         # The header says this file begins at turn N of another thread. Its
         # position is not a timestamp question: *by definition* it sits before

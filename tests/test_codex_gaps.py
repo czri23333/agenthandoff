@@ -419,6 +419,18 @@ def test_a_compaction_is_recorded_with_its_measured_window(tmp_path):
     _parser, raw = _load(
         tmp_path,
         [
+            _row(
+                "response_item",
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+            ),
+            _row(
+                "response_item",
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "on it"}],
+                },
+            ),
             _token_count(138122, 354947),
             _row(
                 "compacted",
@@ -436,6 +448,8 @@ def test_a_compaction_is_recorded_with_its_measured_window(tmp_path):
     event = raw.compactions[0]
     assert "3" in event.reason
     assert (event.pre_tokens, event.post_tokens) == (138122, 16688)
+    # The divider belongs where it happened: two turns had been written.
+    assert event.after_messages == 2, raw.messages
 
 
 # -- notes ---------------------------------------------------------------------

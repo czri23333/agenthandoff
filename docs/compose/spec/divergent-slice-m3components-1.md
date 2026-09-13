@@ -1063,6 +1063,32 @@ revision and "which branch is this directory on now" is still worth showing — 
 now labelled as the directory's, not the session's. Nothing merges the two: a
 session that ran on `webgal` and whose tree is now on `feat/product-v7` shows one
 chip, and it is the session's.
+### Round 33 — the compaction divider was drawn at the wrong end
+
+**Why this round exists.** Round 30 gave the *history* marker a position instead of
+a timestamp, because a session whose rows share one second has nothing for a
+timestamp sort to go on. The compaction divider had the same hole, and it is worse:
+the divider's whole meaning is *where* it sits — everything before it exists only as
+a model summary — and on this store it was being drawn at the newest end of most
+sessions that have one.
+
+| Claim | Measured |
+|---|---|
+| how many sessions have a divider | **14** of the Codex sessions the reader lists |
+| how many of those give the sort nothing to work with | **11** put every row inside the same second, and **12** have a divider sharing its timestamp with a turn — one has all 331 rows on the divider's second |
+| what that produced | the markers were appended after the turns and sorted with them, so a stable sort over equal keys put them at the newest end: the sample session showed its divider at index **0 of 102** |
+
+**What was built.** `CompactionEvent` gained `after_messages` — how many turns had
+been written when the divider appeared — the Codex parser records it, and the
+endpoint places those markers by position (largest index first, so earlier
+insertions stay valid) instead of sorting them by time. Events without a position
+keep the timestamp ordering, which is what the other parsers have always used.
+
+| Claim | Measured |
+|---|---|
+| the divider sits after its own turns | for the 8-file session: two dividers, `after_messages` **1719** and **3524**; in the served API they sit **1719** and **3525** rows from the oldest end — the second is one further because the first divider is itself a row above it |
+| the history marker is still first | inserted at the start of the oldest-first stream after the anchored dividers, so it stays the oldest row |
+| tests | the compaction case in `tests/test_codex_gaps.py` now writes two turns before the divider and asserts `after_messages == 2`, so a divider that loses its position fails |
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

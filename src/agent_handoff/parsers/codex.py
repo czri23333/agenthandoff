@@ -634,6 +634,8 @@ class CodexParser(Parser):
                     at=when,
                     reason=f"window {window}" if isinstance(window, int) else "compacted",
                     pre_tokens=last_tokens.get("input_tokens"),
+                    # Where the divider belongs: everything above it came before.
+                    after_messages=len(messages),
                     auto=True,
                 )
                 compactions.append(event)

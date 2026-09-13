@@ -184,6 +184,11 @@ class CompactionEvent:
 
     at: str | None = None
     reason: str = ""  # e.g. context_limit
+    # How many turns had been written when the divider appeared. A divider's
+    # *position* is the fact - everything before it exists only as a summary -
+    # and 11 of the 14 Codex sessions that have one put every row inside the same
+    # second, where sorting by timestamp is a coin flip.
+    after_messages: int | None = None
     pre_tokens: int | None = None
     post_tokens: int | None = None
     auto: bool = True
