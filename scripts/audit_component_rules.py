@@ -1366,7 +1366,9 @@ def first_detail_route(url: str) -> str:
         return ""
     if not (isinstance(rows, list) and rows):
         return ""
-    first = rows[0]
+    # Deterministic: the API returns recency order, so "the first row" is a
+    # different session every few minutes and the pane readings moved with it.
+    first = min(rows, key=lambda r: str(r.get("session_id") or ""))
     cli = urllib.parse.quote(str(first.get("cli") or ""))
     sid = urllib.parse.quote(str(first.get("session_id") or ""))
     return f"#/session/{cli}/{sid}" if cli and sid else ""
@@ -3192,7 +3194,18 @@ def run_eclipse_sweep(page, url: str, routes: list[str]) -> dict:
         for attempt in range(2):
             open_route(base)
             prepare()
-            page.wait_for_timeout(500)
+            # Wait for the popup the entries name, not for a duration. A busy
+            # machine opened the Select after a fixed 500ms and the gate reported
+            # those entries as unread - a flake dressed as a finding. The wait is
+            # bounded, and a popup that never appears still fails below.
+            for entry in wanted:
+                selector = str(entry.get("selector") or "")
+                if not selector:
+                    continue
+                with contextlib.suppress(Exception):
+                    page.wait_for_selector(selector, state="attached", timeout=8000)
+                break
+            page.wait_for_timeout(300)
             found = eclipse_rows(page, wanted)
             rows.extend(found)
             if any(row.get("computed") is not None for row in found) or attempt:
@@ -3250,12 +3263,15 @@ def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int
         ) as resp:
             rows_api = json.loads(resp.read())
         if isinstance(rows_api, list) and rows_api:
-            first = rows_api[0]
+            # Deterministic on purpose: "the first row the API returns" is a
+            # recency order that changes as the store grows, which made these
+            # sweeps measure a different session on every run.
+            pick = min(rows_api, key=lambda r: str(r.get("session_id") or ""))
             detail_route = (
                 "#/session/"
-                + urllib.parse.quote(str(first["cli"]))
+                + urllib.parse.quote(str(pick["cli"]))
                 + "/"
-                + urllib.parse.quote(str(first["session_id"]))
+                + urllib.parse.quote(str(pick["session_id"]))
             )
     except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as exc:
         # Not a pass and not a defect in the app: say what happened.
@@ -3317,9 +3333,13 @@ def run_focus_sweep(
         ) as resp:
             rows_api = json.loads(resp.read())
         if isinstance(rows_api, list) and rows_api:
+            # Deterministic on purpose: "the first row the API returns" is a
+            # recency order that changes as the store grows, which made this
+            # sweep's counts move between runs (851 -> 1222 -> 1260).
+            pick = min(rows_api, key=lambda r: str(r.get("session_id") or ""))
             detail_route = "#/session/{}/{}".format(
-                urllib.parse.quote(str(rows_api[0]["cli"])),
-                urllib.parse.quote(str(rows_api[0]["session_id"])),
+                urllib.parse.quote(str(pick["cli"])),
+                urllib.parse.quote(str(pick["session_id"])),
             )
     except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError):
         detail_route = ""

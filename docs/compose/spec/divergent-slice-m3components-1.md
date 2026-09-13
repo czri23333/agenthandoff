@@ -934,7 +934,7 @@ names which one it came from (`light at 700px #/`).
 |---|---:|---:|---|
 | `--overlap` | 112 controls | **216** | the compact pass found 0 pairs on all six routes today (34 / 8 / 9 / 20 / 7 / 18 controls examined), so the size was clean — the reading is there so a regression has somewhere to fail |
 | `--states` | 16 controls | **24** | the rail is hidden below 1200px and the tab strip comes back, so the tab's state layer had no reading at any width once the rail existed |
-| `--focus` | 851 elements | **1260** | same reason, and the compact routes expose more focusable nodes than the wide ones: 16 rings were delegated to the box the reader sees, against 8 before |
+| `--focus` | 851 elements | **~1,230** (1211–1260 across runs) | same reason, and the compact routes expose more focusable nodes than the wide ones: 13–18 rings were delegated to the box the reader sees, against 8 before. The spread is the *store* (rows mount as sessions arrive), not the gate — the session-detail route is picked deterministically now, so the wobble is content, not which surface was measured |
 
 All three are green at both sizes.
 
@@ -1002,9 +1002,13 @@ recording, both measured:
   earlier 619 turns live in, in the same tab with 0 page errors.
 
 What is still ours: the earlier turns are **linked, not merged**. A reader who wants
-them reads them in the parent thread, which is where the store keeps them; joining
-the two transcripts would be a new session shape and is not something to guess at
-from an ordinal alone.
+them reads them in the parent thread, which is where the store keeps them. Merging
+was measured before it was declined: for 8 fork pairs, five counts in the parent
+(all rows, item_completed, response_item, user messages, assistant messages) were
+taken up to each child's header timestamp and **none** matches the ordinal (the
+largest pair: ordinal 619 against 3619 / 502 / 2371 / 2 / 133). The ordinal is the
+vendor's own event accounting, which the store does not publish, so a merge would be
+guesswork dressed as history.
 ### Round 31 — the task-kind chip was printing translation keys
 
 **Why this round exists.** Round 30 taught the Codex parser to report

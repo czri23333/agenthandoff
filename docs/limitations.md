@@ -127,8 +127,11 @@ sampled away.
 15. **The focus sweep is synthetic and single-browser.** `--focus` calls
     `element.focus()` on every focusable element and then presses <kbd>Tab</kbd>
     through the same five routes × two themes, reading the computed ring (measured
-    today: **851** focusable elements on two themes plus one session-detail route, 0
-    defects, 16 rings delegated to the box the reader sees). It takes two readings,
+    today: **~1,230** focusable elements across two themes and one session-detail
+    route, 0 defects, 13-18 rings delegated to the box the reader sees; the count
+    moves run to run because the sweep measures live stores and rows mount as
+    sessions arrive, not because the route moves — it is picked deterministically).
+    It takes two readings,
     1400x1000 and 700x900, because the two size classes do not show the same
     controls: the rail is hidden below 1200px and the tab strip comes back, so a
     ring on either one would otherwise have no reading at all. It proves the style, and the review
@@ -286,8 +289,13 @@ sampled away.
     live in, and in 26 of 26 cases that thread *is* in the store. The cockpit now
     says so in the transcript — a `role: "history"` marker at the oldest end whose
     link opens the parent thread — and in the facts list, and it does **not** merge
-    the two: joining them would invent a session shape, and the ordinal alone does
-    not say how the parent's own rows map onto it. A reader who wants the earlier
+    the two: joining them would invent a session shape, and the ordinal is not
+    countable in the parent's own rows - five candidate units (all rows,
+    item_completed, response_item, user messages, assistant messages) were counted
+    in the parent up to each child's header timestamp across 8 fork pairs, and
+    **none** of them matches the ordinal (the largest pair: ordinal 619 against
+    3619 / 502 / 2371 / 2 / 133). The unit is the vendor's own event accounting,
+    which it does not publish; until that is known, merging is guesswork. A reader who wants the earlier
     turns reads them where they are. The same rule places a compaction divider by
     position (`after_messages`) rather than by timestamp, because 11 of the 14
     Codex sessions that have a divider put every row inside the same second.
