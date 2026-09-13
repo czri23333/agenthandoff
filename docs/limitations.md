@@ -102,10 +102,13 @@ sampled away.
    4.07 s to first row with everything else warm) — it refreshes in a thread and
    answers with the stale list, which is what "stale answer beats a queue" was
    always supposed to mean. Build times: cold **16.2 s → 5.4 s**, rebuild
-   **7.6 s → 2.8–3.4 s**. Still unprofiled: the first build's remaining ~5 s is
-   ~360k JSON lines read across 453 files, and no stage below that has been
-   attributed — the honest next step is to read the peeked files lazily rather
-   than 800 lines each.
+   **7.6 s → 2.8–3.4 s**. What is left is attributed: the first build is **1332
+   `read_jsonl` calls parsing 91,155 rows** (measured by wrapping the reader), 319
+   of those calls the jsonl family's peeks and 110 the rollout headers, the rest
+   the other thirteen stores' own head reads. Laziness is not the next win — a peek
+   already stops at 800 lines or the end of the file, whichever comes first, and
+   most of those files are shorter than the cap. The next gain would be per store
+   (a cheaper head read for one family at a time), and no such change is in flight.
 8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change
    page without hitting the theme switch), a session title column squeezed to
