@@ -35,6 +35,8 @@ export interface SessionMeta {
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
+  /** The store file this session was read from (the bundle meta carries it). */
+  source_path?: string | null;
   /** Provenance notes (supplement counts, linked sessions, tool failures…). */
   notes?: string[];
   /** Assistant identity as the product shows it (expert name + avatar URL). */

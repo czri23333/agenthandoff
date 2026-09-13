@@ -965,6 +965,13 @@ export default function SessionDetail({
               <Descriptions.Item label="cwd">
                 <span className="font-mono text-[12px] break-all">{meta.cwd}</span>
               </Descriptions.Item>
+              {meta.source_path && (
+                <Descriptions.Item label={t("sourcePath")}>
+                  <Tooltip title={t("sourcePathHint")}>
+                    <span className="font-mono text-[12px] break-all">{meta.source_path}</span>
+                  </Tooltip>
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label={t("model")}>
                 {meta.model ? (
                   <span className="font-mono text-[12px]">{meta.model}</span>
