@@ -421,7 +421,11 @@ def test_a_compaction_is_recorded_with_its_measured_window(tmp_path):
         [
             _row(
                 "response_item",
-                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "go"}],
+                },
             ),
             _row(
                 "response_item",
