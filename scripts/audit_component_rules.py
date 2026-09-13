@@ -3210,6 +3210,16 @@ def _hover(page, selector: str) -> None:
         element.hover(timeout=3000)
 
 
+# Every interaction gate used to run at one width, so the sheet's compact branch
+# was measured by nobody - and the one overlap this gate has actually caught (a
+# .zip button over the 摘要/全文 switch) was on a narrow column. Two readings per
+# route now, and the failure line names which one.
+OVERLAP_VIEWPORTS: tuple[tuple[str, int, int], ...] = (
+    ("", 1400, 1000),
+    (" at 700px", 700, 900),
+)
+
+
 def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int]:
     """Controls that sit on top of one another, in both themes.
 
@@ -3240,36 +3250,41 @@ def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int
     except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as exc:
         # Not a pass and not a defect in the app: say what happened.
         out.append(f"could not discover a session-detail route: {exc}")
-    for theme in ("light", "dark"):
-        page.goto(url, wait_until="domcontentloaded")
-        page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["ah-theme", theme])
-        page.goto(url, wait_until="domcontentloaded")
-        page.wait_for_selector("#ah-tokens", state="attached")
-        page.wait_for_timeout(1200)
-        seen = [*routes, *([detail_route] if detail_route else [])]
-        for route in seen:
-            page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
-            # Wait for the page to leave its loading state rather than guessing a
-            # duration: the first version waited 4s and measured 160 controls on
-            # one run and 630 on the next, because one of those runs was still
-            # looking at skeletons. A page that never loads is a defect too — it
-            # is the shape of the bug that made this gate necessary.
+    for size_label, width, height in OVERLAP_VIEWPORTS:
+        page.set_viewport_size({"width": width, "height": height})
+        for theme in ("light", "dark"):
+            page.goto(url, wait_until="domcontentloaded")
+            page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["ah-theme", theme])
+            page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_selector("#ah-tokens", state="attached")
             page.wait_for_timeout(1200)
-            loaded = True
-            try:
-                page.wait_for_function(
-                    "() => document.querySelectorAll('.ah-skeleton').length === 0",
-                    timeout=30000,
-                )
-            except Exception:  # noqa: BLE001 - a slow page is the finding, not a crash
-                loaded = False
-            page.wait_for_timeout(1200)
-            found = page.evaluate(OVERLAP_JS)
-            examined += found.get("examined", 0)
-            defects = overlap_defects(f"{theme} {route}", found)
-            if not loaded:
-                defects.append(f"{theme} {route}: still in its loading state after 30s")
-            out.extend(defects)
+            seen = [*routes, *([detail_route] if detail_route else [])]
+            for route in seen:
+                page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+                # Wait for the page to leave its loading state rather than
+                # guessing a duration: the first version waited 4s and measured
+                # 160 controls on one run and 630 on the next, because one of
+                # those runs was still looking at skeletons. A page that never
+                # loads is a defect too - it is the shape of the bug that made
+                # this gate necessary.
+                page.wait_for_timeout(1200)
+                loaded = True
+                try:
+                    page.wait_for_function(
+                        "() => document.querySelectorAll('.ah-skeleton').length === 0",
+                        timeout=30000,
+                    )
+                except Exception:  # noqa: BLE001 - a slow page is the finding, not a crash
+                    loaded = False
+                page.wait_for_timeout(1200)
+                found = page.evaluate(OVERLAP_JS)
+                examined += found.get("examined", 0)
+                where = f"{theme}{size_label} {route}"
+                defects = overlap_defects(where, found)
+                if not loaded:
+                    defects.append(f"{where}: still in its loading state after 30s")
+                out.extend(defects)
+    page.set_viewport_size({"width": 1400, "height": 1000})
     return out, examined
 
 

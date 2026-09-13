@@ -923,6 +923,16 @@ were approximating; and `--pane` measures the frame at three widths.
 | what it cost the mapping table | two new `MAPPING` rows (`pane.preferredWidth`, `pane.preferredWidthXL` → `PaneScaffoldDirective.DefaultPreferredWidth`/`XL`) and one excuse by name for the spacer, which is a value inside a `when` branch rather than a member. That needed one parser addition: the token files declare `internal object XTokens`, while the directive declares `class PaneScaffoldDirective` with an unnamed `companion object`, so `_kotlin_class_members` walks class bodies and only adds keys the object walker did not already find |
 | the corpus | **151** pinned files (83 androidx, 68 material-web) — the two new ones came through `scripts/fetch_m3spec.py`, not by hand |
 
+**A blind spot the pane work exposed.** Every interaction gate ran at one width
+(1400px), so the sheet's compact branch — the one the frame *changes* at 839px —
+was measured by nobody, and the single overlap `--overlap` has ever caught (a
+`.zip` button over the 摘要/全文 switch) was on a narrow column. `--overlap` now
+takes two readings per route, **1400x1000 and 700x900**, and the failure line names
+which one it came from. Measured: the missing-size pass finds **0 pairs** on all
+six routes in both themes today (34 / 8 / 9 / 20 / 7 / 18 controls examined), and
+the gate's total went from 112 to **216 controls compared**, still green. A compact
+layout that regresses now has somewhere to fail.
+
 **What is still ours.** `preferredHeight` (420dp) is the directive's value for a
 *vertical* partition — a tabletop split this web layout does not have — so it is
 deliberately not spent and the test reads it out of the vendored file instead. The
