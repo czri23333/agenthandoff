@@ -41,6 +41,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "_LISTING", (0.0, []))
     monkeypatch.setattr("agent_handoff.server.app.discover", lambda: [])
     monkeypatch.setattr("agent_handoff.server.app.all_parsers", lambda: [])
+    # The startup warm-up builds the session list once, off the request path.
+    # Under a test that swaps the parser set *after* startup it would cache the
+    # empty list under the same key for the next 20 seconds, and the test would
+    # read a build it never asked for.
+    monkeypatch.setenv("AGENTHANDOFF_PREWARM", "0")
     with Client(app) as c:
         yield c
 
@@ -323,10 +328,17 @@ def test_concurrent_callers_share_one_session_build(clean_session_cache, monkeyp
     assert results[0] == [{"cli": "zcode", "session_id": "s1"}]
 
 
-def test_a_stale_list_answers_while_the_refresh_is_still_running(
+def test_a_stale_list_answers_and_refreshes_off_the_request_path(
     clean_session_cache, monkeypatch
 ):
-    import threading
+    """The point of the cache: a request never waits for a rebuild to finish.
+
+    The first version let the request that *won* the lock rebuild synchronously,
+    so one caller per TTL paid the whole build - measured 4.07s to the first row
+    with the list already warm. Now the winner starts the refresh in a thread and
+    answers with what it has, which is what this asserts: the answer is immediate,
+    the build happens once, and the cache is replaced when it finishes.
+    """
 
     A = clean_session_cache
     stale = [{"cli": "zcode", "session_id": "old"}]
@@ -338,22 +350,26 @@ def test_a_stale_list_answers_while_the_refresh_is_still_running(
 
     def slow_build(cli, cwd, q):
         calls.append(1)
-        time.sleep(0.5)
+        time.sleep(0.3)
         return [{"cli": "zcode", "session_id": "new"}]
 
     monkeypatch.setattr(A, "_build_session_roots", slow_build)
-    refresh = threading.Thread(target=lambda: A._session_roots(None, None, None))
-    refresh.start()
-    time.sleep(0.08)  # let the refreshing caller take the lock
-
     started = time.perf_counter()
     answer = A._session_roots(None, None, None)
     elapsed = time.perf_counter() - started
-    refresh.join()
 
-    assert answer == stale, "a second caller should be served the cached list"
-    assert elapsed < 0.2, f"it waited {elapsed:.2f}s for someone else's build"
-    assert len(calls) == 1, f"expected one refresh, got {len(calls)}"
+    assert answer == stale, "a stale caller is served the cached list"
+    assert elapsed < 0.2, f"it waited {elapsed:.2f}s for a build"
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        cached = A._sessions_cache.get("None|None|None")
+        if cached and cached[1] != stale:
+            break
+        time.sleep(0.02)
+    assert calls == [1], f"expected exactly one background refresh, got {calls}"
+    assert A._sessions_cache["None|None|None"][1] == [
+        {"cli": "zcode", "session_id": "new"}
+    ], "the background refresh should have replaced the list"
 
 
 # ── The thread view: an answer, with a number attached ──────────────────────

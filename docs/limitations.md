@@ -83,11 +83,29 @@ sampled away.
    The same is true of `codebuddy-cn`, `qoder-ide` (roadmap: its sessions live in
    an Electron leveldb) and `qwenwork-app` (the store exists here with zero
    message rows in it).
-7. **Cockpit performance is measured in one place only.** Search went 15.3 s →
-   7 ms (warm, in-process) / 0.39 s (fresh process, warm disk cache) on the
-   maintainer's machine. The 450-row session list takes several seconds to paint
-   (observed while measuring layout at six widths), and that wait has not been
-   profiled into stages: cold listing, `detail` generation, first paint.
+7. **The session list is now profiled into stages, and the first paint is the
+   stage that was slow.** Search went 15.3 s → 7 ms (warm, in-process) / 0.39 s
+   (fresh process, warm disk cache) on the maintainer's machine. The list was
+   measured end to end — a server started in-process, a browser launched the
+   moment the port opened — and the breakdown was: **port up 1.06 s**, app shell
+   **0.21 s**, `/api/stores` **0.47 s**, `/api/sessions` **5.27 s**, first row
+   **6.17 s**, all 187 mounted rows **7.67 s**. Before the work below the same
+   measurement read 9.21 s / 10.91 s / 12.43 s. What it found and what was done:
+   `peek_status` asked every session for its own files while the file list re-read
+   the header of **every** rollout (11,440 header reads, 8.1 s of a 16.2 s build) —
+   headers are cached by `(path, mtime, size)` now, because a header cannot change
+   once written; the jsonl family re-read 800 lines per file on every rebuild —
+   that peek is cached by file version too; the list is warmed at process start
+   (`AGENTHANDOFF_PREWARM=0` turns it off) so the browser's own startup overlaps
+   the build; and a stale entry used to be rebuilt *synchronously* by whichever
+   request won the lock, which cost one caller per TTL a whole build (measured
+   4.07 s to first row with everything else warm) — it refreshes in a thread and
+   answers with the stale list, which is what "stale answer beats a queue" was
+   always supposed to mean. Build times: cold **16.2 s → 5.4 s**, rebuild
+   **7.6 s → 2.8–3.4 s**. Still unprofiled: the first build's remaining ~5 s is
+   ~360k JSON lines read across 453 files, and no stage below that has been
+   attributed — the honest next step is to read the peeked files lazily rather
+   than 800 lines each.
 8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change
    page without hitting the theme switch), a session title column squeezed to

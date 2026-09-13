@@ -7,7 +7,9 @@ shipped inside the wheel). See docs/decisions.md ADR-006/007/008.
 
 from __future__ import annotations
 
+import contextlib
 import mimetypes
+import os
 import threading
 import time
 from dataclasses import asdict
@@ -53,7 +55,55 @@ from agent_handoff.threads import (
     title_tokens,
 )
 
-app = FastAPI(title="agenthandoff cockpit", version="0.1.0")
+
+def _prewarm_enabled() -> bool:
+    """Whether to warm the session list at startup.
+
+    On by default. `AGENTHANDOFF_PREWARM=0` turns it off, which two callers want:
+    a test that swaps the parser set after startup (the warm-up would cache the
+    *old* set under the same key for the next 20 seconds - exactly what a
+    monkeypatched store cannot survive), and anyone who starts the UI on a huge
+    store and would rather the first request pays than the boot.
+    """
+
+    return os.environ.get("AGENTHANDOFF_PREWARM", "1").strip().lower() not in (
+        "0",
+        "off",
+        "false",
+    )
+
+
+def _prewarm_sessions() -> None:
+    """Build the default session list once, off the request path.
+
+    The dashboard cannot paint a row before the sessions endpoint answers, and the
+    first answer after a server start used to cost the whole build: measured 0.23s
+    to the app shell, **9.21s** for that request, 10.91s to the first row and
+    12.43s to all 187 mounted rows. Starting the same build at process start moves
+    it off the critical path - the shell paints immediately and the list arrives
+    when the in-flight build finishes. Failures are swallowed: a warm-up is never
+    the reason a server does not come up.
+    """
+
+    def build() -> None:
+        with contextlib.suppress(Exception):
+            _session_roots(None, None, None)
+
+    threading.Thread(target=build, name="prewarm-sessions", daemon=True).start()
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    if _prewarm_enabled():
+        _prewarm_sessions()
+    yield
+
+
+app = FastAPI(
+    title="agenthandoff cockpit",
+    version="0.1.0",
+    lifespan=_lifespan,
+)
 
 # Windows MIME registries may map .js to text/plain, which makes browsers
 # refuse the module scripts and the cockpit boots blank. Pin the web types
@@ -110,12 +160,14 @@ def stores():
 # 30s poll doesn't re-decompress 46 zstd rolls per request (ADR-006).
 _sessions_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 20.0
-# One build per cache key. Measured on this machine: a cold build is 3.7–5.7s of
-# CPU over 802 metas, and without this a second request that arrives while the
-# first is still building starts *its own* build. The cockpit polls every 30s per
-# open tab, so a handful of tabs was enough to keep several builds in flight,
-# saturate the thread pool, and leave the whole app — even `/api/stores` — queued
-# behind them for minutes. A per-key lock plus a stale answer is the whole fix.
+# One build per cache key. Measured on this machine (2026-09-13, 344 sessions): a
+# cold build is **5.4s**, a rebuild **2.8–3.4s**, and without this a second request
+# that arrives while the first is still building starts *its own* build. The
+# cockpit polls every 30s per open tab, so a handful of tabs was enough to keep
+# several builds in flight, saturate the thread pool, and leave the whole app —
+# even `/api/stores` — queued behind them for minutes. A per-key lock, a stale
+# answer and a background refresh are the whole fix; the warm-up at startup is
+# `_prewarm_sessions`.
 _sessions_locks: dict[str, threading.Lock] = {}
 _sessions_locks_guard = threading.Lock()
 
@@ -147,14 +199,24 @@ def _session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
         return hit[1]
     lock = _session_lock(key)
     if hit:
-        if not lock.acquire(blocking=False):
-            return hit[1]
-        try:
-            roots = _build_session_roots(cli, cwd, q)
-            _sessions_cache[key] = (time.monotonic(), roots)
-            return roots
-        finally:
-            lock.release()
+        # Stale: answer with what we have and rebuild off the request path. The
+        # previous shape let the request that *won* the lock rebuild
+        # synchronously, so a tab that polled every 30s blocked for a whole build
+        # every 20s (measured 4.07s to first row with everything else warm). The
+        # list is at most one TTL out of date, which the poll cannot tell apart
+        # from "nothing changed", and a stale answer beats a queue.
+        if lock.acquire(blocking=False):
+            def refresh() -> None:
+                try:
+                    roots = _build_session_roots(cli, cwd, q)
+                    _sessions_cache[key] = (time.monotonic(), roots)
+                except Exception:  # noqa: BLE001 - a failed refresh keeps the old list
+                    pass
+                finally:
+                    lock.release()
+
+            threading.Thread(target=refresh, name=f"refresh-{key}", daemon=True).start()
+        return hit[1]
     with lock:
         fresh = _sessions_cache.get(key)
         if fresh is not None:

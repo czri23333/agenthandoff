@@ -110,6 +110,13 @@ def _summary_title(text: str) -> str:
 # by id for debugging).
 _TOOLLOOP_TITLE = "工具循环会话（无用户消息）"
 
+# (path, mtime, size) -> the eight fields a peek derives, or () for "no rows".
+# A roll is append-only, so a version key is enough: the head, the tail scan and
+# the derived title cannot change without the size or the mtime changing too.
+# This is what makes the 20s cache rebuild cheap instead of re-reading 800 lines
+# per file: measured, the jsonl family alone spent 3.9s of an 11s build.
+_PEEK_CACHE: dict[tuple[str, float, int], tuple] = {}
+
 # ~/.qoder-cn (and ~/.qoder) is SHARED by the whole qoder family: the IDE's own
 # chats live under <project>/transcript/ or in plain <project> dirs, while
 # qoderwake team-groups/workers and qoderwork workspaces each create top-level
@@ -232,8 +239,30 @@ class JsonlSessionParser(Parser):
         under hundreds of tool-hint/meta rows (measured: a 13 MB compacted roll
         keeps its summary at line 487).
         """
+        try:
+            stat = path.stat()
+            key = (str(path), stat.st_mtime, stat.st_size)
+        except OSError:
+            key = (str(path), 0.0, 0)
+        hit = _PEEK_CACHE.get(key)
+        if hit is not None:
+            if not hit:
+                return None  # the file was empty when it was read
+            return SessionMeta(
+                cli=self.cli,
+                session_id=hit[0],
+                title=hit[1],
+                cwd=hit[2],
+                started_at=hit[3],
+                updated_at=hit[4],
+                source_path=str(path),
+                origin=self._origin(),
+            )
         rows = read_jsonl(path, limit=800)
         if not rows:
+            if len(_PEEK_CACHE) > 8192:  # a long-lived process, a growing store
+                _PEEK_CACHE.clear()
+            _PEEK_CACHE[key] = ()
             return None
         cwd = ""
         session_id = path.stem
@@ -283,7 +312,7 @@ class JsonlSessionParser(Parser):
             # a spawned browser/automation sub-agent). Say so honestly instead of
             # leaking a bare short id that looks like a parsing failure.
             title = _TOOLLOOP_TITLE
-        return SessionMeta(
+        meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,
             title=title,
@@ -293,6 +322,10 @@ class JsonlSessionParser(Parser):
             source_path=str(path),
             origin=self._origin(),
         )
+        if len(_PEEK_CACHE) > 8192:
+            _PEEK_CACHE.clear()
+        _PEEK_CACHE[key] = (session_id, title, cwd, started, updated)
+        return meta
 
     def load(self, session_id: str) -> RawSession | None:
         paths = self._resolve_group(session_id)
