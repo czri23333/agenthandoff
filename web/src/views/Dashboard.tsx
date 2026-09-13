@@ -12,7 +12,7 @@ import {
 } from "../api";
 import { CliBadge, CopyButton, EmptyState, Highlight, StatusTag } from "../components";
 import { ActivityGrid } from "../charts";
-import { useFmt, useT, type TKey } from "../i18n";
+import { hasKey, useFmt, useT, type TKey } from "../i18n";
 
 /**
  * Session dashboard: grouping by project domain, plus two search modes.
@@ -656,6 +656,9 @@ function SessionRow({
     });
   };
   const kids = s.children ?? [];
+  // The store owns this vocabulary, so the key is built before it is looked up:
+  // `hasKey` narrows a value, not a template expression.
+  const kindKey = `kind_${s.task_type ?? ""}`;
   return (
     <li className="row-enter">
       <div className="flex items-stretch gap-1">
@@ -720,7 +723,9 @@ function SessionRow({
           )}
           {s.task_type && s.task_type !== "quest-task" && s.task_type !== "interactive" && (
             <Tooltip title={`${t("taskKind")} · ${s.task_type}`}>
-              <span className="ah-faint hidden shrink-0 font-mono text-[11px] lg:inline">⬣ {t(`kind_${s.task_type}` as Parameters<typeof t>[0])}</span>
+              <span className="ah-faint hidden shrink-0 font-mono text-[11px] lg:inline">
+                ⬣ {hasKey(kindKey) ? t(kindKey) : s.task_type}
+              </span>
             </Tooltip>
           )}
           {s.provider && (

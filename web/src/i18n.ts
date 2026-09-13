@@ -39,6 +39,9 @@ const dict = {
     kind_craft: "手工",
     kind_design: "设计",
     kind_coding: "编程",
+  kind_subagent: "子代理",
+  kind_subagent_child: "子代理",
+  kind_agent_created_thread: "智能体创建",
     parentOf: "子任务 · 父会话",
     subSessions: "子会话",
     expandSubs: "展开子会话",
@@ -273,6 +276,9 @@ const dict = {
     kind_craft: "craft",
     kind_design: "design",
     kind_coding: "coding",
+  kind_subagent: "sub-agent",
+  kind_subagent_child: "sub-agent",
+  kind_agent_created_thread: "agent-created",
     parentOf: "child session · parent",
     subSessions: "sub-sessions",
     expandSubs: "expand sub-sessions",
@@ -479,6 +485,18 @@ const dict = {
 
 export type Lang = "zh" | "en";
 export type TKey = keyof (typeof dict)["zh"];
+
+/**
+ * Whether a key exists in the dictionary at all.
+ *
+ * `t()` falls back to the key itself, which is the right default for a missing
+ * translation but the wrong one for a vocabulary the *store* owns: a task kind
+ * nobody translated would render as "kind_subagent_child" in the list. Callers
+ * that map data onto keys check first and show the store's own word otherwise.
+ */
+export function hasKey(key: string): key is TKey {
+  return key in dict.zh;
+}
 
 export const LangContext = createContext<Lang>("zh");
 

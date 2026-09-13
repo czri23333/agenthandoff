@@ -1000,6 +1000,36 @@ What is still ours: the earlier turns are **linked, not merged**. A reader who w
 them reads them in the parent thread, which is where the store keeps them; joining
 the two transcripts would be a new session shape and is not something to guess at
 from an ordinal alone.
+### Round 31 — the task-kind chip was printing translation keys
+
+**Why this round exists.** Round 30 taught the Codex parser to report
+`thread_source` as `SessionMeta.task_type`, which is the field the session list's
+kind chip is written for. Checking that the chip actually rendered turned up a
+defect that had nothing to do with Codex: `t()` is `dict[lang][key] ?? key`, so a
+kind the dictionary does not carry renders as **its own key name**. The dictionary
+carried `playground`, `background`, `working`, `craft`, `design` and `coding` — and
+nothing else, while the stores on this machine report:
+
+| Kind | Rows | Had a label |
+|---|---:|---|
+| `subagent_child` (zcode) | **318** | no — would have printed `⬣ kind_subagent_child` |
+| `subagent` (codex) | **62** | no |
+| `agent_created_thread` (codex) | 1 | no |
+| `background` / `playground` / `working` / `craft` / `design` / `coding` (workbuddy) | 110 / 23 / 11 / 7 / 2 / 2 | yes |
+| `interactive` (zcode), `quest-task` (qodercn-ide) | 32 / 18 | deliberately unlabelled: the first is an ordinary conversation, the second has its own chip and hint |
+
+**What was built.** Three labels in both languages (`子代理` / `sub-agent`, and
+`智能体创建` / `agent-created`), a `hasKey()` export so a caller can tell "no
+translation" from "the store's word", and a chip that shows the store's own value
+when the dictionary has no entry — a vocabulary the store owns cannot be enumerated
+in advance, and printing a key is never the honest fallback.
+
+| Claim | Measured |
+|---|---|
+| the chip renders | in the served cockpit at 1600px, after expanding the 28 parents that have children: **144** `⬣ 子代理`, **1** `⬣ 智能体创建`, and the workbuddy kinds (45 后台, 23 试玩, 4 手工, 3 工作, 2 编程, 2 设计) — **0** raw `kind_*` strings anywhere in the body |
+| the gate | `tests/test_task_kinds.py`, three cases: every kind the parsers write or the fixtures/the measured stores report has a label; every label exists in both languages; the chip checks the dictionary first. Proof it can fail: deleting the Chinese `kind_subagent` line fails with `kind_subagent appears 1 time(s): every label needs zh and en`, and the file was restored byte-for-byte |
+| what the gate can and cannot cover | it reads the parsers' literals, the values the shipped fixtures produce (`subagent`, `interactive`) and the list measured on this machine, so a *new* store vocabulary outside those three is caught by the runtime fallback rather than by the test |
+| gates | `pytest tests/` **475 passed, 2 skipped** · `ruff check .` clean · `gen_tokens.py --check` · `evidence --check` · `conformance --check` 14 CLIs · `npx tsc -b` · `npm run build` · full audit exit 0 with nine gates (focus 802, overlap 216 across two widths, states 16, disabled 72, eclipse 25/17, morph 16, loading 4, rail 2 widths, panes 3) |
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
