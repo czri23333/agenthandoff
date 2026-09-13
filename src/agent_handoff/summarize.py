@@ -344,6 +344,13 @@ def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:
                         0, f"[pending from interrupted session] {pending}"
                     )
 
+    pending = bundle.interruption.pending_user_text
+    if pending:
+        step = f"[pending from interrupted session] {pending}"
+        if not bundle.next_steps or bundle.next_steps[0] != step:
+            bundle.next_steps.insert(0, step)
+
+
 def build_full_transcript(raw: RawSession, keep_noise: bool = False) -> list[tuple[str, str]]:
     """Every dialogue turn verbatim, oldest first — the lossless handoff body.
 

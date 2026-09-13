@@ -68,6 +68,11 @@ class SessionMeta:
     provider: str | None = None
     origin: str | None = None
     parent_session_id: str | None = None
+    # The revision the *session* ran on, when the store records it. Distinct
+    # from the live branch of its cwd, which moves after the session ends: 19 of
+    # 95 Codex sessions on this machine ran on a branch the repo has left.
+    git_branch: str | None = None
+    git_commit: str | None = None
     # Assistant identity as the product shows it (workbuddy
     # assistant-display snapshots: expert name + avatar URL). Display-only;
     # never a credential, URLs point at the vendor's public CDN.
@@ -98,6 +103,10 @@ class Message:
 
     role: str  # "user" | "assistant"
     text: str
+    # The store's own split between the two assistant surfaces the product
+    # shows: "commentary" (the working stream) and "final_answer" (the reply).
+    # Parsers fill it only when the store wrote it; None means it said nothing.
+    phase: str | None = None
     at: str | None = None
     model: str | None = None
     tokens_in: int | None = None
@@ -179,9 +188,30 @@ class CompactionEvent:
 
     at: str | None = None
     reason: str = ""  # e.g. context_limit
+    # How many turns had been written when the divider appeared. A divider's
+    # *position* is the fact - everything before it exists only as a summary -
+    # and 11 of the 14 Codex sessions that have one put every row inside the same
+    # second, where sorting by timestamp is a coin flip.
+    after_messages: int | None = None
     pre_tokens: int | None = None
     post_tokens: int | None = None
     auto: bool = True
+
+
+@dataclass
+class HistoryStart:
+    """This transcript begins mid-conversation, and the rest is elsewhere.
+
+    Codex forks a thread and writes only the turns after the fork: the header
+    names the ordinal this page begins at and the thread the earlier turns live
+    in. A reader that shows the page as the whole conversation is wrong by
+    omission - the same failure a hidden compaction is - so it is a first-class
+    fact about the transcript rather than a note nobody sees.
+    """
+
+    ordinal: int = 0
+    parent_session_id: str = ""
+    at: str | None = None
 
 
 @dataclass
@@ -195,6 +225,8 @@ class RawSession:
     tool_counts: Counter[str] = field(default_factory=Counter)
     interruption: Interruption = field(default_factory=Interruption)
     compactions: list[CompactionEvent] = field(default_factory=list)
+    # Set when the store says this file is one page of a longer thread.
+    history_start: HistoryStart | None = None
 
     @property
     def user_messages(self) -> list[Message]:
@@ -261,6 +293,8 @@ class HandoffBundle:
                 "provider": self.meta.provider,
                 "origin": self.meta.origin,
                 "parent_session_id": self.meta.parent_session_id,
+                "git_branch": self.meta.git_branch,
+                "git_commit": self.meta.git_commit,
                 "expert_name": self.meta.expert_name,
                 "expert_avatar": self.meta.expert_avatar,
                 "notes": self.meta.notes,

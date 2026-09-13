@@ -136,10 +136,14 @@ def render_markdown(b: HandoffBundle) -> str:
     )
     it = b.interruption
     it_md = f"- status: {it.kind}"
-    if it.kind == "user_pending" and it.pending_user_text:
-        it_md += f"\n- pending user message (NOT executed): {it.pending_user_text}"
-    elif it.detail:
+    # The reason a turn died and the instruction it died on are two different
+    # facts: a quota-dead session ends with an error and still owes the user's
+    # last directive. Detail first, then whatever is still un-run - the pending
+    # line is no longer exclusive to user_pending.
+    if it.detail:
         it_md += f"\n- detail: {it.detail}"
+    if it.pending_user_text:
+        it_md += f"\n- pending user message (NOT executed): {it.pending_user_text}"
     topics_block = ""
     if b.topics:
         t_items = "\n".join(f'- "{o}" ({n} user message(s))' for o, n in b.topics)

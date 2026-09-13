@@ -136,7 +136,7 @@ def render_brief(
             f"{b.interruption.describe()}. "
             "Treat state below as possibly incomplete."
         )
-        if b.interruption.kind == "user_pending" and b.interruption.pending_user_text:
+        if b.interruption.pending_user_text:
             warn += (
                 "\nThe user's last instruction was never executed: "
                 f'"{b.interruption.pending_user_text}" — it is already '
@@ -225,7 +225,7 @@ def render_full_brief(b: HandoffBundle, transcript: list[tuple[str, str]], lang:
             f"{b.interruption.describe()}. "
             "Treat state below as possibly incomplete."
         )
-        if b.interruption.kind == "user_pending" and b.interruption.pending_user_text:
+        if b.interruption.pending_user_text:
             warn += (
                 "\nThe user's last instruction was never executed: "
                 f'"{b.interruption.pending_user_text}" \u2014 it is already '

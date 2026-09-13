@@ -79,6 +79,17 @@ def test_cli_identity_chips_are_readable(theme: str) -> None:
 
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
+def test_tonal_containers_carry_text_at_aa(theme: str) -> None:
+    """M3E tonal containers are backgrounds for real text — bubbles, chips,
+    banners — and nothing checked them: the gate only knew about surface0/1/2.
+    A container that drifts too close to the text colour is unreadable text."""
+    p = TOKENS["themes"][theme]
+    for key in ("accentContainer", "okContainer", "warnContainer", "errContainer"):
+        r = ratio(p["text1"], p[key])
+        assert r >= TEXT_PAIR_MIN, f"{theme}: text1 on {key} is {r:.2f}:1"
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
 def test_every_supported_cli_has_an_identity(theme: str) -> None:
     """Add a parser without adding a colour, and this test tells you."""
     declared = set(TOKENS["themes"][theme]["cli"])
@@ -100,11 +111,28 @@ def test_no_component_hardcodes_a_colour() -> None:
     Guards the class of bug where a component picks a colour name that its
     component library does not recognise and silently renders unreadable text.
     """
+    # Generated stylesheets are exempt *because they are generated*: every hex in
+    # them is a palette value copied out of tokens.json by the same run that
+    # writes the token file, and `test_first_paint_is_the_real_surface_colour`
+    # asserts the copy is the real one. Hand-written literals have no such proof,
+    # which is the whole distinction this gate is drawing.
+    generated = {"firstpaint.css"}
     offenders: list[str] = []
     for path in sorted((WEB / "src").rglob("*")):
         if path.suffix not in {".tsx", ".ts", ".css"}:
             continue
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if path.name in generated:
+            continue
+        # Blank block comments before scanning, keeping line numbers. This gate
+        # documents the very presets it forbids — `color="green"` appears in the
+        # comment that explains why it was removed — so a scanner that reads
+        # prose reports prose. That has now happened three times, in three files.
+        text = path.read_text(encoding="utf-8")
+        if path.suffix == ".css":
+            text = re.sub(
+                r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S
+            )
+        for lineno, line in enumerate(text.splitlines(), 1):
             if _is_comment(line):
                 continue
             if "PRIMARY =" in line:
@@ -112,19 +140,54 @@ def test_no_component_hardcodes_a_colour() -> None:
             for pattern in (
                 r"#[0-9a-fA-F]{6}\b",
                 r"\b(?:bg|text|border)-(?:zinc|neutral|gray|slate|stone|sky|amber)-\d{2,3}",
-                r'color="(?:sky|amber|volcano)"',  # presets that do not exist in antd v6
+                # *Any* antd preset colour, not the three that were known to be
+                # fictional. The gate used to allowlist `sky|amber|volcano` on
+                # the theory that a name antd does not recognise is the danger;
+                # the real danger is a name it *does* recognise, because then
+                # antd's theme algorithm derives a pair and nothing here gates
+                # it. Measured: `Tag color="green"` rendered 3.37:1 in the light
+                # theme.
+                r'color="(?:red|volcano|orange|gold|yellow|lime|green|cyan|blue|'
+                r'geekblue|purple|magenta|grey|gray|pink|sky|amber|preset)"',
+                r'variant="(?:filled|outlined|solid|borderless|link|text)"\s+color=',
             ):
                 if re.search(pattern, line):
                     offenders.append(f"{path.name}:{lineno}: {line.strip()[:60]}")
     assert not offenders, "colours outside the token table:\n  " + "\n  ".join(offenders[:10])
 
 
-def test_font_floor_is_enforced_in_css() -> None:
-    """CJK below ~12px is unreadable; the style system sets the floor, not JSX."""
+def test_font_floor_is_enforced_across_the_frontend() -> None:
+    """CJK below ~12px is unreadable, and the rule has to hold where text is set.
+
+    This used to scan `index.css` for `font-size: Npx` only. Two ways that fails:
+    after the M3 typescale migration there are no literal pixel sizes left in the
+    CSS at all (so an assertion over an empty set passes vacuously), and the
+    JSX — where eleven files set `text-[11px]` — was never looked at. The floor
+    now covers both, and it is enforced together with the scale: 11px is Google's
+    `label-small`, which is legitimate for latin identifiers and monospace, so it
+    is allowed only where the same element also sets a mono family.
+    """
     css = (WEB / "src" / "index.css").read_text(encoding="utf-8")
-    sizes = [float(v) for v in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", css)]
-    assert sizes, "expected explicit font sizes in the style system"
-    assert min(sizes) >= MIN_FONT_PX, f"index.css sets {min(sizes)}px text"
+    offenders: list[str] = []
+
+    for value in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", css):
+        if float(value) < MIN_FONT_PX:
+            offenders.append(f"index.css: literal {value}px is under the {MIN_FONT_PX}px floor")
+
+    # The justification is read from the *class attribute*, not from the line: a
+    # review showed a same-line check waves through a `text-[11px]` whose
+    # `font-mono` sits on the next line of a wrapped attribute.
+    for path in sorted((WEB / "src").rglob("*.tsx")):
+        text = path.read_text(encoding="utf-8")
+        for quoted, template in re.findall(r"className=(?:\"([^\"]*)\"|\{`([^`]*)`\})", text):
+            classes = quoted or template
+            sizes = [float(s) for s in re.findall(r"text-\[(\d+(?:\.\d+)?)px\]", classes)]
+            if sizes and min(sizes) < MIN_FONT_PX and "font-mono" not in classes:
+                offenders.append(
+                    f"{path.name}: {classes.strip()[:60]}… sets {min(sizes)}px without font-mono"
+                )
+
+    assert not offenders, "text under the CJK floor:\n  " + "\n  ".join(offenders[:10])
 
 
 def test_theme_tokens_drive_antd() -> None:

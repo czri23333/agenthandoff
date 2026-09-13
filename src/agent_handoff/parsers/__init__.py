@@ -30,6 +30,7 @@ from agent_handoff.parsers.zcode import ZcodeParser
 
 __all__ = [
     "Parser",
+    "PARSER_CLASSES",
     "ZcodeParser",
     "ClaudeCodeParser",
     "CodebuddyParser",
@@ -53,57 +54,42 @@ __all__ = [
     "resolve_session",
 ]
 
+# One registry, two views. `available_parsers()` and `all_parsers()` used to
+# spell this list out separately, which is a drift waiting to happen: the two
+# must agree, and nothing made them. `tests/test_reader_lockstep.py` asserts this
+# tuple is the single source and that every member is also in the support matrix,
+# in `matrix.STORE_KINDS` and in the doctor's probe list.
+PARSER_CLASSES: tuple[type[Parser], ...] = (
+    ZcodeParser,
+    ClaudeCodeParser,
+    CodebuddyParser,
+    CodebuddyCnParser,
+    QoderworkParser,
+    QoderworkCnParser,
+    QodercnIdeParser,
+    QoderIdeParser,
+    QwenworkParser,
+    WorkbuddyParser,
+    DshParser,
+    KimiParser,
+    CodexParser,
+    OpenCodeParser,
+    QoderwakeParser,
+    QoderwakeCnParser,
+    QoderworkAppParser,
+    QoderworkCnAppParser,
+    QwenworkAppParser,
+    CherryStudioParser,
+)
+
 
 def available_parsers() -> list[Parser]:
     """Instantiate parsers whose storage exists on this machine, display order."""
-    instances = [
-        ZcodeParser(),
-        ClaudeCodeParser(),
-        CodebuddyParser(),
-        CodebuddyCnParser(),
-        QoderworkParser(),
-        QoderworkCnParser(),
-        QodercnIdeParser(),
-        QoderIdeParser(),
-        QwenworkParser(),
-        WorkbuddyParser(),
-        DshParser(),
-        KimiParser(),
-        CodexParser(),
-        OpenCodeParser(),
-        QoderwakeParser(),
-        QoderwakeCnParser(),
-        QoderworkAppParser(),
-        QoderworkCnAppParser(),
-        QwenworkAppParser(),
-        CherryStudioParser(),
-    ]
-    return [p for p in instances if p.available()]
+    return [p for p in (cls() for cls in PARSER_CLASSES) if p.available()]
 
 
 def all_parsers() -> list[Parser]:
-    return [
-        ZcodeParser(),
-        ClaudeCodeParser(),
-        CodebuddyParser(),
-        CodebuddyCnParser(),
-        QoderworkParser(),
-        QoderworkCnParser(),
-        QodercnIdeParser(),
-        QoderIdeParser(),
-        QwenworkParser(),
-        WorkbuddyParser(),
-        DshParser(),
-        KimiParser(),
-        CodexParser(),
-        OpenCodeParser(),
-        QoderwakeParser(),
-        QoderwakeCnParser(),
-        QoderworkAppParser(),
-        QoderworkCnAppParser(),
-        QwenworkAppParser(),
-        CherryStudioParser(),
-    ]
+    return [cls() for cls in PARSER_CLASSES]
 
 
 def resolve_session(session_ref: str, cli: str | None = None) -> tuple[Parser, RawSession]:

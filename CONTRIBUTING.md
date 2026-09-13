@@ -41,6 +41,25 @@ git add -A src/agent_handoff/server/static   # commit the rebuilt bundle in the 
 `handoff ui --open` serves it at `http://127.0.0.1:8620` (loopback only).
 During development, `npm run dev` proxies `/api` to that port.
 
+## Before you push
+
+One command runs the gates CI runs, in the same order:
+
+```bash
+python scripts/ci_local.py                  # pytest, ruff, tokens, evidence, conformance, CLI smoke
+python scripts/ci_local.py --with-frontend  # ... plus npx tsc -b and npm run build
+```
+
+A commit in this repository once went red on all nine CI jobs because `ruff check .`
+was run *before* the last test edit and not after: the gates are a set, not a menu,
+and running four of them is easy to mistake for running all of them. The script
+stops at the first failure and names the step.
+
+`--with-frontend` is opt-in because CI does not build the UI (the bundle is
+committed, so a clean clone can `pip install` and serve it) — which is exactly why
+the rebuild has to be deliberate whenever `web/` changed, and why the rebuild
+travels in the same commit as the source it came from.
+
 ## Style
 
 - `ruff check .` must pass (E, F, I, UP, B, SIM; line length 100).

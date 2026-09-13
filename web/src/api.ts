@@ -20,11 +20,23 @@ export interface SessionMeta {
   status: string | null; // proven end-state, null = unknown
   needs_reply?: boolean | null; // ends on an un-answered user message (null = unknown)
   domain: string; // config-driven project grouping (ADR-009)
-  /** Live git branch/worktree for the session cwd (cached 30s server-side). */
-  git?: { branch?: string; worktree_count?: number };
+  /**
+   * The git the row is about. `source: "session"` is the revision the session
+   * ran on, read from the store; `source: "cwd"` is the live probe of its
+   * working directory (cached 30s server-side), the fallback for the stores
+   * that do not record one.
+   */
+  git?: {
+    branch?: string;
+    commit?: string | null;
+    worktree_count?: number;
+    source?: "session" | "cwd";
+  };
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
+  /** The store file this session was read from (the bundle meta carries it). */
+  source_path?: string | null;
   /** Provenance notes (supplement counts, linked sessions, tool failures…). */
   notes?: string[];
   /** Assistant identity as the product shows it (expert name + avatar URL). */
@@ -76,6 +88,10 @@ export interface TranscriptMessage {
   subagent?: string;
   /** Verbatim source before cleaning (absent = cleaning changed nothing). */
   raw_text?: string;
+  /** role="history" markers: the thread the earlier turns live in. */
+  parent_session_id?: string;
+  /** role="history" markers: the ordinal this page begins at. */
+  ordinal?: number;
 }
 
 export interface StoreInfo {
@@ -149,6 +165,27 @@ export interface ThreadGroup {
   session_ids: string[];
   clis: string[];
   last_active: string | null;
+}
+
+/**
+ * What the clustering actually managed to look at.
+ *
+ * `with_files < sessions` means the file-overlap signal covered only part of the
+ * store — the pass runs under a time budget because reading every session record
+ * costs ~150s on an 802-session store. The view says so out loud instead of
+ * presenting a partial cluster set as the whole picture.
+ */
+export interface ThreadsCoverage {
+  sessions: number;
+  with_files: number;
+  seconds: number;
+  budget_s: number;
+  budget_hit: boolean;
+}
+
+export interface ThreadsPayload {
+  threads: ThreadGroup[];
+  coverage: ThreadsCoverage;
 }
 
 export interface InboxItem {
@@ -287,7 +324,14 @@ export const api = {
   /** Download the session's ORIGINAL storage (zip, byte-faithful). */
   rawUrl: (cli: string, sid: string) =>
     `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/raw`,
-  threads: (cwd?: string) => get<ThreadGroup[]>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
+  threads: (cwd?: string) =>
+    get<ThreadsPayload>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
+  // One more budget's worth of file sets. The clustering reads every session's
+  // record to know which files it touched — ~150s over this machine's 802
+  // sessions — so the first call answers with what fits in its budget and this
+  // asks for the next batch.
+  threadsMore: (cwd?: string) =>
+    get<ThreadsPayload>(`/api/threads/refresh${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
   inbox: (globalScope = false) => get<InboxItem[]>(`/api/inbox?global_scope=${globalScope}`),
   launcher: (cli: string, sid: string) =>
     get<Launcher>(`/api/launcher/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}`).catch(() => null),

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "state": {
+    "replacementDecisions": {},
+    "seenFunctionResponseIds": [],
+    "sessionMemoryState": {
+      "initialized": false,
+      "toolCallsSinceLastExtraction": 0
+    },
+    "autoCompactTracking": {
+      "consecutiveFailures": 0,
+      "lastCompressionStatus": 5
+    },
+    "snippedMessageIds": []
+  }
+}

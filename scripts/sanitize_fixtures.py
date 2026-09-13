@@ -49,6 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from agent_handoff.locations import home  # noqa: E402
 from agent_handoff.parsers import all_parsers  # noqa: E402
 
 try:  # optional codec, exactly as in the library
@@ -61,12 +62,47 @@ OUT_ROOT = REPO / "tests" / "fixtures" / "sanitized"
 SEED = 20260831
 MAX_TEXT = 300  # length class, not the words: a fixture is not an archive
 SESSIONS_PER_CLI = 3
+# A store whose transcripts are simply large gets fewer sessions rather than a
+# fixture over the per-cli byte cap — the alternative is either a fixture that
+# fails the audit or a global cap raised for everyone. `workbuddy` is the case
+# that forced it: 3 of its sessions carry 198 files and 5,366 source messages,
+# and the sample came to 4.35 MB against a 4 MB budget.
+SESSIONS_PER_CLI_OVERRIDE: dict[str, int] = {"workbuddy": 2}
+# A reader whose sessions live in more than one tree. QoderWake is the case: the
+# daemon keeps team-group chats in SQLite under `~/.qoderwake*`, while the worker
+# transcripts it lists live in the *shared* qoder store the IDE reads.
+# `select_files` mirrors one tree rooted at the parser's `root`, so the second
+# tree was invisible to it and the CLI was skipped as "nothing selectable" while
+# `handoff doctor` listed eleven sessions from it — the two commands disagreeing
+# about the same store.
+#
+# Each entry is `(path under $HOME, path inside the fixture dir)`. The fixture
+# has to keep the trees in the *relative shape the parser derives*, not just
+# copy them: `QoderwakeParser._shared_parser()` computes the shared store as
+# `root.parent.parent.parent / shared_store / "projects"`, so aiming the parser
+# at `<fixture>/root/data/store` makes it look in `<fixture>/.qoder-cn/projects`.
+# `with_root` is the first entry's destination, which is what makes that hold.
+MULTI_TREE: dict[str, tuple[tuple[str, str], ...]] = {
+    "qoderwake": (
+        (".qoderwake/data/store", "root/data/store"),
+        (".qoder/projects", ".qoder/projects"),
+    ),
+    "qoderwake-cn": (
+        (".qoderwake-cn/data/store", "root/data/store"),
+        (".qoder-cn/projects", ".qoder-cn/projects"),
+    ),
+}
 MAX_RECORDS = 200  # a fixture is a SAMPLE of a session, and says so
 CANDIDATE_POOL = 60  # ranking 451 sessions means 451 full parses
 HEAD_RECORDS = 60  # opening metadata, then a stride, then the newest record
 MAX_FILE_BYTES = 200_000_000  # a dsh roll is 30 MB compressed; repo cost is lines
 MAX_ROWS_PER_TABLE = 200  # a SQLite fixture keeps the schema, not the store
 MAX_CLI_BYTES = 4_000_000  # 125 MB of fixtures is not a test fixture
+
+# Stores whose sessions are genuinely spread over sibling files in one directory.
+# Only kimi has this shape today (`state.json` beside `wire.jsonl` in a session
+# directory); every other CLI must select the exact backing files it needs.
+SIBLING_PICKUP_CLIS = {"kimi"}
 
 # Field values that are schema rather than speech: kept verbatim so the fixture
 # still drives the same code paths (types, roles, tools, statuses).
@@ -181,6 +217,13 @@ STATIC_NAMES = {
 
 # Prefixes parsers glob on; the identity after them may still be hashed.
 _SEGMENT_PREFIXES = ("wd_", "session_", "rollout-", "agent-", "project_")
+# Substrings that must survive a rename because a *parser* classifies by them.
+# `_family_of_path` in jsonl_family.py decides whether a transcript in the shared
+# qoder store belongs to the wake family by looking for `qoderwake`/`qoderwork`
+# in the workspace directory name, so hashing that name away made the fixture
+# parse to zero sessions while every file was present and correct. A product
+# name is schema, not identity — the same reason `wd_` survives for Kimi.
+_SEGMENT_MARKERS = ("qoderwake", "qoderwork")
 
 _HEXISH_RE = re.compile(r"^[0-9a-fA-F][0-9a-fA-F_-]{5,63}(\.[a-z0-9]{1,6})?$")
 
@@ -488,10 +531,11 @@ class Sanitizer:
             # globs `wd_*/session_*/state.json` and a renamed directory makes the
             # fixture unparseable.
             prefix = next((p for p in _SEGMENT_PREFIXES if value.startswith(p)), "")
+            marker = next((m for m in _SEGMENT_MARKERS if m in value), "")
             stem, dot, ext = value.rpartition(".")
             token = "scope-" + hashlib.sha1(value.encode()).hexdigest()[:10]
             tail = f"{token}.{ext}" if dot and 1 <= len(ext) <= 6 else token
-            out = prefix + tail
+            out = f"{prefix}{marker}-{tail}" if marker else prefix + tail
         return self._clean(out)
 
 
@@ -746,8 +790,9 @@ def pick_sessions(parser) -> tuple[list[str], int]:
     for meta in metas[:CANDIDATE_POOL]:
         note_project_path(meta.cwd or "")
     ranked = sorted(metas[:CANDIDATE_POOL], key=_source_bytes, reverse=True)
+    want = SESSIONS_PER_CLI_OVERRIDE.get(parser.cli, SESSIONS_PER_CLI)
     scored: list[tuple[int, str]] = []
-    for meta in ranked[: SESSIONS_PER_CLI * 4]:
+    for meta in ranked[: want * 4]:
         try:
             raw = parser.load(meta.session_id)
         except (OSError, ValueError):
@@ -757,11 +802,11 @@ def pick_sessions(parser) -> tuple[list[str], int]:
         substance = len(raw.messages) + len(raw.files_touched) // 2
         scored.append((substance, meta.session_id))
     scored.sort(reverse=True)
-    chosen = [sid for _score, sid in scored[:SESSIONS_PER_CLI]]
+    chosen = [sid for _score, sid in scored[:want]]
     if not chosen:
         # Best effort beats silence: a thin store still gets a fixture, and the
         # audit - not the selector - decides whether it is meaningful.
-        chosen = [meta.session_id for meta in ranked[:SESSIONS_PER_CLI]]
+        chosen = [meta.session_id for meta in ranked[:want]]
     source_messages = 0
     for sid in chosen:
         try:
@@ -773,53 +818,233 @@ def pick_sessions(parser) -> tuple[list[str], int]:
 
 
 
-def select_files(base: Path, root: Path, sessions: list[str]) -> list[Path]:
+_CODEX_UUID_IN_NAME = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _first_uuid(text: str) -> str | None:
+    """The first UUID-shaped token in a filename, used by Codex's rollout names."""
+    match = _CODEX_UUID_IN_NAME.search(text)
+    return match.group(0) if match else None
+
+
+def _apply_cli_byte_cap(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Keep a deterministic prefix of `paths` that fits in ``MAX_CLI_BYTES``.
+
+    The order is the source of truth, so a rebuild never depends on which files
+    happened to exist in the live store first. Dropped files are returned so the
+    caller can make a truncated fixture explicit instead of silent.
+    """
+    kept: list[Path] = []
+    dropped: list[Path] = []
+    total = 0
+    for path in paths:
+        size = path.stat().st_size
+        if total + size <= MAX_CLI_BYTES:
+            kept.append(path)
+            total += size
+        else:
+            dropped.append(path)
+    return kept, dropped
+
+
+def select_files(
+    cli: str, base: Path, root: Path, sessions: list[str]
+) -> tuple[list[Path], list[Path]]:
     """Store files backing the chosen sessions, plus their sibling records.
 
-    A session is often spread over several files (kimi keeps `state.json` and
-    `wire.jsonl` side by side, and only one of them contains the id), so whole
-    directories that matched are taken intact - a half-copied session parses to
-    nothing and would look like parser drift instead of a broken fixture.
+    Sibling pickup is per-CLI, not a default for every store: kimi keeps
+    `state.json` beside `wire.jsonl` and only one of them contains the id, so a
+    matched session directory has to be taken intact. Codex, by contrast, owns
+    exactly one rollout per filename UUID, and taking every sibling in a date
+    directory was pulling 24 unrelated files into a one-session fixture.
     """
     if base.is_file():
-        return [base]
+        return [base], []
     candidates = sorted(
         p for p in base.rglob("*") if p.is_file() and p.stat().st_size <= MAX_FILE_BYTES
     )
     if not candidates:
-        return []
-    matched_dirs: list[Path] = []
+        return [], []
     wanted: list[Path] = []
-    for sid in sessions:
-        token = sid[:13] if len(sid) > 20 else sid
-        hits = [
-            p
-            for p in candidates
-            if sid in p.name or token in p.name or token in str(p.relative_to(base))
-        ]
-        if not hits:
+    matched_dirs: list[Path] = []
+    session_set = set(sessions)
+    if cli == "codex":
+        wanted = [p for p in candidates if _first_uuid(p.name) in session_set]
+    else:
+        for sid in sessions:
+            token = sid[:13] if len(sid) > 20 else sid
             hits = [
-                p for p in candidates if sid in p.read_bytes()[:40000].decode("utf-8", "ignore")
+                p
+                for p in candidates
+                if sid in p.name or token in p.name or token in str(p.relative_to(base))
             ]
-        for hit in hits:
-            wanted.append(hit)
-            matched_dirs.append(hit.parent)
-    for directory in dict.fromkeys(matched_dirs):
-        for sibling in sorted(directory.iterdir()):
-            if (
-                sibling.is_file()
-                and sibling.stat().st_size <= MAX_FILE_BYTES
-                and sibling not in wanted
-            ):
-                wanted.append(sibling)
+            if not hits:
+                hits = [
+                    p for p in candidates if sid in p.read_bytes()[:40000].decode("utf-8", "ignore")
+                ]
+            for hit in hits:
+                wanted.append(hit)
+                matched_dirs.append(hit.parent)
+    if cli in SIBLING_PICKUP_CLIS:
+        for directory in dict.fromkeys(matched_dirs):
+            for sibling in sorted(directory.iterdir()):
+                if (
+                    sibling.is_file()
+                    and sibling.stat().st_size <= MAX_FILE_BYTES
+                    and sibling not in wanted
+                ):
+                    wanted.append(sibling)
     for p in candidates:  # small vendor indexes sit outside the session dirs
         if p.name in {"session_index.jsonl"} and p not in wanted:
             wanted.append(p)
     seen: set[Path] = set()
-    return [p for p in wanted if not (p in seen or seen.add(p))][:24]
+    unique = [p for p in wanted if not (p in seen or seen.add(p))]
+    unique.sort(key=lambda p: p.relative_to(base).as_posix())
+    return _apply_cli_byte_cap(unique)
+
+
+def write_multi_tree_fixture(
+    cli: str,
+    parser,
+    sessions: list[str],
+    source_messages: int,
+    trees: tuple[tuple[str, str], ...],
+) -> dict:
+    """Mirror two source trees into one fixture, keeping their relative shape.
+
+    See `MULTI_TREE`: a reader can list sessions from a store other than its own
+    `root`, and the parser derives that other store's path from `root`, so the
+    fixture has to preserve the relationship rather than flatten both trees into
+    one directory.
+    """
+    out_dir = OUT_ROOT / cli
+    if out_dir.exists():
+        for stale in sorted(out_dir.rglob("*"), reverse=True):
+            if stale.is_file():
+                stale.unlink()
+    san = Sanitizer(cli)
+    written: list[dict] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mirrored: list[str] = []
+    missing: list[str] = []
+    for home_rel, dest_rel in trees:
+        # Create the destination even when the tree contributes no files: the
+        # parser is *aimed* at the first one, and `fixture_root_for` resolves
+        # `with_root` to that path, so a directory that never gets created reads
+        # as "fixture missing" rather than "this half is empty".
+        (out_dir / dest_rel).mkdir(parents=True, exist_ok=True)
+        tree = home() / home_rel
+        if not tree.is_dir():
+            # Absent is not a failure: the daemon half legitimately has no db on
+            # a machine that only ever ran the IDE, and the reader still works.
+            missing.append(home_rel)
+            continue
+        mirrored.append(_portable(tree))
+        selected, dropped = select_files(cli, tree, tree, sessions)
+        _emit_tree(
+            out_dir,
+            tree,
+            dest_rel,
+            selected,
+            san,
+            sessions,
+            written,
+        )
+        for dropped_path in dropped:
+            print(
+                f"[drop] {cli}: {dropped_path} exceeds the per-CLI source cap "
+                f"({MAX_CLI_BYTES} bytes) and was omitted"
+            )
+    # The parser is aimed at the first tree's destination, which is what makes
+    # `root.parent.parent.parent / shared` resolve to the second tree inside the
+    # fixture.
+    with_root = f"{cli}/{trees[0][1]}"
+    (out_dir / ".fixture.json").write_text(
+        json.dumps(
+            {
+                "cli": cli,
+                "with_root": with_root,
+                "mirrors": " + ".join(mirrored) or " + ".join(m for m, _ in trees),
+                "absent_trees": missing,
+                "sessions": [san.fake_id(s) if len(s) > 8 else s for s in sessions],
+                "files": written,
+                "redacted_keys": sorted(set(san.redacted)),
+                "scrubbed_hits": san.scrubbed,
+                "sampled_records": any(w["sampled"] for w in written),
+                "source_messages": source_messages,
+                "max_records": MAX_RECORDS,
+                "candidate_pool": CANDIDATE_POOL,
+                "seed": SEED,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return {
+        "root": with_root,
+        "base": ";".join(d for _, d in trees),
+        "sessions": sessions,
+        "files": written,
+        "redacted": sorted(set(san.redacted)),
+        "scrubbed": san.scrubbed,
+    }
+
+
+def _emit_tree(
+    out_dir: Path,
+    base: Path,
+    dest_prefix: str,
+    files: list[Path],
+    san: Sanitizer,
+    sessions: list[str],
+    written: list[dict],
+) -> None:
+    """Transform one source tree's files into `out_dir / dest_prefix`."""
+    for src in files:
+        data = src.read_bytes()
+        name = src.name.lower()
+        sampled = False
+        # Two passes on purpose: transform FIRST (which is where session ids get
+        # mapped), then derive the sanitized filename from the finished map.
+        # Naming the file before transforming left real ids in filenames whose
+        # records had already been remapped, so nothing could load.
+        if name.endswith((".zstd", ".zst")):
+            if zstandard is None:
+                continue
+            body, sampled = transform_jsonl(_zstd_decompress(data), san)
+            payload = zstandard.ZstdCompressor().compress(body)
+        elif name.endswith((".sqlite", ".db")):
+            payload = None  # handled by the sqlite rebuilder below
+        elif name.endswith(".jsonl"):
+            payload, sampled = transform_jsonl(data, san)
+        elif name.endswith(".json"):
+            payload = transform_json(data, san)
+        else:
+            payload, sampled = transform_jsonl(data, san)
+
+        parts = [Path(src.name)] if base.is_file() else src.relative_to(base).parts
+        rel = Path(dest_prefix) / Path(*[san.name(part) for part in parts])
+        dst = out_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        extra: dict = {}
+        if payload is None:
+            extra = {"sqlite": transform_sqlite(src, dst, san, sessions)}
+        else:
+            dst.write_bytes(payload)
+        written.append(
+            {"rel": str(rel), "bytes": dst.stat().st_size, "sampled": sampled, **extra}
+        )
 
 
 def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -> dict:
+    trees = MULTI_TREE.get(cli)
+    if trees:
+        return write_multi_tree_fixture(cli, parser, sessions, source_messages, trees)
     root = Path(getattr(parser, "root", None) or parser.db_path)
     base = root.parent if cli in MIRROR_FROM_PARENT else root
     out_dir = OUT_ROOT / cli
@@ -830,7 +1055,13 @@ def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -
     san = Sanitizer(cli)
     written: list[dict] = []
     out_dir.mkdir(parents=True, exist_ok=True)
-    for src in select_files(base, root, sessions):
+    selected, dropped = select_files(cli, base, root, sessions)
+    for dropped_path in dropped:
+        print(
+            f"[drop] {cli}: {dropped_path} exceeds the per-CLI source cap "
+            f"({MAX_CLI_BYTES} bytes) and was omitted"
+        )
+    for src in selected:
         data = src.read_bytes()
         name = src.name.lower()
         sampled = False

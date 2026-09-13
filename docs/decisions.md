@@ -115,6 +115,24 @@ React + TypeScript + Tailwind) single-page app whose dist is shipped inside
 the wheel: end users need no Node toolchain. Polling instead of WebSockets:
 session stores change slowly and honesty about that beats realtime theater.
 
+Polling is cheap on the wire and not on the CPU, and that turned out to be a
+design constraint rather than an implementation detail. Measured here: a cold
+`/api/sessions` build reads **802** session metas and costs **3.1s** (5.7s before
+the git probe stopped spawning two processes per cwd), and the frontend polls
+every 30s per open tab. Two rules are built in as a result, both after the server
+was measured burning **115% of one core** with `/api/stores` taking 8.7s and
+`/api/sessions` timing out at 150s:
+
+* **one build in flight per cache key** — a second caller waits for the first
+  instead of starting its own build;
+* **a stale answer beats a queue** — while one caller refreshes, everyone else is
+  served the list from the previous build (at most one TTL old, which a 30s poll
+  cannot tell apart from "nothing changed").
+
+`tests/test_server_api.py` covers both, and the interaction gate
+(`scripts/audit_component_rules.py --overlap`) fails a page that never leaves its
+loading state, because that is what a queued server looks like from the outside.
+
 ## ADR-007: Executor — command the fleet, but only through verified doors
 
 A cockpit that only watches is half a product. Two executor duties:

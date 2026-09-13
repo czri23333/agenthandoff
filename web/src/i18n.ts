@@ -13,6 +13,7 @@ const dict = {
     inbox: "交接箱",
     doctor: "体检",
     memory: "记忆",
+    navRail: "主导航",
     memoryDesc: "各 agent 的常驻指令与记忆文件 —— 交代过什么，而非做过什么",
     memoryProjectFiles: "含项目内 AGENTS/CLAUDE.md",
     memoryEmpty: "（扫描到的存储中无此类信息）",
@@ -38,6 +39,9 @@ const dict = {
     kind_craft: "手工",
     kind_design: "设计",
     kind_coding: "编程",
+  kind_subagent: "子代理",
+  kind_subagent_child: "子代理",
+  kind_agent_created_thread: "智能体创建",
     parentOf: "子任务 · 父会话",
     subSessions: "子会话",
     expandSubs: "展开子会话",
@@ -109,6 +113,7 @@ const dict = {
     thinking: "思考过程",
     toolCall: "工具调用",
     subagentCall: "子代理",
+    agentMessage: "多代理消息",
     openSubagent: "打开子会话",
     rawArchiveTitle: "下载本会话的原始存储（逐字、byte-faithful：工具调用/系统行/厂商未解析字段都在）",
     resumeInCli: "在 CLI 中恢复",
@@ -121,6 +126,10 @@ const dict = {
     sessionInfo: "会话与 agent",
     interrupted: "会话曾中断",
     pendingDirective: "未执行的指令",
+    engineDetail: "引擎原文",
+    threadsCoverage:
+      "文件重叠信号覆盖 {with_files}/{sessions} 个会话（本次 {seconds}s，已达时间预算）",
+    threadsLoadMore: "继续加载",
     usage: "用量与速度",
     budget: "上下文预算",
     timeline: "时间分布",
@@ -152,6 +161,12 @@ const dict = {
     expand: "展开全文",
     collapse: "收起",
     compactionNote: "上下文压缩",
+  historyStart: "记录从半途开始",
+  gitSession: "会话运行时的分支与提交（存储记录）",
+  sourcePath: "存储文件",
+  sourcePathHint: "这个会话在磁盘上的原始记录文件（只读打开）",
+  gitLive: "工作目录当前的 git 分支（实时探测）",
+  storeFacts: "存储事实",
     compactionHint: "长会话被多次压缩，边界之前的消息仅存模型摘要",
     threadsDesc: "实为同一件事的多个会话 —— 谱系 + 文件重叠 + 标题词，限时间窗内",
     minOverlap: "最小重叠",
@@ -192,6 +207,7 @@ const dict = {
     searchModeTitle: "标题",
     searchModeFull: "全文",
     searchHint: "按 / 聚焦搜索，Esc 清空；全文模式含消息正文与文件路径",
+    clear: "清空",
     searchTooShort: "至少 2 个字符",
     indexing: "索引中 {done}/{total}",
     indexReady: "索引就绪 · {n} 个会话",
@@ -214,7 +230,10 @@ const dict = {
     themeAuto: "跟随系统",
     themeDark: "夜间",
     themeLight: "日间",
+    seedBaseline: "默认配色（M3 baseline）",
+    seedRejected: "这个种子会产生不可读的配色，已保留原配色：",
     themeToggleHint: "切换主题（T）· 配色已按 WCAG AA 校验",
+    displaySettings: "显示设置（主题 / 语言）",
     /* interruption states -------------------------------------------------- */
     it_clean: "正常结束",
     it_user_pending: "有未执行的指令",
@@ -236,6 +255,7 @@ const dict = {
     inbox: "Inbox",
     doctor: "Doctor",
     memory: "Memory",
+    navRail: "Primary navigation",
     memoryDesc: "standing instructions & memory files across CLIs — what was agreed, not what was done",
     memoryProjectFiles: "include project AGENTS/CLAUDE.md",
     memoryEmpty: "(nothing of this kind was found in the scanned stores)",
@@ -261,6 +281,9 @@ const dict = {
     kind_craft: "craft",
     kind_design: "design",
     kind_coding: "coding",
+  kind_subagent: "sub-agent",
+  kind_subagent_child: "sub-agent",
+  kind_agent_created_thread: "agent-created",
     parentOf: "child session · parent",
     subSessions: "sub-sessions",
     expandSubs: "expand sub-sessions",
@@ -332,6 +355,7 @@ const dict = {
   thinking: "thinking",
   toolCall: "tool call",
   subagentCall: "sub-agent",
+  agentMessage: "agent-to-agent",
   openSubagent: "open child session",
   rawArchiveTitle: "The session's ORIGINAL storage, byte-faithful: tool calls, system rows and vendor fields no parser reads",
     resumeInCli: "resume in cli",
@@ -344,6 +368,10 @@ const dict = {
     sessionInfo: "session & agent",
     interrupted: "Interrupted session",
     pendingDirective: "directive never executed",
+    engineDetail: "from the engine",
+    threadsCoverage:
+      "the file-overlap signal covered {with_files}/{sessions} sessions ({seconds}s this pass, budget reached)",
+    threadsLoadMore: "load more",
     usage: "usage & speed",
     budget: "context budget",
     timeline: "when it happened",
@@ -375,6 +403,12 @@ const dict = {
     expand: "expand full text",
     collapse: "collapse",
     compactionNote: "context compaction",
+  historyStart: "transcript starts mid-history",
+  gitSession: "the branch and commit the session ran on (from the store)",
+  sourcePath: "store file",
+  sourcePathHint: "the raw record this session was read from, opened read-only",
+  gitLive: "the working directory's current git branch (live probe)",
+  storeFacts: "store facts",
     compactionHint: "long sessions are compacted repeatedly; before each boundary only a model summary survives",
     threadsDesc: "sessions that are actually one job — lineage + file overlap + title tokens, within a time window",
     minOverlap: "min overlap",
@@ -415,6 +449,7 @@ const dict = {
     searchModeTitle: "titles",
     searchModeFull: "full text",
     searchHint: "/ focuses search, Esc clears; full text covers message bodies and file paths",
+    clear: "Clear",
     searchTooShort: "at least 2 characters",
     indexing: "indexing {done}/{total}",
     indexReady: "index ready · {n} sessions",
@@ -437,7 +472,10 @@ const dict = {
     themeAuto: "system",
     themeDark: "dark",
     themeLight: "light",
+    seedBaseline: "default palette (M3 baseline)",
+    seedRejected: "that seed would not be readable, so the palette is unchanged:",
     themeToggleHint: "cycle theme (T) · every pair is WCAG-AA verified",
+    displaySettings: "display settings (theme / language)",
     /* interruption states -------------------------------------------------- */
     it_clean: "clean end",
     it_user_pending: "un-executed directive",
@@ -457,6 +495,18 @@ const dict = {
 
 export type Lang = "zh" | "en";
 export type TKey = keyof (typeof dict)["zh"];
+
+/**
+ * Whether a key exists in the dictionary at all.
+ *
+ * `t()` falls back to the key itself, which is the right default for a missing
+ * translation but the wrong one for a vocabulary the *store* owns: a task kind
+ * nobody translated would render as "kind_subagent_child" in the list. Callers
+ * that map data onto keys check first and show the store's own word otherwise.
+ */
+export function hasKey(key: string): key is TKey {
+  return key in dict.zh;
+}
 
 export const LangContext = createContext<Lang>("zh");
 
