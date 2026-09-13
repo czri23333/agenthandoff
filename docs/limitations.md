@@ -126,8 +126,12 @@ sampled away.
     instructions work from source only.
 15. **The focus sweep is synthetic and single-browser.** `--focus` calls
     `element.focus()` on every focusable element and then presses <kbd>Tab</kbd>
-    through the same five routes × two themes, reading the computed ring (540
-    nodes, 0 defects on the current build). It proves the style, and the review
+    through the same five routes × two themes, reading the computed ring (measured
+    today: **851** focusable elements on two themes plus one session-detail route, 0
+    defects, 16 rings delegated to the box the reader sees). It takes two readings,
+    1400x1000 and 700x900, because the two size classes do not show the same
+    controls: the rail is hidden below 1200px and the tab strip comes back, so a
+    ring on either one would otherwise have no reading at all. It proves the style, and the review
     showed how much it missed when it *only* called `focus()` — antd's ring on a
     dropdown item, on a segmented item, and a second indicator on the slider —
     so both channels are now part of the check. What is still uncovered: focus
@@ -158,7 +162,9 @@ sampled away.
 
 17. **The hover/press sweep is a family sample, not a census.** `--states` puts a
     real pointer on one representative of each control *family* it finds on each
-    route (44 controls across five routes × two themes on the current build),
+    route, at both size classes (measured today: **24** controls, 8%/12% on every
+    one), and it needs `--app` to have routes at all — run alone it reports
+    "examined only 0 controls" and fails rather than passing on nothing.
     so a defect that only affects, say, the third row's button rather than the
     first would be missed — the sampling exists because a full census is ~700
     controls × four round trips each. It skips disabled and hidden controls (they
@@ -250,9 +256,12 @@ sampled away.
     carries a `_source` naming the files it came from and an independent review
     once compared them by hand against 53 fetched files. That hand review is
     superseded now: `tests/test_official_components.py` is the repeatable gate
-    for all 28 families (341 values against 148 vendored files, pinned in
-    `tests/fixtures/m3spec/PINS.tsv`), and `scripts/fetch_m3spec.py` re-derives
-    the corpus. Item 24 records what that gate does not say.
+    for all 29 families (measured today: **362** values against **151** vendored
+    files, pinned in `tests/fixtures/m3spec/PINS.tsv`), and
+    `scripts/fetch_m3spec.py` re-derives the corpus. Two of those files are not
+    token tables at all — the adaptive pane directive and androidx.window's size
+    classes — and their numbers are pinned by `tests/test_official_panes.py`
+    instead (see item 25). Item 24 records what that gate does not say.
 
 24. **The component gate proves agreement with pinned copies, and one popup is
     checked per property rather than all of them.** It compares our ~370
@@ -271,6 +280,28 @@ sampled away.
     gallery's `.ah-field` and `.ah-mchip` families are measured in the audit
     gallery rather than in the product, because no view mounts them yet.
 
+25. **A forked transcript is linked, not joined.** Codex writes a fork's page
+    without the turns it inherited: 26 of the sessions this reader lists carry a
+    `subagent_history_start_ordinal` (8 to 1022) naming the thread the earlier turns
+    live in, and in 26 of 26 cases that thread *is* in the store. The cockpit now
+    says so in the transcript — a `role: "history"` marker at the oldest end whose
+    link opens the parent thread — and in the facts list, and it does **not** merge
+    the two: joining them would invent a session shape, and the ordinal alone does
+    not say how the parent's own rows map onto it. A reader who wants the earlier
+    turns reads them where they are. The same rule places a compaction divider by
+    position (`after_messages`) rather than by timestamp, because 11 of the 14
+    Codex sessions that have a divider put every row inside the same second.
+26. **The pane geometry is official; the surfaces it frames are ours.** The
+    adaptive directive gives the width classes, the partition count and the pane
+    width, and `tests/test_official_panes.py` pins those against the vendored files
+    — but *which* surfaces sit in the panes is a product decision: the frame is
+    `SessionDetail`'s (transcript + brief/meta), and the dashboard is deliberately
+    single-pane at every width because its content is a toolbar, a chart and a
+    table rather than a list a detail could sit beside. Two published values are
+    carried but unspent for the same reason (`preferredHeight` 420dp is the
+    *vertical* partition this web layout does not have; the rail's 96dp and 44dp
+    describe a container the collapsed form does not render). All three are written
+    down beside the tokens rather than dressed up as used.
 ## How to check any of this yourself
 
 ```bash

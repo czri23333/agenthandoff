@@ -926,12 +926,17 @@ were approximating; and `--pane` measures the frame at three widths.
 **A blind spot the pane work exposed.** Every interaction gate ran at one width
 (1400px), so the sheet's compact branch — the one the frame *changes* at 839px —
 was measured by nobody, and the single overlap `--overlap` has ever caught (a
-`.zip` button over the 摘要/全文 switch) was on a narrow column. `--overlap` now
-takes two readings per route, **1400x1000 and 700x900**, and the failure line names
-which one it came from. Measured: the missing-size pass finds **0 pairs** on all
-six routes in both themes today (34 / 8 / 9 / 20 / 7 / 18 controls examined), and
-the gate's total went from 112 to **216 controls compared**, still green. A compact
-layout that regresses now has somewhere to fail.
+`.zip` button over the 摘要/全文 switch) was on a narrow column. All three sweeps
+now take two readings per route, **1400x1000 and 700x900**, and a failure line
+names which one it came from (`light at 700px #/`).
+
+| Gate | One width | Two widths | Why the second reading is not a duplicate |
+|---|---:|---:|---|
+| `--overlap` | 112 controls | **216** | the compact pass found 0 pairs on all six routes today (34 / 8 / 9 / 20 / 7 / 18 controls examined), so the size was clean — the reading is there so a regression has somewhere to fail |
+| `--states` | 16 controls | **24** | the rail is hidden below 1200px and the tab strip comes back, so the tab's state layer had no reading at any width once the rail existed |
+| `--focus` | 851 elements | **1260** | same reason, and the compact routes expose more focusable nodes than the wide ones: 16 rings were delegated to the box the reader sees, against 8 before |
+
+All three are green at both sizes.
 
 **What is still ours.** `preferredHeight` (420dp) is the directive's value for a
 *vertical* partition — a tabletop split this web layout does not have — so it is

@@ -2741,7 +2741,9 @@ def run_disabled_sweep(
     return {"rows": rows, "examined": len(rows)}
 
 
-def run_state_sweep(page, url: str, routes: list[str], forced: bool = False) -> dict:
+def run_state_sweep(
+    page, url: str, routes: list[str], forced: bool = False, where: str = ""
+) -> dict:
     """Hover and press every interactive control, in both themes.
 
     Returns `{"rows": [...], "examined": n}` so the caller can judge the rows and
@@ -2815,7 +2817,7 @@ def run_state_sweep(page, url: str, routes: list[str], forced: bool = False) -> 
                     continue
                 rows.append(
                     {
-                        "label": f"{theme} {route} {hover['cls'][:26]}",
+                        "label": f"{theme} {route}{where} {hover['cls'][:26]}",
                         "tokens": sorted(tokens),
                         "forced": forced,
                         "rest": rest,
@@ -3297,7 +3299,7 @@ def run_overlap_sweep(page, url: str, routes: list[str]) -> tuple[list[str], int
 
 
 def run_focus_sweep(
-    page, url: str, routes: list[str], forced: bool = False
+    page, url: str, routes: list[str], forced: bool = False, where: str = ""
 ) -> dict:
     """Focus every focusable element on every route, in both themes.
 
@@ -3369,7 +3371,7 @@ def run_focus_sweep(
             out["expect"][theme] = found["expect"]
             for row in found["rows"]:
                 row["theme"] = theme
-                row["route"] = route
+                row["route"] = route + where
                 row["pass"] = "synthetic"
             out["rows"].extend(found["rows"])
             # The same route again, this time walked with the Tab key: antd's
@@ -3384,7 +3386,7 @@ def run_focus_sweep(
                 if not row:
                     continue
                 row["theme"] = theme
-                row["route"] = route + " (Tab)"
+                row["route"] = route + where + " (Tab)"
                 row["pass"] = "keyboard"
                 out["examined"] += 1
                 out["keyboard"] += 1
@@ -3720,6 +3722,17 @@ def main() -> int:
                     found_states = run_state_sweep(page, url, args.route or ["#/"])
                     states["rows"].extend(found_states["rows"])
                     states["examined"] += found_states["examined"]
+                    # The compact branch shows a different control set: the rail
+                    # is hidden below 1200px and the tab strip comes back, so a
+                    # regression in the tab's state layer has no reading at all
+                    # at the large size class.
+                    page.set_viewport_size({"width": 700, "height": 900})
+                    compact_states = run_state_sweep(
+                        page, url, args.route or ["#/"], where=" at 700px"
+                    )
+                    states["rows"].extend(compact_states["rows"])
+                    states["examined"] += compact_states["examined"]
+                    page.set_viewport_size({"width": 1400, "height": 1000})
                     forced_states = run_state_sweep(
                         page, url, args.route or ["#/"], forced=True
                     )
@@ -3746,6 +3759,19 @@ def main() -> int:
                     focus["examined"] += forced_focus["examined"]
                     focus["keyboard"] += forced_focus["keyboard"]
                     for theme, value in forced_focus["expect"].items():
+                        focus["expect"].setdefault(theme, value)
+                    # Same reason as the state sweep: the rail and the tab strip
+                    # are never focusable at the same width, and only one of them
+                    # has ever been measured.
+                    page.set_viewport_size({"width": 700, "height": 900})
+                    compact_focus = run_focus_sweep(
+                        page, url, args.route or ["#/"], where=" at 700px"
+                    )
+                    page.set_viewport_size({"width": 1400, "height": 1000})
+                    focus["rows"].extend(compact_focus["rows"])
+                    focus["examined"] += compact_focus["examined"]
+                    focus["keyboard"] += compact_focus["keyboard"]
+                    for theme, value in compact_focus["expect"].items():
                         focus["expect"].setdefault(theme, value)
                 for route in (args.route or ["#/"]):
                     page.goto(url, wait_until="domcontentloaded")
