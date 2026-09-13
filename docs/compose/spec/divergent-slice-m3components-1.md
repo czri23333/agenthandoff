@@ -892,6 +892,49 @@ report. Gates: `pytest tests/` **459 passed, 2 skipped** · `ruff check .` clean
 ring at 3px/2px in both themes, overlap **112** controls with none hit-testing
 another, states **16**, disabled **72**, eclipse **25/17**, morph **16** readings,
 loading **4**, rail **2** window sizes.
+### Round 29 — the pane frame was 400px because someone typed 400
+
+**Why this round exists.** Round 28 closed the first half of the leftover item
+(`loading indicator` rhythm, `navigation rail` heights and arrangement). The other
+half was "pane layout, official heights and arrangement", and the measurement that
+starts it is what the cockpit's pane frame actually renders:
+
+| Claim | Evidence |
+|---|---|
+| the pane frame exists, and only `SessionDetail` uses it | `web/src/views/SessionDetail.tsx:551` renders `.ah-shell` with `.ah-main` (the transcript) and `.ah-side` (brief and meta). `grep` for `ah-shell|ah-main|ah-side` finds no other caller |
+| both of its numbers were invented | `web/src/index.css`: at `min-width: 1200px` the side column is `minmax(0, 1fr) 400px`, at `min-width: 1700px` it is `460px`; below 1200px the layout stacks. None of 400, 460, 1200 or 1700 is published anywhere |
+| so were three other breakpoints | `web/src/index.css`: `max-width: 860px` hides medium chrome, `max-width: 1100px` hides tertiary chrome, `min-width: 1700px` widens the shell. androidx.window's width size classes begin at 600 / 840 / 1200 / 1600 |
+| the official numbers were one fetch away | `PaneScaffoldDirective.kt` on `androidx-main` publishes `DefaultPreferredWidth` 360dp, `DefaultPreferredWidthXL` 412dp, `DefaultPreferredHeight` 420dp, and `calculatePaneScaffoldDirective` gives Compact and Medium **1** partition with a 0dp spacer, Expanded **2** with **24dp**, Large and Extra Large up to **3** with 24dp. The bounds it branches on are `WindowSizeClass.kt`'s 600 / 840 / 1200 / 1600dp |
+| neither file was vendored | they are now, through `scripts/fetch_m3spec.py` (`_androidx_adaptive_layout`, `_androidx_window_core`), with their sha256 in `PINS.tsv` — the tree is 151 pinned files |
+
+**What was built.** The pane frame moved out of `index.css`'s hand-typed numbers
+and into `m3.css` keyed on androidx.window's size classes, spending the three
+`pane` tokens; the two other invented breakpoints were aligned to the bounds they
+were approximating; and `--pane` measures the frame at three widths.
+
+| Claim | Measured |
+|---|---|
+| the pane frame at Large | 1440px: **2 columns**, side pane **412px** against a token that declares 412px, partitions **24px** apart, both panes **740px** tall |
+| the pane frame at Expanded | 1000px: **2 columns**, side pane **360px** against a token that declares 360px, partitions **24px** apart |
+| below Expanded | 700px: **1 column**, the panes stacked, the detail filling the whole content width |
+| the invented breakpoints | `max-width: 860px` → **839px**, `max-width: 1100px` → **1199px**, and the `min-width: 1700px` rule is gone: Large and Extra Large share the same pane width and spacer, so there is nothing Extra-Large-specific left to say |
+| a gate that finds the next one | `tests/test_official_panes.py`, 5 cases. It parses both vendored files, compares the three published values, asserts the partition counts (Compact and Medium 1, Expanded 2, Large up to 3) and fails on **any** width breakpoint in `m3.css` or `index.css` that is not one of 600 / 840 / 1200 / 1600 (or one below one for `max-width`) |
+| it can fail, two ways | a `%TEMP%`-free in-place mutation of `min-width: 840px` → `841px` fails with `m3.css: [841] is not one of androidx.window's width size class bounds [600, 840, 1200, 1600]` **and** `m3.css has no breakpoint at the Expanded bound (840px)`; changing `tokens.json`'s `preferredWidth` 360 → 361 fails with `assert 361 == 360`. Both files were restored byte-for-byte afterwards (`m3.css` and `tokens.json` compare equal to the pre-mutation bytes) |
+| what it cost the mapping table | two new `MAPPING` rows (`pane.preferredWidth`, `pane.preferredWidthXL` → `PaneScaffoldDirective.DefaultPreferredWidth`/`XL`) and one excuse by name for the spacer, which is a value inside a `when` branch rather than a member. That needed one parser addition: the token files declare `internal object XTokens`, while the directive declares `class PaneScaffoldDirective` with an unnamed `companion object`, so `_kotlin_class_members` walks class bodies and only adds keys the object walker did not already find |
+| the corpus | **151** pinned files (83 androidx, 68 material-web) — the two new ones came through `scripts/fetch_m3spec.py`, not by hand |
+
+**What is still ours.** `preferredHeight` (420dp) is the directive's value for a
+*vertical* partition — a tabletop split this web layout does not have — so it is
+deliberately not spent and the test reads it out of the vendored file instead. The
+pane frame is `SessionDetail`'s: the dashboard stays a single pane at every width,
+because its content is a toolbar, a chart and a table rather than a list that a
+detail could sit beside. Gates: `pytest tests/` **464 passed, 2 skipped** ·
+`ruff check .` clean · `gen_tokens.py --check` · `evidence --check` ·
+`conformance --check` 14 CLIs · `npx tsc -b` · `npm run build`. Full audit, exit 0,
+now nine gates: focus **862** elements at 3px/2px, overlap **110** controls with
+none hit-testing another, states **16** at 8%/12%, disabled **72**, eclipse
+**25/17**, morph **16** readings, loading **4**, rail **2** window sizes, panes
+**3**.
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

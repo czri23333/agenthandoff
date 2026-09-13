@@ -825,28 +825,10 @@ html {
    not a fixed canvas. Layout adapts; type size does not (12px is already the
    floor for CJK legibility). */
 
-.ah-shell {
-  display: grid;
-  grid-template-columns: 1fr;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-  /* gap and padding live in m3.css, off the M3 spacing scale. */
-}
-
-@media (min-width: 1200px) {
-  .ah-shell {
-    grid-template-columns: minmax(0, 1fr) 400px;
-  }
-}
-
-@media (min-width: 1700px) {
-  .ah-shell {
-    grid-template-columns: minmax(0, 1fr) 460px;
-  }
-}
-
-/* Stacks below 1200px: the side column becomes a second row, scrollable. */
+/* The session detail pane scaffold (display/grid/columns/gap/padding) now lives
+   in m3.css and follows PaneScaffoldDirective.kt; `.ah-main`/`.ah-side` below
+   only carry its scroll behaviour. */
+/* Stacks below 840px: the side column becomes a second row, scrollable. */
 .ah-side {
   min-height: 0;
   overflow-y: auto;
@@ -876,14 +858,16 @@ html {
   max-width: 78ch;
 }
 
-/* Hide tertiary chrome on narrow windows instead of truncating it. */
-@media (max-width: 1100px) {
+/* Hide tertiary chrome on narrow windows instead of truncating it.
+   1199px = WIDTH_DP_LARGE_LOWER_BOUND - 1: the last width below Large. */
+@media (max-width: 1199px) {
   .ah-narrow-hide {
     display: none !important;
   }
 }
 
-@media (max-width: 860px) {
+/* 839px = WIDTH_DP_EXPANDED_LOWER_BOUND - 1: the last width below Expanded. */
+@media (max-width: 839px) {
   .ah-md-hide {
     display: none !important;
   }

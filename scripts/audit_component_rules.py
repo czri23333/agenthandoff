@@ -1310,6 +1310,139 @@ def rail_defects(rows: list[dict]) -> list[str]:
     return out
 
 
+# The pane layout: SessionDetail renders .ah-shell with a transcript pane and a
+# brief/meta pane. M3 says how many partitions a width class gets and how wide a
+# pane prefers to be (PaneScaffoldDirective.kt), so the frame is measured against
+# those numbers at each class rather than against a hand-picked 400px.
+PANE_VIEWPORTS: tuple[tuple[int, int, str], ...] = (
+    (1440, 1000, "large"),
+    (1000, 900, "expanded"),
+    (700, 900, "compact"),
+)
+
+PANE_JS = """
+() => {
+  const px = (v) => { const n = parseFloat(String(v || '').trim()); return Number.isFinite(n) ? n : null; };
+  const root = getComputedStyle(document.documentElement);
+  const tok = (name) => px(root.getPropertyValue(name));
+  const shell = document.querySelector('.ah-shell');
+  const main = document.querySelector('.ah-main');
+  const side = document.querySelector('.ah-side');
+  const out = {
+    shell: !!shell,
+    main: !!main,
+    side: !!side,
+    tokens: {
+      preferred: tok('--ah-c-pane-preferred-width'),
+      preferred_xl: tok('--ah-c-pane-preferred-width-xl'),
+      spacer: tok('--ah-c-pane-spacer'),
+    },
+  };
+  if (!shell || !main || !side) return out;
+  const cs = getComputedStyle(shell);
+  const shellBox = shell.getBoundingClientRect();
+  const mainBox = main.getBoundingClientRect();
+  const sideBox = side.getBoundingClientRect();
+  const tracks = cs.gridTemplateColumns.split(' ').filter((v) => v !== '' && v !== 'none');
+  out.columns = tracks.length;
+  out.main_width = mainBox.width;
+  out.side_width = sideBox.width;
+  out.gap = px(cs.columnGap);
+  out.same_top = Math.abs(mainBox.top - sideBox.top) < 0.5;
+  out.same_height = Math.abs(mainBox.height - sideBox.height) < 0.5;
+  out.side_below_main = sideBox.top >= mainBox.bottom - 0.5;
+  return out;
+}
+"""
+
+
+def first_detail_route(url: str) -> str:
+    """A real session-detail route, so a pane sweep has panes to measure."""
+
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + "/api/sessions", timeout=90) as resp:
+            rows = json.loads(resp.read())
+    except Exception:  # noqa: BLE001 - no route means the sweep reports nothing, not a crash
+        return ""
+    if not (isinstance(rows, list) and rows):
+        return ""
+    first = rows[0]
+    cli = urllib.parse.quote(str(first.get("cli") or ""))
+    sid = urllib.parse.quote(str(first.get("session_id") or ""))
+    return f"#/session/{cli}/{sid}" if cli and sid else ""
+
+
+def run_pane_sweep(page, url: str, route: str) -> dict:
+    """The detail view's two panes, one reading per width size class."""
+
+    rows: list[dict] = []
+    for width, height, size_class in PANE_VIEWPORTS:
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(url.rstrip("/") + "/" + route, wait_until="domcontentloaded")
+        page.wait_for_selector("#ah-tokens", state="attached")
+        page.wait_for_timeout(1200)
+        found = page.evaluate(PANE_JS)
+        found["width"] = width
+        found["size_class"] = size_class
+        rows.append(found)
+    return {"rows": rows}
+
+
+def pane_defects(rows: list[dict]) -> list[str]:
+    """Two partitions from the Expanded bound, and the directive's width at each.
+
+    The pane widths are not aesthetic: PaneScaffoldDirective.kt publishes 360dp
+    for Expanded and 412dp once the window is Large, with a 24dp spacer between
+    partitions. A frame that picks 400px is a frame nobody can check.
+    """
+
+    if not rows:
+        return ["the pane sweep measured nothing"]
+    out: list[str] = []
+    for row in rows:
+        where = f"{row['width']}px ({row.get('size_class')})"
+        if not (row.get("shell") and row.get("main") and row.get("side")):
+            out.append(f"{where}: the detail view renders no pane frame")
+            continue
+        tokens = row.get("tokens") or {}
+        spacer = tokens.get("spacer")
+        if row.get("size_class") == "compact":
+            if int(row.get("columns") or 0) != 1:
+                out.append(
+                    f"{where}: {row.get('columns')} columns below the Expanded bound, "
+                    "where the directive allows a single pane"
+                )
+            if not row.get("side_below_main"):
+                out.append(f"{where}: the two panes sit side by side below the Expanded bound")
+            continue
+        want = tokens.get("preferred_xl" if row.get("size_class") == "large" else "preferred")
+        if int(row.get("columns") or 0) < 2:
+            out.append(
+                f"{where}: one column where the directive allows two partitions"
+            )
+        measured = row.get("side_width")
+        if measured is None or want is None:
+            out.append(f"{where}: the side pane's width was not measurable")
+        elif abs(float(measured) - float(want)) > 0.5:
+            out.append(
+                f"{where}: the side pane renders {measured:g}px, but its token declares "
+                f"{want:g}px"
+            )
+        gap = row.get("gap")
+        if gap is None or spacer is None:
+            out.append(f"{where}: the gap between the panes was not measurable")
+        elif abs(float(gap) - float(spacer)) > 0.5:
+            out.append(
+                f"{where}: the panes are {gap:g}px apart, but the partition spacer declares "
+                f"{spacer:g}px"
+            )
+        if not row.get("same_top"):
+            out.append(f"{where}: the two panes do not start on the same line")
+        if not row.get("same_height"):
+            out.append(f"{where}: the two panes are different heights")
+    return out
+
+
 def run_dialog_sweep(page, base: str, theme: str) -> dict:
     """Open a confirm dialog, then close it, reading both springs while they run.
 
@@ -3360,6 +3493,16 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--pane",
+        action="store_true",
+        help=(
+            "also measure the detail view's pane frame at each width size class: how "
+            "many partitions it renders, the side pane's width against "
+            "PaneScaffoldDirective's preferred width, the spacer between them, and "
+            "that the two panes share a top and a height"
+        ),
+    )
+    parser.add_argument(
         "--app-only",
         action="store_true",
         help=(
@@ -3542,6 +3685,7 @@ def main() -> int:
             overlaps: list[str] = []
             overlap_examined = 0
             rail: dict = {"rows": []}
+            panes: dict = {"rows": []}
             states: dict = {"rows": [], "examined": 0}
             eclipses: dict = {"rows": [], "examined": 0}
             for url in args.app:
@@ -3566,6 +3710,10 @@ def main() -> int:
                     overlap_examined += seen
                 if args.rail:
                     rail["rows"].extend(run_rail_sweep(page, url)["rows"])
+                if args.pane:
+                    pane_route = first_detail_route(url)
+                    if pane_route:
+                        panes["rows"].extend(run_pane_sweep(page, url, pane_route)["rows"])
                 if args.focus:
                     focus.update(run_focus_sweep(page, url, args.route or ["#/"]))
                     forced_focus = run_focus_sweep(
@@ -3635,6 +3783,7 @@ def main() -> int:
         )
     overlap_failures = overlaps if args.overlap else []
     rail_failures = rail_defects(rail["rows"]) if args.rail else []
+    pane_failures = pane_defects(panes["rows"]) if args.pane else []
     state_failures = state_defects(states["rows"]) if args.states else []
     eclipse_failures = eclipse_defects(eclipses["rows"]) if args.eclipse else []
     morph_failures = morph_defects(morph["rows"]) if args.morph else []
@@ -3804,6 +3953,12 @@ def main() -> int:
                         if not r.get("missing")
                     ],
                 },
+                "pane_sweep": {
+                    "enabled": args.pane,
+                    "viewports": [r["width"] for r in panes["rows"]],
+                    "defects": pane_failures,
+                    "measured": list(panes["rows"]),
+                },
                 "rail_sweep": {
                     "enabled": args.rail,
                     "viewports": [r["width"] for r in rail["rows"]],
@@ -3858,6 +4013,7 @@ def main() -> int:
         "press morph": morph_failures,
         "loading indicator": loading_failures,
         "navigation rail": rail_failures,
+        "pane layout": pane_failures,
         "overlapping controls": overlap_failures,
         "hover and press": state_failures,
         "disabled controls": disabled_failures,
@@ -3956,6 +4112,18 @@ def main() -> int:
             f"{'shown' if narrow.get('rail_shown') else 'hidden'} and the tab strip "
             f"{'shown' if narrow.get('tabs_shown') else 'HIDDEN'}."
         )
+    if args.pane:
+        parts = []
+        for row in panes["rows"]:
+            if not row.get("shell"):
+                parts.append(f"{row['width']}px: no pane frame")
+                continue
+            parts.append(
+                f"{row['width']}px: {row.get('columns')} column(s), side pane "
+                f"{row.get('side_width'):g}px (token {row.get('tokens', {}).get('preferred_xl' if row.get('size_class') == 'large' else 'preferred'):g}px), "
+                f"gap {row.get('gap'):g}px"
+            )
+        print("Panes: " + "; ".join(parts) + ".")
     if app_allowed:
         print(
             f"Allowed: {len(app_allowed)} computed value(s) that are in no token "

@@ -69,6 +69,43 @@ def _androidx_impl(*names: str) -> None:
         )
 
 
+def _androidx_adaptive_layout(*names: str) -> None:
+    """The adaptive pane layout: where M3 keeps its pane geometry.
+
+    The scaffold directives live in a sibling module of the token files
+    (compose/material3/adaptive/adaptive-layout/...), which is why they need
+    their own base path.
+    """
+    base = (
+        "https://raw.githubusercontent.com/androidx/androidx/androidx-main/"
+        "compose/material3/adaptive/adaptive-layout/src/commonMain/kotlin/"
+        "androidx/compose/material3/adaptive/layout/"
+    )
+    mirror = (
+        "https://cdn.jsdelivr.net/gh/androidx/androidx@androidx-main/"
+        "compose/material3/adaptive/adaptive-layout/src/commonMain/kotlin/"
+        "androidx/compose/material3/adaptive/layout/"
+    )
+    for name in names:
+        MANIFEST[f"androidx/{name}"] = (base + name, mirror + name)
+
+
+def _androidx_window_core(*names: str) -> None:
+    """androidx.window's size-class bounds: the official definition of
+    compact/medium/expanded/large/extra-large, which every adaptive layout
+    decision in this app is keyed on."""
+    base = (
+        "https://raw.githubusercontent.com/androidx/androidx/androidx-main/"
+        "window/window-core/src/commonMain/kotlin/androidx/window/core/layout/"
+    )
+    mirror = (
+        "https://cdn.jsdelivr.net/gh/androidx/androidx@androidx-main/"
+        "window/window-core/src/commonMain/kotlin/androidx/window/core/layout/"
+    )
+    for name in names:
+        MANIFEST[f"androidx/{name}"] = (base + name, mirror + name)
+
+
 def _web(path: str) -> None:
     flat = path.replace("/", "-")
     MANIFEST[f"materialweb/{flat}"] = (MATERIAL_WEB + path, MATERIAL_WEB_MIRROR + path)
@@ -289,6 +326,10 @@ _web_internal("ripple/internal/_ripple.scss", "elevation/internal/_elevation.scs
 # vendored too: the expressive `defaultChipShapes` reads the base file, and the
 # per-variant `ContainerShape` is only the outlined variant's own default.
 _androidx_impl("Chip.kt")
+
+# Adaptive pane layout: the scaffold directive that owns pane widths.
+_androidx_adaptive_layout("PaneScaffoldDirective.kt")
+_androidx_window_core("WindowSizeClass.kt")
 
 # ── The system layers the component files reference by name ──────────────────
 _androidx(

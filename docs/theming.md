@@ -104,19 +104,35 @@ that gap the same way the layer tests do, and it is the largest of them.
 
 | Source | What it is | How many |
 |---|---|---|
-| `tests/fixtures/m3spec/androidx/*.kt` | androidx's per-component token files (Apache-2.0, headers intact), `// VERSION:` stamps kept | 66 files |
-| `tests/fixtures/m3spec/materialweb/tokens-*.scss` | material-web's published token sets, `versions/v0_192/` and the current set where the two differ | 60 files |
-| `tests/fixtures/m3spec/materialweb/*-internal-*.scss` | the CSS that paints them, for the two values that exist only as a formula (the button's 64px minimum, the chip's 48px touch target) and the focus-ring choreography | 22 files |
+| `tests/fixtures/m3spec/androidx/*Tokens.kt` | androidx's per-component token files (Apache-2.0, headers intact), `// VERSION:` stamps kept | 80 files |
+| `tests/fixtures/m3spec/androidx/{Chip,PaneScaffoldDirective,WindowSizeClass}.kt` | the three androidx files that are not token tables: the chip's implementation, and — since round 29 — the adaptive pane directive and androidx.window's size classes | 3 files |
+| `tests/fixtures/m3spec/materialweb/tokens-*.scss` | material-web's published token sets, `versions/v0_192/` and the current set where the two differ | 51 files |
+| `tests/fixtures/m3spec/materialweb/*-internal-*.scss` | the CSS that paints them, for the two values that exist only as a formula (the button's 64px minimum, the chip's 48px touch target) and the focus-ring choreography | 17 files |
 
-The vendored copies are pinned in `tests/fixtures/m3spec/PINS.tsv` (148 sha256
+The vendored copies are pinned in `tests/fixtures/m3spec/PINS.tsv` (151 sha256
 rows) and the test compares the tree against it **in both directions**: a file
 that changed, a file that was added without a pin and a file that was deleted all
 fail. `scripts/fetch_m3spec.py` is how they got there — it names every URL, falls
 back to a mirror, and prints the hash it wrote — so the corpus can be re-derived
 instead of believed.
 
+**The layout numbers are not tokens, and are pinned the same way.** The rail's
+geometry comes from token files, but the pane frame and the breakpoints under it
+do not: `PaneScaffoldDirective.kt` states its numbers in `when` branches and
+`const val`s, and `WindowSizeClass.kt` is androidx.window. `tokens.json` carries
+only what a stylesheet can spend — `pane.preferredWidth` 360,
+`pane.preferredWidthXL` 412, `pane.spacer` 24 — and
+`tests/test_official_panes.py` parses the two vendored files and asserts those,
+the partition counts (Compact and Medium 1, Expanded 2, Large up to 3) and, the
+part that finds real drift, that **every width breakpoint in `m3.css` and
+`index.css` is one of androidx.window's bounds** (600 / 840 / 1200 / 1600dp, or
+one below one for a `max-width`). The first run of that check failed on 860, 1100
+and 1700 — three thresholds nobody published. `preferredHeight` (420dp, the
+vertical-partition value) and the two bounds above are deliberately not spent by
+the web layout and are pinned by the test instead of posing as tokens.
+
 On top of that sits an explicit **mapping table**: our dotted token path →
-(file, member). 341 values are compared today, and a comparison never skips
+(file, member). 362 values are compared today, and a comparison never skips
 silently:
 
 | Kind | Example | How it is compared |
@@ -675,6 +691,8 @@ structure at all:
 | antd's own banner palette for an `Alert` | a tonal container with `text1` on it — the same pattern `.ah-tonal-*` uses elsewhere | M3 publishes no banner, so this is ours and says so. antd's warning palette made the interruption banner the loudest thing on the transcript screen, amber-on-olive, with a contrast nobody had checked; ours is AA-gated against `text1` by `tests/test_tokens_contrast.py`. The `warn`/`ok` containers themselves are ours for the same reason they always were: M3 has no success or warning role |
 | antd's `Tag color="green"` preset palette | `.ah-tag` with four tones, each one of our AA-gated containers | the preset API *is* the bug this file opens with, and it had survived in five places across three views. Measured: `read` rendered **3.37:1** in the light theme and 7.04:1 in dark — one theme passing and the other not is exactly what a spot check misses, and antd's derived pairs were covered by no gate at all. The colour gate only knew the three preset names that *do not exist*; it now knows every name antd resolves |
 
+| a shell with five tabs and a rail's geometry nobody mounted | a real `NavigationRailCollapsedTokens` rail from 1200px: **80dp** column, items **80×56dp** with **4dp** between them, a **56×32dp** corner-full indicator, `label-medium` labels, and the top tab strip below the breakpoint | the rail's three vendored files. `NavigationRailVerticalItemTokens.kt` was not even vendored, and the 4dp/6dp argument between the collapsed and baseline files is settled by `NavigationRail.kt`: `NavigationRailVerticalPadding = 4.dp` is both the rail's padding and the space between items. Measured at 1440px/900px by `--rail`, and the gallery mounts the rail now so the product's own selectors reach an element |
+| a pane frame with a hand-typed `400px`, `460px` and a `1700px` breakpoint | the pane frame from `PaneScaffoldDirective`: **360dp** side pane once the window is Expanded, **412dp** once it is Large, a **24dp** spacer between the partitions, and one column below 840px | the adaptive directive and androidx.window's size classes, both vendored. The pane widths are tokens; the breakpoints cannot be (a media query cannot read a custom property), so `tests/test_official_panes.py` reads the two vendored files and fails on any width breakpoint in `m3.css` or `index.css` that is not 600/840/1200/1600 — its first run found **860, 1100 and 1700** |
 The nav is why tokens alone could not get there: a segmented button is the right
 control for "which filter" and the wrong one for "which of five screens am I on".
 Corner-radius tuning does not fix a control that is the wrong component.

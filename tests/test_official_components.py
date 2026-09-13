@@ -71,6 +71,39 @@ COMPOSED_CORNERS = {"extra-small-top", "large-top", "large-start", "large-end", 
 _KOTLIN_VAL = re.compile(r"^[ \t]*(?:inline )?val (\w+): [^\n]+\n[ \t]*get\(\) = ([^\n]+)$", re.M)
 _KOTLIN_CONST = re.compile(r"^[ \t]*const val (\w+) = ([^\n]+)$", re.M)
 _KOTLIN_OBJECT = re.compile(r"internal object (\w+) \{")
+# The adaptive directives are not token objects: they are `class X` with an
+# unnamed `companion object`, so their defaults are keyed by the class name.
+_KOTLIN_CLASS = re.compile(r"(?:public |internal |private )?(?:value )?class (\w+)[^{]*\{")
+# `val X = 360.dp` and `const val X: Int = 600`: the shapes a token object does
+# not use (it writes `val X: Dp` on one line and `get() = 1.dp` on the next).
+_KOTLIN_FLAT_VAL = re.compile(
+    r"^[ \t]*(?:public |internal |private )?(?:const )?val (\w+)(?:: [^\n=]+?)? = ([^\n]+)$",
+    re.M,
+)
+
+
+def _kotlin_class_members(text: str) -> dict[str, str]:
+    """`{"PaneScaffoldDirective.DefaultPreferredWidth": "360.dp"}`.
+
+    Companion-object members are read by walking the class body's braces; a
+    member the object walker already found is never overwritten, so widening
+    this can add keys but cannot change a comparison the mapping already makes.
+    """
+
+    members: dict[str, str] = {}
+    for match in _KOTLIN_CLASS.finditer(text):
+        start = match.end()
+        depth, cursor = 1, start
+        while depth and cursor < len(text):
+            if text[cursor] == "{":
+                depth += 1
+            elif text[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        body = text[start:cursor]
+        for member in _KOTLIN_FLAT_VAL.finditer(body):
+            members[f"{match.group(1)}.{member.group(1)}"] = member.group(2).strip()
+    return members
 
 
 def _kotlin_members(text: str) -> dict[str, str]:
@@ -575,6 +608,17 @@ MAPPING: dict[str, tuple[str, str]] = {
         "NavigationBarTokens.ItemInactiveLabelTextColor",
     ),
     # Navigation rail.
+    # The adaptive pane directive is a class with a companion object, not a
+    # token table; the spacer is a value inside a when-branch, so it is excused
+    # by name and read by tests/test_official_panes.py.
+    "pane.preferredWidth": (
+        ANDROIDX + "PaneScaffoldDirective.kt",
+        "PaneScaffoldDirective.DefaultPreferredWidth",
+    ),
+    "pane.preferredWidthXL": (
+        ANDROIDX + "PaneScaffoldDirective.kt",
+        "PaneScaffoldDirective.DefaultPreferredWidthXL",
+    ),
     "navigationRail.container.width": (
         ANDROIDX + "NavigationRailCollapsedTokens.kt",
         "NavigationRailCollapsedTokens.ContainerWidth",
@@ -879,6 +923,11 @@ UNMAPPED_OK: dict[str, str] = {
     "focusRing.duration": "the same motion token the motion layer's own gate checks",
     "focusRing.easing": "focus/internal/_focus-ring.scss easing-emphasized, read by test_only_css_formulas_still_hold",
     "dialog.enter": "a spring, checked against androidx by tests/test_official_layers.py",
+    "pane.spacer": (
+        "the 24dp partition spacer is the value of horizontalPartitionSpacerSize inside "
+        "PaneScaffoldDirective.kt's when-branches, not a named member; "
+        "tests/test_official_panes.py reads the branches themselves"
+    ),
     "dialog.exit": "a spring, checked against androidx by tests/test_official_layers.py",
     "textField.height": "composed: top-space + body-large line-height + bottom-space = 16 + 24 + 16, checked below",
     "textField.heightDense": "ours: M3 publishes no dense field; the container spaces halve to 8 + 24 + 8",
@@ -1017,7 +1066,11 @@ def _generator():
 
 
 def _kotlin(path: str) -> dict[str, str]:
-    return _kotlin_members((SPEC / path).read_text(encoding="utf-8"))
+    text = (SPEC / path).read_text(encoding="utf-8")
+    members = _kotlin_members(text)
+    for key, value in _kotlin_class_members(text).items():
+        members.setdefault(key, value)
+    return members
 
 
 def _scss(path: str) -> dict[str, str]:

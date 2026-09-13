@@ -1507,15 +1507,44 @@
   font-weight: var(--ah-c-app-bar-small-title-type-role-weight);
 }
 
+/* ── Pane scaffold (session detail column frame) ───────────────────────────
+   androidx adaptive layout, PaneScaffoldDirective.kt
+   (`calculatePaneScaffoldDirective`) keyed on the width size classes in
+   androidx.window's WindowSizeClass.kt. A media query cannot read a custom
+   property, so the two width literals below are the size-class bounds:
+     840 = WIDTH_DP_EXPANDED_LOWER_BOUND
+     1200 = WIDTH_DP_LARGE_LOWER_BOUND
+   Everything else reads the pane tokens: the preferred widths and the 24dp
+   spacer. `preferredHeight` (420dp) is a vertical-partition value and is
+   deliberately not spent here — the web cockpit has one horizontal row. */
 .ah-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 100%);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
   gap: var(--ah-c-spacing-steps-md);
   padding: var(--ah-c-spacing-steps-md);
 }
 
-/* Tablet and up: the spacing scale's 16px step, and a 400px side column. */
+/* Expanded: 2 horizontal partitions, spacer 24dp, preferred width 360dp.
+   The leading track is `100%` minus the fixed partition and its spacer so the
+   two panes plus the gap exactly fill the content box without a literal `1fr`. */
+@media (min-width: 840px) {
+  .ah-shell {
+    grid-template-columns:
+      minmax(0, calc(100% - var(--ah-c-pane-spacer) - var(--ah-c-pane-preferred-width)))
+      var(--ah-c-pane-preferred-width);
+    column-gap: var(--ah-c-pane-spacer);
+  }
+}
+
+/* Large and Extra Large: preferred width rises to 412dp; spacer stays 24dp. */
 @media (min-width: 1200px) {
   .ah-shell {
-    gap: var(--ah-c-spacing-steps-lg);
+    grid-template-columns:
+      minmax(0, calc(100% - var(--ah-c-pane-spacer) - var(--ah-c-pane-preferred-width-xl)))
+      var(--ah-c-pane-preferred-width-xl);
     padding: var(--ah-c-spacing-steps-lg);
   }
 }

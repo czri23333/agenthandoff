@@ -864,6 +864,26 @@ COMPONENTS: dict[str, dict] = {
             "pressed": "@role:on-secondary-container",
         },
     },
+    # The adaptive pane layout. Only the geometry the product can actually spend
+    # is published here: a pane width and the spacer between partitions. The size
+    # class bounds and the preferred height are official too but cannot be spent in
+    # CSS (a media query cannot read a custom property), so tests/test_official_panes.py
+    # pins them against the vendored files instead of pretending they are tokens.
+    "pane": {
+        "_source": (
+            "androidx adaptive layout: PaneScaffoldDirective.kt — "
+            "calculatePaneScaffoldDirective branches on the window width size class: "
+            "Compact and Medium keep 1 horizontal partition with a 0dp spacer, "
+            "Expanded takes 2 with a 24dp spacer, Large and ExtraLarge take 3 with "
+            "the same 24dp spacer. DefaultPreferredWidth 360dp, "
+            "DefaultPreferredWidthXL 412dp, DefaultPreferredHeight 420dp. The bounds "
+            "the branches are keyed on come from androidx.window's WindowSizeClass.kt "
+            "(width 600 / 840 / 1200 / 1600dp, height 480 / 900dp)."
+        ),
+        "preferredWidth": 360,
+        "preferredWidthXL": 412,
+        "spacer": 24,
+    },
     "slider": {
         "_source": (
             "androidx tokens: SliderTokens.kt — the M3E handle is a 4×44dp corner-full bar, "
