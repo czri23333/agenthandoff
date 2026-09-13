@@ -418,8 +418,22 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                     "needs_reply": p.peek_needs_reply(m.session_id),
                     # config-driven project domain (ADR-009): cwd by default
                     "domain": _domain_for(m.cwd),
-                    # live git branch/worktree for the session cwd (cached 30s)
-                    **({"git": g} if (g := _git_info(m.cwd)) else {}),
+                    # The store's own record of the revision the session ran on
+                    # wins over the live probe: 19 of 95 Codex sessions ran on a
+                    # branch the repository has since left, so the live answer is
+                    # about the *cwd today*, not about the session. The probe stays
+                    # as the fallback for the CLIs whose stores do not say.
+                    **(
+                        {
+                            "git": {
+                                "branch": m.git_branch,
+                                "commit": m.git_commit,
+                                "source": "session",
+                            }
+                        }
+                        if m.git_branch
+                        else ({"git": {**g, "source": "cwd"}} if (g := _git_info(m.cwd)) else {})
+                    ),
                 }
             )
     out.sort(key=lambda s: s["updated_at"] or "", reverse=True)

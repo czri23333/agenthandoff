@@ -1030,6 +1030,39 @@ in advance, and printing a key is never the honest fallback.
 | the gate | `tests/test_task_kinds.py`, three cases: every kind the parsers write or the fixtures/the measured stores report has a label; every label exists in both languages; the chip checks the dictionary first. Proof it can fail: deleting the Chinese `kind_subagent` line fails with `kind_subagent appears 1 time(s): every label needs zh and en`, and the file was restored byte-for-byte |
 | what the gate can and cannot cover | it reads the parsers' literals, the values the shipped fixtures produce (`subagent`, `interactive`) and the list measured on this machine, so a *new* store vocabulary outside those three is caught by the runtime fallback rather than by the test |
 | gates | `pytest tests/` **475 passed, 2 skipped** · `ruff check .` clean · `gen_tokens.py --check` · `evidence --check` · `conformance --check` 14 CLIs · `npx tsc -b` · `npm run build` · full audit exit 0 with nine gates (focus 802, overlap 216 across two widths, states 16, disabled 72, eclipse 25/17, morph 16, loading 4, rail 2 widths, panes 3) |
+### Round 32 — the list's git chip was about the directory, not the session
+
+**Why this round exists.** Round 30 gave `SessionMeta` the store's own record of
+the revision a Codex session ran on (`session_meta.git` = branch + commit hash, on
+118 of 118 header rows). The list already had a git chip — fed by a *live* probe of
+the session's cwd, cached 30 seconds. Those are two different facts, and on this
+machine they disagree:
+
+| Claim | Measured |
+|---|---|
+| the store and the probe disagree | of the 95 Codex sessions that have both a store git and a list row, **19** ran on a branch the working tree has since left — the rows said `feat/product-v7` for sessions whose header says `webgal` |
+| the store has the commit, the probe does not | `session_meta.git` is `{"branch": ..., "commit_hash": ...}` on every row; the live probe reports a branch and a worktree count, i.e. about the directory *today*, not about the session |
+
+**What was built.** `SessionMeta` gained `git_branch` and `git_commit` (also in the
+bundle's meta), the Codex parser fills them from the header, and the sessions
+endpoint prefers them:
+
+| Surface | Before | After |
+|---|---|---|
+| the row's `git` | `{branch, worktree_count}` from the live probe, always | `{branch, commit, source: "session"}` when the store records one, otherwise the live probe tagged `source: "cwd"` |
+| the chip | `⎇ feat/product-v7` | `⎇ feat/product-v7@b015082`, with a tooltip that says which of the two it is (`gitSession` / `gitLive`) |
+
+Measured on the served cockpit: **95** rows now carry `source: "session"` (the 19
+`webgal` sessions among them) and every other CLI keeps `source: "cwd"` — zcode
+338, dsh 48, qodercn-ide 19, codebuddy 14, workbuddy 13, opencode 5, qoderwake-cn 2.
+In the browser, 84 chips rendered with the session title after expanding the tree,
+e.g. `⎇ feat/product-v7@b015082`.
+
+**What is still ours.** The live probe stays, because most stores do not record a
+revision and "which branch is this directory on now" is still worth showing — it is
+now labelled as the directory's, not the session's. Nothing merges the two: a
+session that ran on `webgal` and whose tree is now on `feat/product-v7` shows one
+chip, and it is the session's.
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

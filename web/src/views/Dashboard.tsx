@@ -689,7 +689,13 @@ function SessionRow({
             <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
               {s.session_id.slice(0, 8)}
               {s.git?.branch && (
-                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
+                <span
+                  className="ml-1.5 ah-accent"
+                  title={s.git.source === "session" ? t("gitSession") : t("gitLive")}
+                >
+                  ⎇ {s.git.branch}
+                  {s.git.commit ? `@${s.git.commit.slice(0, 7)}` : ""}
+                </span>
               )}
               {s.cwd && (
                 <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>

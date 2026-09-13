@@ -68,6 +68,11 @@ class SessionMeta:
     provider: str | None = None
     origin: str | None = None
     parent_session_id: str | None = None
+    # The revision the *session* ran on, when the store records it. Distinct
+    # from the live branch of its cwd, which moves after the session ends: 19 of
+    # 95 Codex sessions on this machine ran on a branch the repo has left.
+    git_branch: str | None = None
+    git_commit: str | None = None
     # Assistant identity as the product shows it (workbuddy
     # assistant-display snapshots: expert name + avatar URL). Display-only;
     # never a credential, URLs point at the vendor's public CDN.
@@ -279,6 +284,8 @@ class HandoffBundle:
                 "provider": self.meta.provider,
                 "origin": self.meta.origin,
                 "parent_session_id": self.meta.parent_session_id,
+                "git_branch": self.meta.git_branch,
+                "git_commit": self.meta.git_commit,
                 "expert_name": self.meta.expert_name,
                 "expert_avatar": self.meta.expert_avatar,
                 "notes": self.meta.notes,

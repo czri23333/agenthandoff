@@ -212,9 +212,15 @@ class CodexParser(Parser):
         # conversation and says nothing; the other two are what the app groups
         # child runs by, and SessionMeta.task_type is the field for that.
         thread_source = str(payload.get("thread_source") or "").strip()
+        # The revision the session ran on, as the store recorded it at the time.
+        header_git = payload.get("git") if isinstance(payload.get("git"), dict) else {}
+        git_branch = str(header_git.get("branch") or "").strip() or None
+        git_commit = str(header_git.get("commit_hash") or "").strip() or None
         return SessionMeta(
             cli="codex",
             session_id=thread_id,
+            git_branch=git_branch,
+            git_commit=git_commit,
             task_type=(
                 thread_source if thread_source in ("subagent", "agent_created_thread") else None
             ),

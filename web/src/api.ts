@@ -20,8 +20,18 @@ export interface SessionMeta {
   status: string | null; // proven end-state, null = unknown
   needs_reply?: boolean | null; // ends on an un-answered user message (null = unknown)
   domain: string; // config-driven project grouping (ADR-009)
-  /** Live git branch/worktree for the session cwd (cached 30s server-side). */
-  git?: { branch?: string; worktree_count?: number };
+  /**
+   * The git the row is about. `source: "session"` is the revision the session
+   * ran on, read from the store; `source: "cwd"` is the live probe of its
+   * working directory (cached 30s server-side), the fallback for the stores
+   * that do not record one.
+   */
+  git?: {
+    branch?: string;
+    commit?: string | null;
+    worktree_count?: number;
+    source?: "session" | "cwd";
+  };
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
