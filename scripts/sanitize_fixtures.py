@@ -99,6 +99,11 @@ MAX_FILE_BYTES = 200_000_000  # a dsh roll is 30 MB compressed; repo cost is lin
 MAX_ROWS_PER_TABLE = 200  # a SQLite fixture keeps the schema, not the store
 MAX_CLI_BYTES = 4_000_000  # 125 MB of fixtures is not a test fixture
 
+# Stores whose sessions are genuinely spread over sibling files in one directory.
+# Only kimi has this shape today (`state.json` beside `wire.jsonl` in a session
+# directory); every other CLI must select the exact backing files it needs.
+SIBLING_PICKUP_CLIS = {"kimi"}
+
 # Field values that are schema rather than speech: kept verbatim so the fixture
 # still drives the same code paths (types, roles, tools, statuses).
 _ENUM_KEYS = {
@@ -813,50 +818,91 @@ def pick_sessions(parser) -> tuple[list[str], int]:
 
 
 
-def select_files(base: Path, root: Path, sessions: list[str]) -> list[Path]:
+_CODEX_UUID_IN_NAME = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _first_uuid(text: str) -> str | None:
+    """The first UUID-shaped token in a filename, used by Codex's rollout names."""
+    match = _CODEX_UUID_IN_NAME.search(text)
+    return match.group(0) if match else None
+
+
+def _apply_cli_byte_cap(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Keep a deterministic prefix of `paths` that fits in ``MAX_CLI_BYTES``.
+
+    The order is the source of truth, so a rebuild never depends on which files
+    happened to exist in the live store first. Dropped files are returned so the
+    caller can make a truncated fixture explicit instead of silent.
+    """
+    kept: list[Path] = []
+    dropped: list[Path] = []
+    total = 0
+    for path in paths:
+        size = path.stat().st_size
+        if total + size <= MAX_CLI_BYTES:
+            kept.append(path)
+            total += size
+        else:
+            dropped.append(path)
+    return kept, dropped
+
+
+def select_files(
+    cli: str, base: Path, root: Path, sessions: list[str]
+) -> tuple[list[Path], list[Path]]:
     """Store files backing the chosen sessions, plus their sibling records.
 
-    A session is often spread over several files (kimi keeps `state.json` and
-    `wire.jsonl` side by side, and only one of them contains the id), so whole
-    directories that matched are taken intact - a half-copied session parses to
-    nothing and would look like parser drift instead of a broken fixture.
+    Sibling pickup is per-CLI, not a default for every store: kimi keeps
+    `state.json` beside `wire.jsonl` and only one of them contains the id, so a
+    matched session directory has to be taken intact. Codex, by contrast, owns
+    exactly one rollout per filename UUID, and taking every sibling in a date
+    directory was pulling 24 unrelated files into a one-session fixture.
     """
     if base.is_file():
-        return [base]
+        return [base], []
     candidates = sorted(
         p for p in base.rglob("*") if p.is_file() and p.stat().st_size <= MAX_FILE_BYTES
     )
     if not candidates:
-        return []
-    matched_dirs: list[Path] = []
+        return [], []
     wanted: list[Path] = []
-    for sid in sessions:
-        token = sid[:13] if len(sid) > 20 else sid
-        hits = [
-            p
-            for p in candidates
-            if sid in p.name or token in p.name or token in str(p.relative_to(base))
-        ]
-        if not hits:
+    matched_dirs: list[Path] = []
+    session_set = set(sessions)
+    if cli == "codex":
+        wanted = [p for p in candidates if _first_uuid(p.name) in session_set]
+    else:
+        for sid in sessions:
+            token = sid[:13] if len(sid) > 20 else sid
             hits = [
-                p for p in candidates if sid in p.read_bytes()[:40000].decode("utf-8", "ignore")
+                p
+                for p in candidates
+                if sid in p.name or token in p.name or token in str(p.relative_to(base))
             ]
-        for hit in hits:
-            wanted.append(hit)
-            matched_dirs.append(hit.parent)
-    for directory in dict.fromkeys(matched_dirs):
-        for sibling in sorted(directory.iterdir()):
-            if (
-                sibling.is_file()
-                and sibling.stat().st_size <= MAX_FILE_BYTES
-                and sibling not in wanted
-            ):
-                wanted.append(sibling)
+            if not hits:
+                hits = [
+                    p for p in candidates if sid in p.read_bytes()[:40000].decode("utf-8", "ignore")
+                ]
+            for hit in hits:
+                wanted.append(hit)
+                matched_dirs.append(hit.parent)
+    if cli in SIBLING_PICKUP_CLIS:
+        for directory in dict.fromkeys(matched_dirs):
+            for sibling in sorted(directory.iterdir()):
+                if (
+                    sibling.is_file()
+                    and sibling.stat().st_size <= MAX_FILE_BYTES
+                    and sibling not in wanted
+                ):
+                    wanted.append(sibling)
     for p in candidates:  # small vendor indexes sit outside the session dirs
         if p.name in {"session_index.jsonl"} and p not in wanted:
             wanted.append(p)
     seen: set[Path] = set()
-    return [p for p in wanted if not (p in seen or seen.add(p))][:24]
+    unique = [p for p in wanted if not (p in seen or seen.add(p))]
+    unique.sort(key=lambda p: p.relative_to(base).as_posix())
+    return _apply_cli_byte_cap(unique)
 
 
 def write_multi_tree_fixture(
@@ -896,15 +942,21 @@ def write_multi_tree_fixture(
             missing.append(home_rel)
             continue
         mirrored.append(_portable(tree))
+        selected, dropped = select_files(cli, tree, tree, sessions)
         _emit_tree(
             out_dir,
             tree,
             dest_rel,
-            select_files(tree, tree, sessions),
+            selected,
             san,
             sessions,
             written,
         )
+        for dropped_path in dropped:
+            print(
+                f"[drop] {cli}: {dropped_path} exceeds the per-CLI source cap "
+                f"({MAX_CLI_BYTES} bytes) and was omitted"
+            )
     # The parser is aimed at the first tree's destination, which is what makes
     # `root.parent.parent.parent / shared` resolve to the second tree inside the
     # fixture.
@@ -1003,7 +1055,13 @@ def write_fixture(cli: str, parser, sessions: list[str], source_messages: int) -
     san = Sanitizer(cli)
     written: list[dict] = []
     out_dir.mkdir(parents=True, exist_ok=True)
-    for src in select_files(base, root, sessions):
+    selected, dropped = select_files(cli, base, root, sessions)
+    for dropped_path in dropped:
+        print(
+            f"[drop] {cli}: {dropped_path} exceeds the per-CLI source cap "
+            f"({MAX_CLI_BYTES} bytes) and was omitted"
+        )
+    for src in selected:
         data = src.read_bytes()
         name = src.name.lower()
         sampled = False

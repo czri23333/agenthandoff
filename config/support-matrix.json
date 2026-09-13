@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-09-12",
+  "generated": "2026-09-13",
   "rows": [
     {
       "cli": "zcode",
@@ -204,7 +204,7 @@
       "reader": true,
       "fixtures": 21,
       "fixture_sessions": 19,
-      "fixture_messages": 439,
+      "fixture_messages": 558,
       "fixture_ok": true,
       "shape_only": false,
       "codec_missing": false,

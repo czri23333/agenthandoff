@@ -484,6 +484,12 @@ export default function SessionDetail({
 
   const b = data.bundle;
   const meta = b.meta;
+  // The store's own one-line facts (`rate_limits:`, `goal:`, `context_window:`,
+  // `world_state:`) ride in meta.notes and were fetched but never shown; only
+  // `linked_cli_sessions:` had a renderer of its own.
+  const storeFacts = (meta.notes ?? []).filter(
+    (n) => !n.startsWith("linked_cli_sessions:"),
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1009,6 +1015,26 @@ export default function SessionDetail({
               )}
             </Descriptions>
           </Card>
+
+          {storeFacts.length > 0 && (
+            <Card size="small" title={<span className="ah-label">{t("storeFacts")}</span>}>
+              <ul className="m-0 list-none space-y-1 p-0 font-mono text-[12px]">
+                {storeFacts.map((n) => {
+                  const cut = n.indexOf(":");
+                  const key = cut > 0 ? n.slice(0, cut) : "note";
+                  const value = cut > 0 ? n.slice(cut + 1) : n;
+                  return (
+                    <li key={n} className="flex items-baseline gap-2">
+                      <span className="ah-faint shrink-0">{key}</span>
+                      <span className="ah-meta min-w-0 flex-1 truncate" title={value}>
+                        {value}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
         </div>
       </div>
     </div>

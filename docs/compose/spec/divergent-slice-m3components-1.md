@@ -704,6 +704,144 @@ alone so the bubble still grows from the anchor rather than from its middle.
 | the gate reads each phase while it runs | the appear phase is polled for its class, then the anchor is left and the leave phase polled for `ant-zoom-big-fast-leave`; "never observed" is a defect, so deleting the motion cannot pass |
 | it can fail | disabling the appear override reported, in both themes: `tooltip (light): the appear runs 'css-wgezi7-antZoomBigIn' (0.2s 'cubic-bezier(0.08, 0.82, 0.17, 1)'), not ah-tooltip-in on the system tokens` |
 
+### Round 27 — the Codex reader read one file of eight, and eight record types of twenty-three
+
+**Why this round exists.** `scripts/codex_session_stats.py` (added in `9a9bb78`)
+asks the store and the reader the same question and prints both answers. On this
+machine (2026-09-12) it answers:
+
+```
+root: C:\Users\c'zh\.codex\sessions
+96 rollout file(s) -> 89 session(s); 1 span more than one file
+list_sessions() rows: 89  (one per session); a session read short says so below
+
+session                                files  msgs on disk  read back
+01a08bc6-754b-78e1-9a1c-b9ba74f8354f       8           800          1  <- short
+```
+
+One session is eight rollout files — `rollout-<ts>-<id>.jsonl` plus seven
+`rollout-<ts>-<id>_<continuation>.jsonl` — all carrying the same
+`session_meta.payload.id`. The reader returned on the first header match, so 799
+of 800 messages were invisible. The same first-match shortcut took `updated_at`
+and `source_path` from the *oldest* file, returned one `raw_archive` entry out of
+eight, and read `_usage_for` from whichever file it met first.
+
+**The census that followed.** Counting `(record.type, payload.type)` over those 96
+files and asking of every one of them "would the official client show this?".
+`event_msg` rows *are* the product's own UI notifications and `response_item` rows
+are the API items it renders, so a record type with no reader is a record the
+cockpit drops in silence:
+
+| Record | Count | Client shows | Decision |
+|---|---:|---|---|
+| `event_msg/item_completed` | 9907 | the timeline card of every finished item | read — sub-census below |
+| `event_msg/token_count` | 9425 | usage | already read |
+| `response_item/function_call` | 6058 | a tool card | counted before; now also a transcript row |
+| `response_item/function_call_output` | 6047 | the card's body | exit code and slow-call analysis, already |
+| `response_item/reasoning` | 4512 | the folded thinking block | **was ignored; now a `[思考]` row** |
+| `token_usage_record` | 3489 | usage | the same numbers in a second spelling; read, never alongside `token_count` |
+| `response_item/message` | 2891 | the message | already read |
+| `response_item/custom_tool_call` | 1918 | a tool card | counted before; now also a transcript row |
+| `response_item/custom_tool_call_output` | 1918 | the card's body | **was ignored — the exit code and wall clock of every custom tool call** |
+| `turn_context` | 273 | model and permission posture | already read |
+| `event_msg/task_started` | 264 | the run header | already read |
+| `world_state` | 216 | collaboration state | already read |
+| `inter_agent_communication_metadata` | 196 | nothing | ignored, shape recorded: `{"trigger_turn": bool}` and no other key |
+| `response_item/agent_message` | 196 | the message | already read |
+| `event_msg/task_complete` | 195 | a clean finish | already read |
+| `session_meta` | 104 | the session header | already read |
+| `response_item/web_search_call` | 101 | the search card | **was ignored; now a `[工具 web_search]` row carrying the queries** |
+| `event_msg/thread_settings_applied` | 87 | the model chip | **was ignored; the model and provider of record** |
+| `event_msg/thread_goal_updated` | 57 | the goal banner | **was ignored; now a `goal:` note** |
+| `event_msg/turn_aborted` | 29 | the interrupted marker | **was ignored; the end state the transcript was guessing at** |
+| `compacted` | 23 | the compaction divider | **was ignored; now a `CompactionEvent` with measured pre/post tokens** |
+| `response_item/tool_search_call` | 12 | the tool-search card | **was ignored; now a `[工具 tool_search]` row** |
+| `response_item/tool_search_output` | 12 | its result | nothing to show: no exit code, no wall clock |
+
+`event_msg/item_completed` is not an item but a *container* of items, so it got its
+own census. Five of its thirteen item kinds are duplicates of a record already
+read, and the duplication is measured rather than assumed:
+
+| Item | Count | Decision |
+|---|---:|---|
+| `AgentMessage` | 2942 | duplicate of `response_item/message` + `agent_message`; ignored |
+| `CommandExecution` | 2242 | the same command, exit code and duration as the `*_tool_call_output` pair; the pair stays the source |
+| `FileChange` | 2234 | the changed paths, each with a unified diff — read into `files_touched` |
+| `Reasoning` | 1686 | duplicate: 1645 of 1645 non-empty `raw_content[0]` strings appear verbatim in a `response_item/reasoning` row |
+| `UserMessage` | 267 | duplicate of `response_item/message`; ignored |
+| `WebSearch` | 246 | its `query` is what the `web_search_call` row shows |
+| `SubAgentActivity` | 163 | `started` 69 / `interacted` 71 / `completed` 21 / `interrupted` 2 — the `[子代理]` row |
+| `ImageView` | 49 | a path the model actually looked at; read into `files_touched` |
+| `CollabAgentToolCall` | 48 | 48 of 48 ids are already a `response_item` call id; ignored |
+| `ContextCompaction` | 22 | 0 files carry one without a `compacted` record; the record is the source |
+| `McpToolCall` | 5 | 4 of the 4 ids seen are already a `response_item` call id; ignored |
+| `Plan` | 2 | a plan document; two rows in the whole store is not a category yet |
+| `FunctionCallOutput` | 1 | the item spelling of the output row already read |
+
+**The wiring is the house convention, not a new one.** `[思考]` / `[工具 name]` / `[子代理]` rows are what `dsh`,
+`jsonl_family`, `cherrystudio`, `qoderapp` and `zcode` already emit for exactly
+these three concepts, and `web/src/views/SessionDetail.tsx` already folds them —
+a folded thinking block, a tool card whose body is the arguments, a sub-agent
+block that links to the child session. A Codex reasoning row or tool call was
+simply never turned into one.
+
+**Measured after the change.** Same commands, same machine, 2026-09-13. The
+aggregation is proved on the eight-file session; everything else is the twelve
+largest rollouts (which between them hold the `FileChange` and `CommandExecution`
+items this round is about), read twice: once by `HEAD:src/.../codex.py` loaded as
+a module, once by the worktree parser.
+
+| Claim | Before | After |
+|---|---:|---:|
+| the eight-file session, read back | 1 of 800 | **4913 turns** (the tool no longer flags it) |
+| changed paths absent from `files_touched` | 284 of 284 | **0 of 284** |
+| `exit:` / `slow_call` keys the reader reported | 499 | **827** |
+| of the 334 failures spelled `Process exited with code N` | 0 read | **328 read** (6 have no output row at all) |
+| message rows across those 12 files | 1343 | 13629 |
+| — of which thinking rows (`[思考]`) | 0 | 4075 |
+| — of which tool cards (`[工具`) | 0 | 7415 |
+| — of which sub-agent blocks (`[子代理]`) | 0 | 47 |
+| compactions read | 0 | 15 in those files, **23** store-wide |
+| end states | `user_pending` × 2 of 12 | 1 `clean`, 1 `cancelled` |
+
+That session now returns **4913** turns against the 800 `message` records on disk,
+because the reader also returns the thinking blocks and tool cards the client
+shows - rows the store writes as `response_item/reasoning` and `function_call`,
+not as messages. `scripts/codex_session_stats.py` compares turns to `message`
+records, so it stopped flagging the session as short; the two numbers measure
+different things and the tool says so in its own header.
+
+| Claim | Measured (2026-09-13) |
+|---|---|
+| thinking rows, whole store | **4581** `[思考]` turns over the 100 sessions the reader now lists (the 96-file census above found 4512 `response_item/reasoning` rows, 4456 of them carrying readable text) |
+| tool cards, whole store | **8238** `[工具]` turns |
+| the exit code that was spelled differently | the desktop build writes `Process exited with code 1`, not `Exit code: 1` — 267 of the eight-file session’s 271 failures were invisible for that reason, and a synthetic test pins the second spelling |
+| end states, whole store | **7 sessions `cancelled`** (from `turn_aborted`, `reason: interrupted`), 78 `clean`, 9 `user_pending`, 6 `unknown` |
+| store facts now visible | 11 sessions carry a `goal:` note, 24 a `provider:`, 18 a `service_tier:`, 19 a `world_state:` |
+| what the reader costs | the eight-file session now returns **4913** turns and **7.0 MB** of transcript JSON; the tool-card body is capped at 600 characters |
+| the fixture baseline | codex `nonempty_messages` 439 → **558** in `conformance/codex.json`, `config/support-matrix.json` and both READMEs — the gate counts the turns the reader returns, so more of them is a baseline move, not drift |
+| fixture selection, codex | `select_files` for six sessions: **24 files / 7,714,469 bytes → 6 files / 3,813,812 bytes**, 0 dropped, `tests/fixtures/**` untouched |
+
+Browser-measured on the built bundle (headless Chromium, the served cockpit):
+on the eight-file session the first page mounts **106 tool cards** and **45 folded
+thinking blocks**; clicking a thinking header opens `.ah-reasoning-content` with the
+model’s own words, clicking a tool head expands `.ah-toolcall-args` with the
+arguments JSON (▸ 🔧 navigate_to_codex_page · {"threadId": "01a0949d…"}), the
+session shows 3 compaction mentions, and the new store-facts list renders
+`context_window 950000`. On a session that spawned one, **2 sub-agent blocks**
+render with a working child link (▸ 👥 子代理 · completed /root/echo_check … → 01a09918…).
+0 page errors in either run. Gates: `pytest tests/` **459 passed, 2 skipped** ·
+`ruff check .` clean · `gen_tokens.py --check` · `evidence --check` ·
+`conformance --check` 14 CLIs · `npx tsc -b` · `npm run build`.
+
+Dropped on purpose, with the measurement that justifies it: `item_completed`’s
+`AgentMessage`/`UserMessage`/`Reasoning`/`CommandExecution`/`CollabAgentToolCall`/
+`ContextCompaction`/`McpToolCall`/`Plan` kinds and the `inter_agent_communication_metadata`
+row repeat a record already read above, and the round-27 census shows the overlap
+item by item rather than assuming it: 4 of 4 `McpToolCall` ids, 48 of 48
+`CollabAgentToolCall` ids and 1645 of 1645 `Reasoning` strings are already a row
+somewhere else.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
