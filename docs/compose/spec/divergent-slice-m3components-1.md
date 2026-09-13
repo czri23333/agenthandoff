@@ -935,6 +935,45 @@ now nine gates: focus **862** elements at 3px/2px, overlap **110** controls with
 none hit-testing another, states **16** at 8%/12%, disabled **72**, eclipse
 **25/17**, morph **16** readings, loading **4**, rail **2** window sizes, panes
 **3**.
+### Round 30 — the header knew the revision, the task kind and where the page started
+
+**Why this round exists.** Round 27 read the *event stream* and left `session_meta`
+alone: the reader took `id`, `session_id`, `cwd`, `originator`, `source` and the
+spawn block, and ignored everything else the header publishes. Counting the
+header's own fields with a value over this store — **118** `session_meta` rows in
+**110** rollout files (**8** files append a second header mid-file) over **103**
+threads:
+
+| Field | Rows | What it says | Was |
+|---|---:|---|---|
+| `git: {branch, commit_hash}` | 118 | `feat/product-v7` ×99, `webgal` ×19 — the revision the session actually ran on | ignored. The cockpit's git chip probes the *live* cwd instead, which is a different fact and moves after the session ends |
+| `thread_source` | 118 | `user` 53, `subagent` 64, `agent_created_thread` 1 — the product's own classification | ignored, so Codex sessions had no `task_type` while zcode's had one |
+| `history_mode` | 118 | `paginated` on every row | ignored (and harmless on its own: it is the store's storage mode, not a claim about this file) |
+| `subagent_history_start_ordinal` | 26 | this transcript **begins at turn N** of the thread it was forked from | ignored, so 26 sub-agent transcripts read as complete conversations |
+| `forked_from_id` | 21 | the thread this one was cut from | ignored (`parent_thread_id` covered it — the two agree on 21 of 21 rows) |
+| `history_base: {thread_id, end_ordinal_exclusive, end_byte_offset}` | 6 | the previous page of a paginated thread | ignored. It is the chain round 27's aggregation already rebuilds from the filenames |
+
+**What was built.** `_meta_from_header` now maps `thread_source` onto
+`SessionMeta.task_type` (`user` says nothing, the other two are what the app groups
+child runs by) and falls back to `forked_from_id` for the parent; `_build` reads the
+header row for the two facts no later row repeats and writes them as notes, deduped
+because a thread with several pages repeats its header.
+
+| Claim | Measured |
+|---|---|
+| the task kind the store publishes | over the 103 listed sessions: **40** ordinary conversations, **62** `subagent`, **1** `agent_created_thread` — rendered by the session-info card that already showed this field for other CLIs |
+| the revision the session ran on | a `git:` note on **103 of 103** sessions (`git:webgal@cd1bc06`), deduped from 118 header rows |
+| the transcripts that start mid-history | a `history_start:` note on **28** sessions naming the ordinal and the thread the earlier turns live in. In **26 of 26** cases that thread is in the store, so the missing turns are reachable |
+| the fork link | `forked_from_id` is the parent fallback; on this store it equals `parent_thread_id` on 21 of 21 rows, so the cockpit's lineage did not change — the fallback covers a fork whose spawn block is absent |
+| tests | 5 new cases in `tests/test_codex_gaps.py` (23 there now): the revision note, the page-start note naming the parent, silence when there is no ordinal, the three `thread_source` mappings, and the fork fallback |
+| gates | `pytest tests/` **469 passed, 2 skipped** · `ruff check .` clean · full audit **exit 0** with nine gates (focus 851 elements, overlap 112 controls, states 16, disabled 72, eclipse 25/17, morph 16, loading 4, rail 2 widths, panes 3) |
+
+**What is still ours.** The page start is a *store fact in the notes list*, not a
+first-class divider in the transcript the way a compaction is (the compaction has a
+`CompactionEvent` and the server renders it as a `role: compaction` marker). The
+earlier turns of those 26 threads are neither merged nor linked: the cockpit lists
+the parent thread, and the note names it, but a reader has to go there themselves.
+Both are recorded here as the honest next steps rather than solved by guessing.
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

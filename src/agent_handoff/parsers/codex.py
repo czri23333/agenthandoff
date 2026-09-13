@@ -183,7 +183,15 @@ class CodexParser(Parser):
         spawn = {}
         if isinstance(src.get("subagent"), dict):
             spawn = src["subagent"].get("thread_spawn") or {}
-        parent = payload.get("parent_thread_id") or spawn.get("parent_thread_id") or root_session
+        # A sub-agent names its spawner; a *forked* thread names the thread it was
+        # cut from, which is the only link it has. They are the same value on this
+        # store (21 of 21), so this is a fallback rather than a change.
+        parent = (
+            payload.get("parent_thread_id")
+            or spawn.get("parent_thread_id")
+            or payload.get("forked_from_id")
+            or root_session
+        )
         if parent == thread_id:
             parent = None
         notes: list[str] = []
@@ -193,9 +201,16 @@ class CodexParser(Parser):
             notes.append(f"agent:{spawn['agent_nickname']}")
         if root_session != thread_id:
             notes.append(f"root_session:{root_session}")
+        # What the product itself calls this thread. "user" is an ordinary
+        # conversation and says nothing; the other two are what the app groups
+        # child runs by, and SessionMeta.task_type is the field for that.
+        thread_source = str(payload.get("thread_source") or "").strip()
         return SessionMeta(
             cli="codex",
             session_id=thread_id,
+            task_type=(
+                thread_source if thread_source in ("subagent", "agent_created_thread") else None
+            ),
             title="",  # filled by the caller (index lookup beats the filename)
             cwd=str(payload.get("cwd") or ""),
             started_at=ts_to_iso(payload.get("timestamp")),
@@ -379,6 +394,7 @@ class CodexParser(Parser):
         recorded_last: dict[str, int] = {}
         recorded_total: dict[str, int] = {}
         recorded_calls = 0
+        header_facts: list[str] = []
         goal: str | None = None
         settings: dict[str, str] = {}
         subagents_seen: set[tuple[str, str]] = set()
@@ -432,6 +448,25 @@ class CodexParser(Parser):
                             msg.tokens_reasoning = pending.get("reasoning")
                             pending_tokens.pop("pending", None)
                 messages.append(msg)
+
+            if rtype == "session_meta":
+                # Facts about the *session* that no later row repeats: where the
+                # working tree stood when it ran, and whether this file is the
+                # whole conversation. 26 sessions on this store start mid-history
+                # (their earlier turns live in the thread they forked from).
+                git = payload.get("git") if isinstance(payload.get("git"), dict) else {}
+                branch = str(git.get("branch") or "").strip()
+                commit = str(git.get("commit_hash") or "").strip()
+                if branch or commit:
+                    where = f"{branch or 'detached'}@{commit[:7]}" if commit else branch
+                    header_facts.append(f"git:{where}")
+                ordinal = payload.get("subagent_history_start_ordinal")
+                if isinstance(ordinal, int) and ordinal > 0:
+                    origin = str(meta.parent_session_id or "").strip()
+                    header_facts.append(
+                        f"history_start:{ordinal}" + (f" of {origin}" if origin else "")
+                    )
+                continue
 
             if rtype == "event_msg":
                 if ptype == "task_started":
@@ -751,6 +786,13 @@ class CodexParser(Parser):
             last_tokens.update(recorded_last)
             total_tokens.update(recorded_total)
             requests += recorded_calls
+        # A thread with several pages can repeat a header fact; each one is a
+        # single fact about the session.
+        seen_facts = set(meta.notes)
+        meta.notes = [
+            *meta.notes,
+            *(f for f in header_facts if not (f in seen_facts or seen_facts.add(f))),
+        ]
         if goal:
             meta.notes = [*meta.notes, f"goal:{goal}"]
         for key, val in settings.items():

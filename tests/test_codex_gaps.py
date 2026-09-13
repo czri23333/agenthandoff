@@ -503,6 +503,63 @@ def _usage_record(per_call: int, total: int) -> dict:
     }
 
 
+# -- the header's own facts -----------------------------------------------------
+def _header_with(**extra) -> dict:
+    payload = dict(_header()["payload"])
+    payload.update(extra)
+    return {"type": "session_meta", "payload": payload}
+
+
+def _load_header(tmp_path, **extra):
+    root = tmp_path / "sessions" / "2026" / "09" / "12"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"rollout-2026-09-12T10-00-00-{SID}.jsonl"
+    rows = [_header_with(**extra), _row("event_msg", {"type": "task_complete"})]
+    path.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8"
+    )
+    parser = CodexParser(tmp_path / "sessions")
+    raw = parser.load(SID)
+    assert raw is not None
+    return parser, raw
+
+
+def test_the_header_records_the_revision_the_session_ran_on(tmp_path):
+    _parser, raw = _load_header(tmp_path, git={"branch": "webgal", "commit_hash": "cd1bc06df0ba"})
+    assert any(n == "git:webgal@cd1bc06" for n in raw.meta.notes), raw.meta.notes
+
+
+def test_a_page_that_starts_mid_history_says_so(tmp_path):
+    _parser, raw = _load_header(
+        tmp_path,
+        thread_source="subagent",
+        parent_thread_id="019fb863-138f-7f01-8f1f-716c90c789ac",
+        subagent_history_start_ordinal=619,
+    )
+    note = next((n for n in raw.meta.notes if n.startswith("history_start:")), "")
+    assert note.startswith("history_start:619"), raw.meta.notes
+    assert "019fb863" in note, "the note names the thread the earlier turns live in"
+
+
+def test_a_whole_conversation_says_nothing_about_pages(tmp_path):
+    _parser, raw = _load_header(tmp_path, history_mode="paginated")
+    assert not [n for n in raw.meta.notes if n.startswith("history_start:")]
+
+
+def test_the_thread_source_becomes_the_task_kind(tmp_path):
+    _p1, sub = _load_header(tmp_path / "a", thread_source="subagent")
+    _p2, user = _load_header(tmp_path / "b", thread_source="user")
+    _p3, created = _load_header(tmp_path / "c", thread_source="agent_created_thread")
+    assert sub.meta.task_type == "subagent"
+    assert user.meta.task_type is None, "an ordinary conversation is not a task kind"
+    assert created.meta.task_type == "agent_created_thread"
+
+
+def test_a_forked_thread_falls_back_to_the_thread_it_was_cut_from(tmp_path):
+    _parser, raw = _load_header(tmp_path, forked_from_id="01a08bc6-754b-78e1-9a1c-b9ba74f8354f")
+    assert raw.meta.parent_session_id == "01a08bc6-754b-78e1-9a1c-b9ba74f8354f"
+
+
 def test_usage_records_are_usage_when_token_count_is_absent(tmp_path):
     parser, _raw = _load(tmp_path, [_usage_record(6765, 6765)])
     assert parser.last_request_tokens(SID)["input_tokens"] == 6765
