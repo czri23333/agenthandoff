@@ -185,6 +185,22 @@ class CompactionEvent:
 
 
 @dataclass
+class HistoryStart:
+    """This transcript begins mid-conversation, and the rest is elsewhere.
+
+    Codex forks a thread and writes only the turns after the fork: the header
+    names the ordinal this page begins at and the thread the earlier turns live
+    in. A reader that shows the page as the whole conversation is wrong by
+    omission - the same failure a hidden compaction is - so it is a first-class
+    fact about the transcript rather than a note nobody sees.
+    """
+
+    ordinal: int = 0
+    parent_session_id: str = ""
+    at: str | None = None
+
+
+@dataclass
 class RawSession:
     """Provider-neutral extraction of one session."""
 
@@ -195,6 +211,8 @@ class RawSession:
     tool_counts: Counter[str] = field(default_factory=Counter)
     interruption: Interruption = field(default_factory=Interruption)
     compactions: list[CompactionEvent] = field(default_factory=list)
+    # Set when the store says this file is one page of a longer thread.
+    history_start: HistoryStart | None = None
 
     @property
     def user_messages(self) -> list[Message]:

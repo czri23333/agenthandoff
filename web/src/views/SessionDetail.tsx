@@ -679,7 +679,9 @@ export default function SessionDetail({
           >
             <div className="pb-2">
               <TurnTimeline
-                messages={data.messages.filter((m) => m.role !== "compaction")}
+                messages={data.messages.filter(
+                  (m) => m.role !== "compaction" && m.role !== "history",
+                )}
                 compactions={data.compactions}
                 t={charts}
               />
@@ -692,7 +694,25 @@ export default function SessionDetail({
                 page={200}
                 moreLabel={t("showMore")}
                 row={(m, i) =>
-                  m.role === "compaction" ? (
+                  m.role === "history" ? (
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12px]">
+                      <span className="ah-warn">⚠ {t("historyStart")}</span>{" "}
+                      <span className="ah-meta">
+                        {m.ordinal ?? "?"}
+                        {m.parent_session_id ? " · " : ""}
+                        {m.parent_session_id ? (
+                          <button
+                            type="button"
+                            className="ah-accent font-mono"
+                            title={`${t("openSubagent")} · ${m.parent_session_id}`}
+                            onClick={() => onOpen?.(cli, String(m.parent_session_id))}
+                          >
+                            → {String(m.parent_session_id).slice(0, 8)}…
+                          </button>
+                        ) : null}
+                      </span>
+                    </li>
+                  ) : m.role === "compaction" ? (
                     <li key={i} className="ah-inset px-2.5 py-1.5 text-[12px]">
                       <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
                       <span className="ah-meta">{m.text}</span>

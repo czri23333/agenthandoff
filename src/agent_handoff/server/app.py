@@ -536,6 +536,23 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
         # turns, not the last 400. Paging/virtualization is the frontend's
         # job; the API must not silently drop history.
         stream = sorted(stream + markers, key=lambda x: x["at"] or "")
+    if raw.history_start is not None:
+        # The header says this file begins at turn N of another thread. Its
+        # position is not a timestamp question: *by definition* it sits before
+        # the first turn of this page, and a session whose rows share one
+        # timestamp (this store has such sessions) would otherwise sort it to
+        # the newest end. `stream` is oldest-first; the endpoint reverses it.
+        history = raw.history_start
+        stream.insert(
+            0,
+            {
+                "role": "history",
+                "text": f"{history.ordinal} · {history.parent_session_id}",
+                "at": history.at,
+                "parent_session_id": history.parent_session_id,
+                "ordinal": history.ordinal,
+            },
+        )
 
     # The same measurement `handoff watch` ladder-steps, read-only: the UI must
     # not show a fuller or emptier session than the snapshots claim.

@@ -76,6 +76,10 @@ export interface TranscriptMessage {
   subagent?: string;
   /** Verbatim source before cleaning (absent = cleaning changed nothing). */
   raw_text?: string;
+  /** role="history" markers: the thread the earlier turns live in. */
+  parent_session_id?: string;
+  /** role="history" markers: the ordinal this page begins at. */
+  ordinal?: number;
 }
 
 export interface StoreInfo {

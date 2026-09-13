@@ -981,12 +981,25 @@ because a thread with several pages repeats its header.
 | the duplicates, re-measured on the grown store | `McpToolCall` is now 84 rows and `CollabAgentToolCall` 56, so the round-27 "already a `response_item` call id" verdict was re-checked at that size: **84 of 84** and **56 of 56** still match, so ignoring them stays right |
 | gates | `pytest tests/` **469 passed, 2 skipped** · `ruff check .` clean · full audit **exit 0** with nine gates (focus 851 elements, overlap 112 controls, states 16, disabled 72, eclipse 25/17, morph 16, loading 4, rail 2 widths, panes 3) |
 
-**What is still ours.** The page start is a *store fact in the notes list*, not a
-first-class divider in the transcript the way a compaction is (the compaction has a
-`CompactionEvent` and the server renders it as a `role: compaction` marker). The
-earlier turns of those 26 threads are neither merged nor linked: the cockpit lists
-the parent thread, and the note names it, but a reader has to go there themselves.
-Both are recorded here as the honest next steps rather than solved by guessing.
+**The page start is a first-class marker, not just a note.** `RawSession.history_start`
+(ordinal, parent, timestamp) is set by the parser; the server inserts a
+`role: "history"` marker carrying the ordinal and the parent id; the cockpit renders
+it as `⚠ 记录从半途开始 619 · → 019fb863…` and the id is a link. Two decisions worth
+recording, both measured:
+
+* **It is placed by position, not by timestamp.** A session on this store has every
+  row inside one second, and `sorted(..., key=at)` put the marker at the *newest*
+  end (index 1 of 102). By definition the marker precedes the first turn of its own
+  page, so the server inserts it at the start of the oldest-first stream: measured
+  again, index **101 of 101** — the oldest end.
+* **Clicking it works.** Measured: the link navigates to
+  `#/session/codex/019fb863-138f-7f01-8f1f-716c90c789ac`, the parent thread the
+  earlier 619 turns live in, in the same tab with 0 page errors.
+
+What is still ours: the earlier turns are **linked, not merged**. A reader who wants
+them reads them in the parent thread, which is where the store keeps them; joining
+the two transcripts would be a new session shape and is not something to guess at
+from an ordinal alone.
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

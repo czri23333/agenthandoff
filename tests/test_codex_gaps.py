@@ -556,6 +556,25 @@ def test_a_page_that_starts_mid_history_says_so(tmp_path):
     assert "019fb863" in note, "the note names the thread the earlier turns live in"
 
 
+def test_the_page_start_is_a_field_and_not_only_a_note(tmp_path):
+    """The server renders this as a marker, the way a compaction is rendered."""
+    _parser, raw = _load_header(
+        tmp_path,
+        thread_source="subagent",
+        parent_thread_id="019fb863-138f-7f01-8f1f-716c90c789ac",
+        subagent_history_start_ordinal=619,
+    )
+    assert raw.history_start is not None
+    assert raw.history_start.ordinal == 619
+    assert raw.history_start.parent_session_id == "019fb863-138f-7f01-8f1f-716c90c789ac"
+    assert raw.history_start.at, "the marker needs the header's timestamp to sort in"
+
+
+def test_a_whole_conversation_has_no_history_start(tmp_path):
+    _parser, raw = _load_header(tmp_path)
+    assert raw.history_start is None
+
+
 def test_a_whole_conversation_says_nothing_about_pages(tmp_path):
     _parser, raw = _load_header(tmp_path, history_mode="paginated")
     assert not [n for n in raw.meta.notes if n.startswith("history_start:")]

@@ -45,7 +45,14 @@ from typing import NamedTuple
 from urllib.parse import unquote, urlparse
 
 from agent_handoff.locations import home
-from agent_handoff.model import CompactionEvent, Message, RawSession, SessionMeta, ts_to_iso
+from agent_handoff.model import (
+    CompactionEvent,
+    HistoryStart,
+    Message,
+    RawSession,
+    SessionMeta,
+    ts_to_iso,
+)
 from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
 
 # A rollout filename carries the thread's UUID first; a continuation file
@@ -395,6 +402,7 @@ class CodexParser(Parser):
         recorded_total: dict[str, int] = {}
         recorded_calls = 0
         header_facts: list[str] = []
+        history_start: HistoryStart | None = None
         goal: str | None = None
         settings: dict[str, str] = {}
         subagents_seen: set[tuple[str, str]] = set()
@@ -465,6 +473,14 @@ class CodexParser(Parser):
                     origin = str(meta.parent_session_id or "").strip()
                     header_facts.append(
                         f"history_start:{ordinal}" + (f" of {origin}" if origin else "")
+                    )
+                    history_start = HistoryStart(
+                        ordinal=ordinal,
+                        parent_session_id=origin,
+                        # The row's timestamp is the usual source; the header
+                        # payload carries its own for the builds that omit it,
+                        # and the marker has to sort before the first turn.
+                        at=when or ts_to_iso(payload.get("timestamp")),
                     )
                 continue
 
@@ -833,6 +849,7 @@ class CodexParser(Parser):
         }
         raw = self.build_raw(meta, messages, [], files, tools, interruption)
         raw.compactions = compactions
+        raw.history_start = history_start
         if world_agents:
             # Collaboration snapshot the product keeps (AGENTS.md excerpt).
             # A head fits notes; the full text stays in raw_archive verbatim.
