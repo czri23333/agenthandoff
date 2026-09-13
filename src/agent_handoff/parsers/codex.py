@@ -100,7 +100,7 @@ _INJECTED_PREFIXES = (
 # block. They are turns in the transcript but they are not the answer to a
 # request, so per-request billing never settles onto one - the answer row keeps
 # the numbers the store recorded for the request that produced it.
-_HINT_PREFIXES = ("[思考]", "[工具", "[子代理]")
+_HINT_PREFIXES = ("[思考]", "[工具", "[子代理]", "[多代理")
 
 
 def codex_root() -> Path:
@@ -609,8 +609,8 @@ class CodexParser(Parser):
                                 model=model,
                             )
                 elif ptype == "agent_message":
-                    body = payload.get("message") or payload.get("text")
-                    push("assistant", self._flatten(body), when, model=model)
+                    text = self._agent_message_text(payload)
+                    push("assistant", self._agent_message_line(payload, text), when, model=model)
                 elif ptype == "token_count":
                     info = payload.get("info") or {}
                     # Two different quantities live in one record.
@@ -764,8 +764,12 @@ class CodexParser(Parser):
                     continue
                 if text and not self.is_noise(text):
                     msg = push(str(role), text, when, raw, model=model)
-                    if msg is not None and role == "assistant" and turn_id:
-                        last_assistant[turn_id] = msg
+                    if msg is not None:
+                        phase = payload.get("phase")
+                        if isinstance(phase, str) and phase:
+                            msg.phase = phase
+                        if role == "assistant" and turn_id:
+                            last_assistant[turn_id] = msg
                 for tb in tool_blocks:
                     name = str(tb.get("name") or "tool")
                     tools[name] += 1
@@ -791,8 +795,8 @@ class CodexParser(Parser):
                             model=model,
                         )
             elif ptype == "agent_message":
-                body = payload.get("text") or payload.get("message")
-                push("assistant", self._flatten(body), when, model=model)
+                text = self._agent_message_text(payload)
+                push("assistant", self._agent_message_line(payload, text), when, model=model)
             elif ptype in ("function_call", "custom_tool_call"):
                 name = str(payload.get("name") or "tool")
                 tools[name] += 1
@@ -950,6 +954,36 @@ class CodexParser(Parser):
             ]
             return "\n".join(p for p in parts if p).strip()
         return ""
+
+    @staticmethod
+    def _agent_message_text(payload: dict) -> str:
+        """The readable body of an ``agent_message``, ``content`` blocks first.
+
+        Real rows carry ``content`` as a list of ``input_text`` blocks (the
+        encrypted half of a pair also carries ``encrypted_content``, which
+        ``as_text_blocks`` intentionally skips). Older rows kept the same text
+        under ``text``/``message``, so those remain the fallback spelling.
+        """
+        content = payload.get("content")
+        if content is not None:
+            text, _ = as_text_blocks(content)
+            return text.strip()
+        return CodexParser._flatten(payload.get("text") or payload.get("message"))
+
+    @staticmethod
+    def _agent_message_line(payload: dict, text: str) -> str:
+        """Prefix the multi-agent sender/recipient hint, then the verbatim body.
+
+        The body itself is never rewritten; the hint is a synthesized turn line
+        like the existing [思考]/[工具] markers. Same author and recipient mean
+        the message is a self-reminder, so no routing line is added.
+        """
+        author = str(payload.get("author") or "").strip()
+        recipient = str(payload.get("recipient") or "").strip()
+        if not author or not recipient or author == recipient:
+            return text
+        head = f"[多代理 {author} → {recipient}]"
+        return f"{head}\n{text}" if text else head
 
     @staticmethod
     def _reasoning_text(payload: dict) -> str:

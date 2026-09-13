@@ -39,7 +39,7 @@
 | `workbuddy` | JSONL dir + SQLite title index | ✓ | 23 | 14 ses / 586 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `dsh` | zstd 压缩 JSONL 目录 | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ 仅形态（源存档无对话内容） |
-| `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 558 msg | ✓ | ✅ 稳定（有夹具证据） |
+| `codex` | JSONL rollout 存档 | ✓ | 21 | 19 ses / 560 msg | ✓ | ✅ 稳定（有夹具证据） |
 | `opencode` | SQLite（只读 URI 打开） | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake` | SQLite daemon store + shared JSONL | ✓ | — | — | — | ⚠️ 未验证（缺脱敏夹具） |
 | `qoderwake-cn` | SQLite daemon store + shared JSONL | ✓ | 11 | 8 ses / 21 msg | ✓ | ✅ 稳定（有夹具证据） |

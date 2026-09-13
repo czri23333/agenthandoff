@@ -103,6 +103,10 @@ class Message:
 
     role: str  # "user" | "assistant"
     text: str
+    # The store's own split between the two assistant surfaces the product
+    # shows: "commentary" (the working stream) and "final_answer" (the reply).
+    # Parsers fill it only when the store wrote it; None means it said nothing.
+    phase: str | None = None
     at: str | None = None
     model: str | None = None
     tokens_in: int | None = None

@@ -41,7 +41,7 @@ This table is derived from the sanitized real-format fixtures under `tests/fixtu
 | `workbuddy` | JSONL dir + SQLite title index | ✓ | 23 | 14 ses / 586 msg | ✓ | ✅ stable (fixture-proven) |
 | `dsh` | zstd JSONL dir | ✓ | 4 | 3 ses / 85 msg | ✓ | ✅ stable (fixture-proven) |
 | `kimi` | state.json + wire.jsonl | ✓ | 4 | — | ✓ | ⬜ shape only (source store held no dialogue) |
-| `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 558 msg | ✓ | ✅ stable (fixture-proven) |
+| `codex` | JSONL rollouts | ✓ | 21 | 19 ses / 560 msg | ✓ | ✅ stable (fixture-proven) |
 | `opencode` | SQLite (read-only URI) | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake` | SQLite daemon store + shared JSONL | ✓ | — | — | — | ⚠️ unverified (no fixture) |
 | `qoderwake-cn` | SQLite daemon store + shared JSONL | ✓ | 11 | 8 ses / 21 msg | ✓ | ✅ stable (fixture-proven) |

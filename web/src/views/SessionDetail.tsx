@@ -61,6 +61,8 @@ function guessLinkedCli(_id: string, fromCli: string): string {
  * - thinking ([思考] prefix): folded by default, tertiary 13px header
  * - tool call ([工具 name] line): card with header + args
  * - sub-agent call ([子代理 mark] line): nested block linked to the child
+ * - multi-agent message ([多代理 author → recipient] line): the parent/child
+ *   traffic of one thread, shown with its addressing
  * - timestamp: hover-only time tip, never standing text
  */
 function TranscriptRow({
@@ -81,6 +83,7 @@ function TranscriptRow({
     thinking: string;
     toolCall: string;
     subagentCall: string;
+    agentMessage: string;
     openSubagent: string;
   };
   expert?: { name?: string | null; avatar?: string | null };
@@ -95,7 +98,8 @@ function TranscriptRow({
   const isThinking = text.startsWith("[思考]");
   const isTool = !isThinking && text.startsWith("[工具");
   const isSubagent = !isThinking && !isTool && text.startsWith("[子代理");
-  const long = !isThinking && !isTool && !isSubagent && text.length > 500;
+  const isAgent = !isThinking && !isTool && !isSubagent && text.startsWith("[多代理");
+  const long = !isThinking && !isTool && !isSubagent && !isAgent && text.length > 500;
   const who = m.role === "user" ? labels.user : labels.assistant;
   const shown = showRaw && m.raw_text ? m.raw_text : text;
   // Elapsed-time cost proxy (store clocks): "3.2s" when the store kept no
@@ -306,6 +310,37 @@ function TranscriptRow({
                 <pre className="ah-toolcall-args" dir="auto">
                   {m.raw_text.slice(0, 2000)}
                 </pre>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // — multi-agent message: the parent/child traffic of one thread —
+  if (isAgent) {
+    // "[多代理 /root/nav_rail → /root]" on its own line, the message under it.
+    const nl = text.indexOf("\n");
+    const head = (nl >= 0 ? text.slice(0, nl) : text)
+      .replace(/^\[多代理\s?/, "")
+      .replace(/\]$/, "");
+    const body = nl >= 0 ? text.slice(nl + 1) : "";
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div className="ah-subagent">
+            <div className="ah-toolcall-head">
+              <span>
+                ⇄ {labels.agentMessage} · {head || who}
+              </span>
+              <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>
+                {durTip || timeTip}
+              </span>
+            </div>
+            {body ? (
+              <div className="ah-toolcall-body" dir="auto">
+                <span className="whitespace-pre-wrap break-words">{body}</span>
               </div>
             ) : null}
           </div>
@@ -734,6 +769,7 @@ export default function SessionDetail({
                           thinking: t("thinking"),
                           toolCall: t("toolCall"),
                           subagentCall: t("subagentCall"),
+                          agentMessage: t("agentMessage"),
                           openSubagent: t("openSubagent"),
                         }}
                       />
