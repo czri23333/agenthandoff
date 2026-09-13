@@ -653,7 +653,18 @@ class CodexParser(Parser):
                 for key in ("sandbox_policy", "approval_policy", "collaboration_mode"):
                     val = payload.get(key)
                     if val and key not in turn_policy:
-                        turn_policy[key] = str(val)[:120]
+                        # A dict here is a nested policy ({"type":
+                        # "workspace-write", "writable_roots": [...]}). str() put a
+                        # Python repr in the cockpit's facts list
+                        # ({'type': 'danger-full-access'}); the same bytes as JSON are
+                        # the same fact in a notation the reader does not have to
+                        # translate.
+                        if isinstance(val, (dict, list)):
+                            turn_policy[key] = json.dumps(
+                                val, ensure_ascii=False, separators=(",", ":")
+                            )[:120]
+                        else:
+                            turn_policy[key] = str(val)[:120]
                 continue
 
             if rtype != "response_item":

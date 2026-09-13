@@ -524,6 +524,21 @@ def _load_header(tmp_path, **extra):
     return parser, raw
 
 
+def test_a_nested_policy_is_json_and_not_a_python_repr(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _row(
+                "turn_context",
+                {"sandbox_policy": {"type": "workspace-write", "writable_roots": ["D:/demo"]}},
+            )
+        ],
+    )
+    note = next(n for n in raw.meta.notes if n.startswith("sandbox_policy:"))
+    assert note == 'sandbox_policy:{"type":"workspace-write","writable_roots":["D:/demo"]}', note
+    assert "'" not in note, "a Python repr leaked into the cockpit"
+
+
 def test_the_header_records_the_revision_the_session_ran_on(tmp_path):
     _parser, raw = _load_header(tmp_path, git={"branch": "webgal", "commit_hash": "cd1bc06df0ba"})
     assert any(n == "git:webgal@cd1bc06" for n in raw.meta.notes), raw.meta.notes
