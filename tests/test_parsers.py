@@ -198,6 +198,61 @@ def test_an_unseen_row_shape_is_reported_not_swallowed(tmp_path):
     assert archive and "quantum_flux_report" in archive[0]["text"]
 
 
+def test_attachment_is_reported_by_its_own_kind_not_as_one_blob(tmp_path):
+    """`attachment` is 12 different things, so one label for it hides the point.
+
+    Nine of the kinds this machine writes are injected context (skills, hooks,
+    reminders) and name nothing; three name a file the session touched. Listing
+    them all as "unread attachment" would drown the three that matter and let a
+    brand-new kind slip past as noise.
+    """
+    import json
+
+    root = tmp_path / ".codebuddy" / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "aaa111.jsonl").write_text(
+        "".join(
+            json.dumps(r) + "\n"
+            for r in [
+                {"type": "session_meta", "sessionId": "aaa111", "cwd": "D:/demo"},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "skill_listing", "content": "- a skill"}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "file", "filename": "D:/demo/notes.md", "content": "x"}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "post_compact_restored_files",
+                    "files": json.dumps([{"filePath": "D:/demo/restored.rs"}])}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "plan_mode", "planFilePath": "D:/demo/plan.md"}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "holographic_diff", "whatever": 1}},
+                {
+                    "type": "message",
+                    "sessionId": "aaa111",
+                    "cwd": "D:/demo",
+                    "timestamp": 1756548000000,
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello there friend"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    raw = CodebuddyParser(tmp_path / ".codebuddy").load("aaa111")
+    assert raw is not None
+    notes = raw.meta.notes
+    # injected context: known, silent
+    assert not [n for n in notes if n.startswith("unhandled_row:attachment/skill_listing")]
+    # file-bearing kinds: read, so their paths are in the record. The plan_*
+    # kinds were only found because attachments are reported per sub-type.
+    files = dict(raw.files_touched)
+    assert files["D:/demo/notes.md"] == 1
+    assert files["D:/demo/restored.rs"] == 1
+    assert files["D:/demo/plan.md"] == 1
+    # a kind nobody has seen: reported, by its own name
+    assert "unhandled_row:attachment/holographic_diff=1" in notes
+
+
 def test_qoder_and_qwen_share_dialect(tmp_path):
     for cls, dirname, text in [
         (QoderworkParser, ".qoderwork", "qoder ask"),

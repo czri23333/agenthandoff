@@ -366,15 +366,17 @@ sampled away.
     surface through `peek_needs_reply`, which drives the "等你回复" count, the
     filter and the tooltip, so the probe would have added a second, drift-prone
     place to say the same thing. It is not in the product.
-32. **Two row shapes the stores really write are still unread, and now say so.**
-    `attachment` appeared in **33 of 104** sampled sessions and
-    `resend-fork-notice` in **7**; neither carries a role, so both fell out of
-    the parse loop in silence until Round 41 made the fall-through report it.
-    The bytes are not lost - `raw_archive()` exports the file verbatim - but
-    nothing interprets them: no attachment is listed as a touched file, and no
-    fork relationship is drawn, which is the same hole item 25 left open for
-    Codex's 26 forked sessions seen from the other side. Reading them is a
-    parser change, not a reporting one; the reporting is what was missing.
+32. **One row shape the stores really write is still unread, and says so.**
+    `resend-fork-notice` appears in 7 of 94 sampled sessions and carries no role,
+    so it falls out of the parse loop; Round 41 made that visible instead of
+    silent. It is the fork fact item 25 wants, seen from the other side.
+    (This entry used to also name `attachment`. Round 42 split that label by its
+    own sub-types and found it was twelve different things: nine kinds of
+    injected context, six kinds that name a file. The file-bearing ones are read
+    now - 47 paths across 94 sampled sessions - and the context ones are
+    declared per kind, so `attachment` is no longer a gap and was never the one
+    blob this entry described. The "33 of 104 sessions" figure here was also a
+    capped-sample artifact; the real count is 6,313 rows in 1,283 sessions.)
 
 ## How to check any of this yourself
 

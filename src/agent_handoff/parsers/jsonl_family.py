@@ -155,6 +155,24 @@ def _parse_iso_local(iso):
         return None
 
 
+def _row_shape(row: dict) -> str:
+    """A reportable name for a row the parser did not read.
+
+    Refined by the store's own sub-type where it has one, because `attachment`
+    on its own would say nothing useful: 9 of the 12 attachment kinds this
+    machine's stores write are injected context (task_reminder 3136 rows,
+    skill_listing 1460, agent_listing_delta 1286, ...) and 3 name files.
+    Reporting them together is how a real one gets ignored.
+    """
+    base = str(row.get("type") or "<no-type>")
+    if base != "attachment":
+        return base
+    att = row.get("attachment")
+    if isinstance(att, dict) and att.get("type"):
+        return f"attachment/{att.get('type')}"
+    return "attachment/<no-subtype>"
+
+
 #: Row types that legitimately carry no turn - bookkeeping and side-channel
 #: records the parser reads or ignores on purpose. Anything reaching the
 #: no-role fall-through outside this list becomes a visible `unhandled_row:`
@@ -184,6 +202,36 @@ ROLELESS_ROW_TYPES: frozenset[str] = frozenset({
     "system",
     "summary",
     "isCompactSummary",
+    # Injected context, named by the store's own sub-type: rows saying which
+    # skills/agents exist, hook output, queue and goal reminders. Counted on
+    # 2026-09-19 as task_reminder 3136, skill_listing 1460, agent_listing_delta
+    # 1286, hook_output 190, queued_command 87, hook_non_blocking_error 55,
+    # critical_system_reminder 37, goal_state 18, relevant_memories 11 rows.
+    # The three attachment kinds that name files are NOT here - `_build` reads
+    # those, and an attachment sub-type nobody has seen still gets reported.
+    "attachment/task_reminder",
+    "attachment/skill_listing",
+    "attachment/agent_listing_delta",
+    "attachment/hook_output",
+    "attachment/queued_command",
+    "attachment/hook_non_blocking_error",
+    "attachment/critical_system_reminder",
+    "attachment/goal_state",
+    "attachment/relevant_memories",
+    "attachment/hook_error_during_execution",
+})
+
+#: Attachment sub-types whose payload names files the product models as touched.
+#: The three `plan_*` kinds were found by reporting attachments per sub-type:
+#: as one `attachment` blob they were invisible, and all three carry
+#: `planFilePath`.
+FILE_BEARING_ATTACHMENTS = frozenset({
+    "file",
+    "edited_text_file",
+    "post_compact_restored_files",
+    "plan_file_reference",
+    "plan_mode",
+    "plan_mode_exit",
 })
 
 #: A store's own status word -> the end state it proves. Only the two stores
@@ -830,6 +878,19 @@ class JsonlSessionParser(Parser):
                         files[fp] += 1
                     continue
 
+                if rtype == "attachment" and isinstance(row.get("attachment"), dict):
+                    # Several attachment kinds name a file the session opened or
+                    # edited. The product models that as a touched path, so they
+                    # are read here instead of being reported unread; injected
+                    # context kinds (skills, hooks, reminders) carry no turn and
+                    # fall through to the shape report, where their sub-type is
+                    # what decides whether that is expected.
+                    att = row["attachment"]
+                    if str(att.get("type") or "") in FILE_BEARING_ATTACHMENTS:
+                        for fp in self._attachment_files(att):
+                            files[fp] += 1
+                        continue
+
                 role, text, raw_text, tool_blocks = self._row_content(row)
                 if not role:
                     # Nothing matched this row and it carries no turn, so it
@@ -838,7 +899,7 @@ class JsonlSessionParser(Parser):
                     # outside the process, which is how a store shipping a new
                     # record type reads as "nothing happened". Count them all
                     # first; ROLELESS_ROW_TYPES is what the live store showed.
-                    unhandled[str(rtype or "<no-type>")] += 1
+                    unhandled[_row_shape(row)] += 1
                     continue
                 for tb in tool_blocks:
                     name, tool_input = self._tool_name_input(tb)
@@ -1090,6 +1151,36 @@ class JsonlSessionParser(Parser):
         snap = row.get("snapshot") or {}
         backups = snap.get("trackedFileBackups") or {}
         return [str(k) for k in backups if isinstance(k, str) and k.strip()]
+
+    @staticmethod
+    def _attachment_files(att: dict) -> list[str]:
+        """Paths a file-bearing attachment names outright.
+
+        `file` and `edited_text_file` carry `filename`, the `plan_*` kinds carry
+        `planFilePath`, and `post_compact_restored_files` carries a list with
+        `filePath` per entry. The store spells the path out, so nothing is
+        guessed here - a value the product would have to infer is a value it
+        should not report.
+        """
+        out: list[str] = []
+        for key in ("filename", "planFilePath"):
+            direct = att.get(key)
+            if isinstance(direct, str) and direct.strip():
+                out.append(direct.strip())
+        entries = att.get("files")
+        if isinstance(entries, str):
+            # Some rolls serialise the list as JSON text instead of an array.
+            try:
+                entries = json.loads(entries)
+            except (ValueError, TypeError):
+                entries = []
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and isinstance(entry.get("filePath"), str):
+                    fp = entry["filePath"].strip()
+                    if fp:
+                        out.append(fp)
+        return out
 
     def usage(self, session_id: str) -> dict | None:
         """Per-model token accounting aggregated from the turns themselves.

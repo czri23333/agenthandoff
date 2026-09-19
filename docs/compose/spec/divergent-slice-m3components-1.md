@@ -1450,6 +1450,46 @@ buried the finding, so they stay reported.
 | not run | the nine-rule browser audit: no `web/` file and no CSS here; `dist` is byte-identical to 947921e |
 | what it does not do | it does not read `attachment`. That is the follow-up this round exists to make visible - see `docs/limitations.md` item 32 |
 
+### Round 42 — reporting by sub-type found what the blob hid, so it reads them
+
+**Why this round exists.** Round 41 reported an unread row under its `type`, and
+the first thing the report showed was `attachment` on 33 of 104 sampled sessions.
+Two things about that were wrong. The count was a sweep artifact - across the
+family stores the real figure is **6,313 rows in 1,283 sessions**, ~39% of
+everything on this machine - and the label lumped together things with very
+different business. `attachment` is not one kind of row: it is twelve, named by
+`attachment.type`.
+
+Split by sub-type and the blob fell apart usefully. Nine kinds are injected
+context - `task_reminder` 3136 rows, `skill_listing` 1460, `agent_listing_delta`
+1286, `hook_output` 190, `queued_command` 87, `hook_non_blocking_error` 55,
+`critical_system_reminder` 37, `goal_state` 18, `relevant_memories` 11,
+`hook_error_during_execution` - correctly unread, and now declared per kind
+rather than excused as a class. Three kinds name a file: `file` and
+`edited_text_file` carry `filename`, `post_compact_restored_files` carries
+`filePath` per entry. And three more - `plan_mode`, `plan_mode_exit`,
+`plan_file_reference` - carry `planFilePath`, which is **the point of the
+exercise**: under the `attachment` label they were indistinguishable from
+reminder noise, and the report that was supposed to be a temporary telescope
+would have been averaged away inside a blob of 6,313 rows.
+
+**What was built.** The shape a row is reported under is now `type/sub-type`
+where the store names one (`_row_shape`), the six file-bearing kinds are read
+into `files_touched` through the paths the store spells out - `filename`,
+`planFilePath`, `files[].filePath`, including the list serialised as JSON text
+in some rolls - and nothing is inferred: a path the product had to guess is a
+path it should not claim.
+
+| Claim | Measured (2026-09-19) |
+|---|---|
+| attachment rows / sessions on this machine | **6,313** rows in **1,283** sessions (Round 41's "33 of 104" was a capped-sample artifact; corrected here, not retro-edited) |
+| attachment sub-types found | 12; 9 injected context, 6 file-bearing (`file`, `edited_text_file`, `post_compact_restored_files`, `plan_mode`, `plan_mode_exit`, `plan_file_reference`) |
+| paths newly recorded over 94 sampled sessions from the attachment-heavy stores | **47 distinct, 93 occurrences** - including `wgal-math/src/color.rs` and `wgal-export/src/renderer.rs`, which the file view never showed before |
+| what the report surface is now | **only `resend-fork-notice` (7 sessions)** - every other shape is either read or declared, so a new one stands out instead of joining a blob |
+| tests | `test_attachment_is_reported_by_its_own_kind_not_as_one_blob`: injected context silent, `filename`/`filePath`/`planFilePath` read into the record, an invented sub-type reported by its own name; suite **518 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| not run | the nine-rule browser audit: no `web/` file here, `dist` byte-identical to 947921e |
+| still open | `resend-fork-notice` is reported and still unread - it is the fork fact limitations item 25 wants, and reading it is a parser change with its own design question |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
