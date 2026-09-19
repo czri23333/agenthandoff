@@ -1168,13 +1168,12 @@ class CodexParser(Parser):
     # its newest end event widens past it (see _latest_end_event).
     _TAIL_BYTES = 65536
 
-    def _end_event_in_tail(self, path: Path, window: int) -> tuple[str | None, bool]:
-        """The newest end event in the last ``window`` bytes, and whether the
-        whole file was covered.
+    def _tail_rows(self, path: Path, window: int) -> tuple[list[dict], bool]:
+        """Rows in the last ``window`` bytes, and whether that covered the file.
 
-        ``json.loads`` failures are the partial first line at a window boundary
-        and are skipped, which is why a kind found in a window is the newest one
-        in the file: rows before the window can only be older.
+        The first line of a window is usually a partial row cut at the boundary;
+        it fails ``json.loads`` and is skipped, so a row found here is never
+        older than one the same scan passed over.
         """
         try:
             with path.open("rb") as handle:
@@ -1184,8 +1183,8 @@ class CodexParser(Parser):
                 handle.seek(start)
                 data = handle.read().decode("utf-8", errors="replace")
         except OSError:
-            return None, True
-        latest: str | None = None
+            return [], True
+        rows: list[dict] = []
         for line in data.splitlines():
             if not line.strip():
                 continue
@@ -1193,6 +1192,17 @@ class CodexParser(Parser):
                 row = json.loads(line)
             except ValueError:
                 continue
+            if isinstance(row, dict):
+                rows.append(row)
+        return rows, start == 0
+
+    def _end_event_in_tail(self, path: Path, window: int) -> tuple[str | None, bool]:
+        """The newest end event in the last ``window`` bytes, and whether the
+        whole file was covered.
+        """
+        rows, covered = self._tail_rows(path, window)
+        latest: str | None = None
+        for row in rows:
             if row.get("type") != "event_msg":
                 continue
             payload = row.get("payload")
@@ -1203,7 +1213,7 @@ class CodexParser(Parser):
                 latest = "error" if self._completion_error(payload) is not None else "clean"
             elif ptype == "turn_aborted":
                 latest = "cancelled"
-        return latest, start == 0
+        return latest, covered
 
     def _latest_end_event(self, path: Path) -> str | None:
         """The newest end event in one rollout's tail, or None when absent.
@@ -1244,6 +1254,63 @@ class CodexParser(Parser):
             types = {str((r.get("payload") or {}).get("type")) for r in rows if r.get("type")}
             if "task_complete" in types:
                 return "clean"
+        return None
+
+    def _newest_message_role(self, path: Path, window: int) -> tuple[str | None, bool]:
+        """Role of the newest real message row in the window, and coverage.
+
+        Applies the filters the full parse applies - developer/system rows,
+        injected context and noise are not a turn - so the probe cannot
+        disagree with the detail page about what the last thing said was. An
+        `agent_message` row counts as an assistant one because `_build` pushes it
+        as one: a parent dispatching a sub-agent has spoken, which is exactly the
+        case 12 sessions here turn on.
+        """
+        rows, covered = self._tail_rows(path, window)
+        for row in reversed(rows):
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            ptype = payload.get("type")
+            rtype = row.get("type")
+            if rtype == "event_msg" and ptype == "agent_message":
+                return "assistant", covered
+            if rtype != "response_item":
+                continue
+            if ptype == "agent_message":
+                return "assistant", covered
+            if ptype != "message":
+                continue
+            role = payload.get("role")
+            if role not in ("user", "assistant"):
+                continue  # developer/system rows are harness injections
+            text, _tools = as_text_blocks(payload.get("content"))
+            text = self.clean_text(text)
+            if not text or text.startswith(_INJECTED_PREFIXES) or self.is_noise(text):
+                continue
+            return str(role), covered
+        return None, covered
+
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """Does the session end on a user message that nothing answered?
+
+        The store records the roles, but this parser implemented no probe, so
+        the cockpit's "Needs input" column reported unknown for every Codex
+        session while the signal sat in the rollout. Files are walked newest
+        first with the same widening as `_latest_end_event`: a resumed session's
+        newest file can hold only the tail of a tool run, and a long run leaves
+        the last message far above EOF, so a probe that read one file once would
+        answer "unknown" for exactly the sessions worth asking about.
+        """
+        for rollout in reversed(self._session_files(session_id)):
+            window = self._TAIL_BYTES
+            while True:
+                role, covered = self._newest_message_role(rollout.path, window)
+                if role is not None:
+                    return role == "user"
+                if covered:
+                    break
+                window *= 4
         return None
 
 

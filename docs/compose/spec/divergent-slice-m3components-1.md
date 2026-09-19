@@ -1257,6 +1257,46 @@ exactly the reply attempt that got cut off, and preferring an older
 | tests | `tests/test_codex_phase.py`: 6 cases (final answer beats commentary, falls back when none exists, a tool card is not a conclusion, `unfinished` reports a truncated commentary and prefers it over an older final answer, no assistant text does not crash); suite **504 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
 | not run | the nine-rule component audit: no `web/` file and no CSS in either slice of this round pair |
 
+### Round 38 — the Dashboard's "等你回复" filter never saw Codex
+
+**Why this round exists.** The store already answers "does this session end on a
+user message nothing replied to": `peek_needs_reply` is that probe, Claude Code
+implements it, and the Dashboard counts its `true` rows, gates a filter on them
+and lists up to eight titles in the tooltip. `CodexParser` never implemented it,
+so it inherited the base stub - which returns *unknown*, honestly - for all
+**103** Codex sessions, the single largest store in the list. Every Codex session
+was silently excluded from a control whose whole job is "go answer these".
+
+Round 36 and the limitations entry it left behind are corrected here, and the
+correction is mine, not a discovery about the store: that round counted 7 sessions
+as a residual disagreement, of which one was this missing probe. The other 6 are
+not a gap - `peek_status` returning nothing *is* the contract for "unknown"
+(`parsers/base.py`, and the server's own row comment says "never faked as clean"),
+so counting them as disagreements used a stricter ruler than the product has.
+
+**What was built.** Codex gets the probe. It reads the newest rollout's tail and
+answers on the newest real message row, with the filters the full parse applies -
+developer and system rows are harness injections, injected context and noise are
+not turns - and walks back through a resumed session's older files, because the
+newest one can hold nothing but the tail of a tool run.
+
+The first version looked only at `response_item/message` and reported unknown for
+**12** sessions whose last recorded turn is an `agent_message` - a parent
+dispatching a sub-agent. `_build` pushes those as assistant rows, so the session
+had spoken last and is not waiting for anyone; an `agent_message` counts as an
+assistant row in the probe too, for the same reason.
+
+| Claim | Measured |
+|---|---|
+| Codex sessions the probe answers | **0 → 103** of 103, through `/api/sessions` (not in-process) |
+| of those, actually waiting on a reply | **13** |
+| probe vs full parse, session by session | **103/103** agree that "the newest real message row is a user one" |
+| sessions that hinge on the dispatch-row rule | **12** - each answered unknown by the first version |
+| what it costs | the probe is 872 ms across 103 sessions (mean 8.5 ms, worst 26.5 ms) - 24% of what parsing those sessions takes. Two adjacent cold-build A/B pairs measured −17.7% then +13.4%, i.e. the cost sits under the noise floor of a 14–17 s build and inside the 20% gate either way |
+| what Round 36's "7 left" really was | 1 missing probe (fixed here) + 6 non-gaps (contract says nothing means unknown); the item-30 entry written beside 03b606c is deleted as wrong on both counts |
+| tests | `tests/test_codex_peek.py` gained 6 cases (user last ⇒ True, assistant answered ⇒ False, a sub-agent dispatch is the parent having spoken, widening past a full tail window, looking back through a resumed session's files, harness rows are not a turn); suite **510 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| not run | the nine-rule component audit: no `web/` file changed, so there is no rendered rule this moves |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

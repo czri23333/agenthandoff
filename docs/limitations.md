@@ -343,13 +343,6 @@ sampled away.
     column or fact reads it. `duration_ms` is now spent (the turn's `dur_ms`), but the
     other half of the same record is what separates a turn that was slow to *think*
     from one that was slow to *stream*, and this reader cannot yet say which happened.
-30. **The list's cheap probe cannot name every kind the detail can.** For 7 of the
-    103 codex sessions `peek_status` answers nothing where a full parse names a
-    kind: `unknown` on 6 (no end event and no completion anywhere in the session)
-    and `user_pending` on 1, which is a fact about message rows that a probe
-    reading end events cannot see. Measured 2026-09-19; the other 96 agree with the
-    detail exactly. Those 7 rows carry no badge rather than a wrong one, which is
-    why this is a gap left open and not a contradiction claimed fixed.
 
 ## How to check any of this yourself
 
