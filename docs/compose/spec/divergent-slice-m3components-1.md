@@ -1219,6 +1219,44 @@ they wrote, a few for the two that do not.
 | tests | `tests/test_codex_peek.py`: 8 cases (tail beats an older completion, an abort outranks a success, an event past row 400, an event above a full window, the resumed-session fallback, silence without either); suite **504 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
 | not run | the nine-rule component audit: this slice touches no `web/` file and no CSS, so there is no rendered rule for it to re-measure |
 
+### Round 37 — the phase was read, kept, and then never used
+
+**Why this round exists.** Round 35 taught the reader to keep `phase` and stopped
+there, writing down in `docs/limitations.md` what consuming it *would* change -
+**by simulation**, on the fixtures, not on this machine's store. (That entry has
+since been closed and deleted, as that file asks you to do; the simulation's
+numbers are reproduced below because two of its three were wrong.)
+
+| Claim | Measured (2026-09-19, against `summarize` as of HEAD) |
+|---|---|
+| `context_notes` differ for | **67** of 103 sessions - the simulation said 67, and was right |
+| the "last answer" text differs for | **34** - the simulation said **49**, over-counting by 15 |
+| `unfinished` differs for | **2** (`01a094bc-e0f1…`, `019fb90d-d5b3…`) - the simulation said 1 |
+| what the 34 actually are | the sessions whose last note *was* a scaffolding row: measured as a set, all 34 overlap and neither side has an extra member, so this is one fact, not two |
+
+**What was built.** `_assistant_conclusions` is the one selector `summarize`
+draws conclusions from. It drops the rows the parser itself synthesised -
+`[思考]`, `[工具`, `[子代理`, `[多代理` - because those are transcript structure,
+not an answer; and when the store stamped any row `phase == final_answer`, those
+rows win, because the store is saying which text is the reply. When no row
+carries the stamp - an older CLI, or a run that died before the answer - every
+remaining assistant row stays in play, so the absence of a field never reads as
+the absence of a conclusion.
+
+The two callers want opposite things from it, and say so in their argument.
+`context_notes` asks for the conclusion, so it takes final answers first.
+`_unfinished` asks what the session was *doing* when it stopped, so it takes the
+literal last non-scaffolding row instead: a commentary truncated mid-sentence is
+exactly the reply attempt that got cut off, and preferring an older
+`final_answer` over it would hide the cut.
+
+| Claim | Measured |
+|---|---|
+| sessions whose last note was a scaffolding row before | **34**, now **0** with any scaffolding note at all |
+| fixtures | untouched - no `conformance --write` / `evidence --write` needed, the byte fingerprints do not change |
+| tests | `tests/test_codex_phase.py`: 6 cases (final answer beats commentary, falls back when none exists, a tool card is not a conclusion, `unfinished` reports a truncated commentary and prefers it over an older final answer, no assistant text does not crash); suite **504 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| not run | the nine-rule component audit: no `web/` file and no CSS in either slice of this round pair |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

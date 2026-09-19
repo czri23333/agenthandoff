@@ -39,6 +39,40 @@ _UNFINISHED_CHARS = 1200
 # fragment and dropped rather than presented as a conclusion.
 _ENDING_PUNCT = tuple("。．.!?！？…」』】）)]}\"'”’")
 
+# Synthesized transcript rows that are scaffolding, not conclusions. The same
+# prefixes the codex parser writes for thinking/tool/sub-agent/multi-agent rows.
+_HINT_PREFIXES = ("[思考]", "[工具", "[子代理]", "[多代理")
+
+
+def _is_hint(text: str) -> bool:
+    return text.lstrip().startswith(_HINT_PREFIXES)
+
+
+def _assistant_conclusions(
+    raw: RawSession, prefer_final_answer: bool = True
+) -> list[Message]:
+    """Assistant messages that can carry the session's conclusion, newest first.
+
+    Rules:
+      1. Drop hint rows (`[思考]`, `[工具`, `[子代理`, `[多代理`) — they are
+         transcript structure, not the answer.
+      2. With ``prefer_final_answer`` (the ``context_notes`` use), rows the
+         store stamped ``phase == "final_answer"`` win when any exist; the store
+         is explicitly saying which text is the reply.
+      3. Otherwise keep every remaining assistant message: a store without
+         ``phase`` (or a run that died before final_answer) must not read as
+         having no conclusion.
+
+    ``prefer_final_answer=False`` keeps the literal last non-hint row instead,
+    which is what the unfinished-tail check needs: a truncated commentary is
+    still the last reply attempt and must be reportable.
+    """
+    non_hint = [m for m in raw.assistant_messages if not _is_hint(m.text)]
+    if prefer_final_answer:
+        final = [m for m in non_hint if m.phase == "final_answer"]
+        non_hint = final or non_hint
+    return list(reversed(non_hint))
+
 
 def _looks_truncated(text: str) -> bool:
     return bool(text) and not text.rstrip().endswith(_ENDING_PUNCT)
@@ -196,8 +230,10 @@ def summarize(raw: RawSession, max_notes: int = 3) -> HandoffBundle:
     ]
     bundle.tool_summary = raw.tool_counts.most_common(8)
 
-    # Last assistant messages are the freshest self-reported state.
-    for m in reversed(raw.assistant_messages):
+    # Last assistant conclusions are the freshest self-reported state. The
+    # phase-aware selector drops tool/thinking/sub-agent rows and prefers the
+    # store's final_answer text when it exists.
+    for m in _assistant_conclusions(raw):
         note = _clip(m.text, _MAX_NOTE)
         if len(note) > 20:
             if _looks_truncated(note):
@@ -253,7 +289,12 @@ def _unfinished(raw: RawSession, bundle: HandoffBundle) -> str:
     dead_kinds = ("length_truncated", "context_exceeded", "user_pending", "unknown")
     if bundle.interruption.kind not in dead_kinds:
         return ""
-    last = raw.last_message("assistant")
+    # The last reply attempt is a conclusion-bearing assistant row, not a
+    # tool/thinking/sub-agent card. A truncated commentary is still the reply
+    # attempt that got cut off, so do not skip it in favour of an older
+    # final_answer.
+    candidates = _assistant_conclusions(raw, prefer_final_answer=False)
+    last = candidates[0] if candidates else None
     if last is None:
         return ""
     text = last.text.strip()

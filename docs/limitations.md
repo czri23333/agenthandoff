@@ -343,23 +343,13 @@ sampled away.
     column or fact reads it. `duration_ms` is now spent (the turn's `dur_ms`), but the
     other half of the same record is what separates a turn that was slow to *think*
     from one that was slow to *stream*, and this reader cannot yet say which happened.
-28. **`phase` separates a commentary turn from the final answer; the reader still
-    takes whichever came last.** Across the 103 sessions this store holds, the last
-    chat message is `commentary` in **21** of them, and the parser's literal last
-    assistant message is a tool card in **23** and a reasoning block in **1** — which
-    is what `summarize`'s `context_notes`, its `unfinished` tail and its "last answer"
-    are built from. Simulating a `phase == final_answer` pick changes `context_notes`
-    in **67** of 103 sessions and the last-answer text in **49**. The parser keeps
-    every phase row (2,226 commentary + 172 final_answer + 4 with none), so nothing is
-    lost — the *choice* is what is missing; `task_complete.last_agent_message` is not
-    a substitute (it is empty on 31 sessions, absent on 10, and points at an earlier
-    final answer than the newest one on at least 1).
-29. **A sub-agent's own message rows are read past.** `response_item/agent_message`
-    carries 215 rows in this store — the parent–child traffic of a multi-agent
-    session, with `author`, `recipient` and a `content` block — and the reader looks
-    for `text`/`message`, which those rows do not have, so all 215 become nothing.
-    The event pair they mirror (`event_msg/agent_message`) is read; the
-    `response_item` spelling is not, and neither is the addressing.
+30. **The list's cheap probe cannot name every kind the detail can.** For 7 of the
+    103 codex sessions `peek_status` answers nothing where a full parse names a
+    kind: `unknown` on 6 (no end event and no completion anywhere in the session)
+    and `user_pending` on 1, which is a fact about message rows that a probe
+    reading end events cannot see. Measured 2026-09-19; the other 96 agree with the
+    detail exactly. Those 7 rows carry no badge rather than a wrong one, which is
+    why this is a gap left open and not a contradiction claimed fixed.
 
 ## How to check any of this yourself
 
