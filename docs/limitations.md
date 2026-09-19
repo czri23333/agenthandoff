@@ -107,7 +107,14 @@ sampled away.
    of those calls the jsonl family's peeks and 110 the rollout headers, the rest
    the other thirteen stores' own head reads. Laziness is not the next win — a peek
    already stops at 800 lines or the end of the file, whichever comes first, and
-   most of those files are shorter than the cap. The next gain would be per store
+   most of those files are shorter than the cap. `peek_status` reads the newest
+   rollout's tail as well now (spec Round 36): one 64 KB read for a session that
+   ends at the last row it wrote, widened ×4 until it holds an end event for the
+   two that do not. Measured as three adjacent A/B pairs on the cold list request
+   that cost +4.5% / −1.1% / −1.8%, which is nothing this measurement can
+   separate from noise; the same sessions' cold build ranged 11.3–13.5 s across
+   those runs, so treat the 5.4 s above as a different day's store, not a
+   baseline to hold later runs to. The next gain would be per store
    (a cheaper head read for one family at a time), and no such change is in flight.
 8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change

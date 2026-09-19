@@ -1163,13 +1163,83 @@ class CodexParser(Parser):
         totals = {"calls": calls, "tokens_in": total_in, "tokens_out": total_out}
         return {"models": rows, "totals": totals}
 
+    # First window for the tail read. Most sessions end at the last row they
+    # wrote, so one read of this settles them; a session that kept writing after
+    # its newest end event widens past it (see _latest_end_event).
+    _TAIL_BYTES = 65536
+
+    def _end_event_in_tail(self, path: Path, window: int) -> tuple[str | None, bool]:
+        """The newest end event in the last ``window`` bytes, and whether the
+        whole file was covered.
+
+        ``json.loads`` failures are the partial first line at a window boundary
+        and are skipped, which is why a kind found in a window is the newest one
+        in the file: rows before the window can only be older.
+        """
+        try:
+            with path.open("rb") as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                start = max(0, size - window)
+                handle.seek(start)
+                data = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            return None, True
+        latest: str | None = None
+        for line in data.splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("type") != "event_msg":
+                continue
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            ptype = str(payload.get("type") or "")
+            if ptype == "task_complete":
+                latest = "error" if self._completion_error(payload) is not None else "clean"
+            elif ptype == "turn_aborted":
+                latest = "cancelled"
+        return latest, start == 0
+
+    def _latest_end_event(self, path: Path) -> str | None:
+        """The newest end event in one rollout's tail, or None when absent.
+
+        The store appends end events at the end of the file, so reading the
+        first 400 rows can never see a failure that happened late in a long
+        turn. The tail is read instead, and its window quadrupled until it holds
+        an end event - a session that kept writing after its last one leaves the
+        tail empty of them. Two sessions in this store end their newest event
+        ~540 KB before EOF, and one 64 KB read reported them ``clean`` off a
+        completion far above it.
+        """
+        window = self._TAIL_BYTES
+        while True:
+            kind, covered = self._end_event_in_tail(path, window)
+            if kind is not None or covered:
+                return kind
+            window *= 4
+
     def peek_status(self, session_id: str) -> str | None:
-        """Cheap end-state: scan event types, no full rebuild.
+        """Cheap end-state: the newest file's tail decides, then any completion.
 
         A resumed session is clean when *any* of its files recorded
         ``task_complete`` - the newest file often holds only the follow-up.
+        But a failed turn ends in the *newest* file's tail, so the old first-
+        400-row probe reported it as clean. The tail is read until it answers
+        (one read for the sessions that end at EOF); older files only answer
+        the ``clean`` fallback for a resumed session.
         """
-        for rollout in self._session_files(session_id):
+        rollouts = self._session_files(session_id)
+        if not rollouts:
+            return None
+        newest = self._latest_end_event(rollouts[-1].path)
+        if newest in ("error", "cancelled", "clean"):
+            return newest
+        for rollout in rollouts:
             rows = read_jsonl(rollout.path, limit=400)
             types = {str((r.get("payload") or {}).get("type")) for r in rows if r.get("type")}
             if "task_complete" in types:

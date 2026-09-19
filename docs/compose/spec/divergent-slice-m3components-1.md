@@ -1140,6 +1140,85 @@ what it still owes are two different facts.
 | the pending instruction still reaches the brief | a synthetic rollout in `tests/test_codex_gaps.py`: kind `error` with a dangling user turn ⇒ `next_steps[0]` starts with `[pending from interrupted session]`; a session that is already `user_pending` does not get the line twice |
 | tests | `tests/test_codex_gaps.py` gained 11 cases (dict and bare errors, a later success staying clean, an abort outranking an error, duration attribution and its refusal to overwrite, unmatched turn ids dropped, both notes); suite **486 passed, 2 skipped**, `ruff` clean |
 
+### Round 35 — the reader looked for the wrong key
+
+**Why this round exists.** Round 34 taught the reader to believe the store about
+*how* a session ended. The same audit of what the store actually holds found two
+fields it was still reading past, and one of them was a whole record type.
+`response_item/agent_message` is the parent/child traffic of a multi-agent
+thread - `author` `/root/nav_rail` to `recipient` `/root`, with the text under
+`content` - and the reader asked those rows for `text`/`message`, which they do
+not have. **218 rows across 66 of the 103 sessions** were read into nothing.
+
+| Claim | Measured |
+|---|---|
+| agent_message rows read past | **218** rows, in **66** of 103 sessions |
+| what the reader asked for | `payload.text` / `payload.message`; the rows carry `content` blocks |
+| what the rows are | who said what to whom inside one thread (`author` / `recipient`) |
+| the other ignored field | `phase` on assistant `response_item/message` rows: **2,226** `commentary`, **172** `final_answer`, 4 absent |
+| what the phase picks today | nothing - `summarize` still takes whatever assistant row came last, which is a tool card in **23** sessions and a reasoning block in **1** |
+
+**What was built.** Both `agent_message` branches read `content` through the same
+block flattener the message branch already used, with `text`/`message` kept as the
+fallback for the older spelling, and a row whose `author` differs from its
+`recipient` is emitted with `[多代理 author → recipient]` as its first line. The
+transcript renders those rows as their own block - `⇄ 多代理消息 ·
+/root/nav_rail → /root`, body verbatim underneath - rather than letting a
+bracket marker sit in the prose, and `[多代理` joins the hint prefixes that
+per-request billing never settles onto.
+
+`Message` gained `phase`, filled only when the store wrote it. Nothing consumes
+it yet: what it should change, and by how much, is measured in
+`docs/limitations.md` rather than guessed at here.
+
+| Claim | Measured |
+|---|---|
+| messages gained on the live store | **+218**, sessions holding them **0 → 66** |
+| fixtures | codex non-empty messages **558 → 560** (`conformance --write`, `evidence --write`) |
+| tests | `tests/test_codex_agent_message.py`: content blocks, the old spelling, `author == recipient`, all three phase shapes; suite **490 passed, 2 skipped**, `ruff` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+
+### Round 36 — the list page was never given the reader the detail page got
+
+**Why this round exists.** Round 34 taught the detail page to believe the store
+about how a session ended. The list page runs a cheaper probe instead -
+`peek_status`, because it answers for every session on one screen - and that
+probe asked a question with a shape it cannot answer: "do any of this session's
+files mention `task_complete` in their first 400 rows". A turn that fails writes
+its end event at the *end* of the rollout, past row 400. So on one store, in one
+request, the row and the page disagreed about the same session. This is the same
+defect Round 34 fixed, one layer up, and it was reported as closed.
+
+| Claim | Measured (2026-09-19, 103 codex sessions) |
+|---|---|
+| where the two pages disagreed | **45** of 103 (58 agreed) |
+| what the list could say | `clean` **88**, nothing **15** - no shape of "failed" existed to report |
+| what the detail said about those same sessions | `clean` 62, `error` 27, `cancelled` 7, `unknown` 6, `user_pending` 1 |
+
+**What was built.** The newest rollout's tail decides: its newest end event wins
+over any older completion, and the "any completion means clean" rule only answers
+when the newest file holds no end event at all, which is the resumed-session case
+it was written for.
+
+One tail read was not enough, and the measurement said so before the commit: two
+sessions (`019fb930-cd8f…`, `019fb930-9540…`) still reported `clean` on the list
+while the detail reported `cancelled`. Both wrote ~540 KB more after their last
+`turn_aborted`, so the 64 KB tail held no end event, the fallback fired, and the
+head scan answered with a completion 540 KB above it - the probe fell back into
+exactly the lie Round 34 removed. The window now quadruples until it holds an end
+event or has covered the file: one read for the sessions that end at the last row
+they wrote, a few for the two that do not.
+
+| Claim | Measured |
+|---|---|
+| disagreements left | **45 → 7**, exact agreement **58 → 96** of 103 |
+| list distribution now | `clean` **62**, `error` **27**, `cancelled` **7**, nothing **7** - the `clean`/`error`/`cancelled` counts match the detail exactly |
+| what the 7 left are | the probe stays silent (`None`) where only a full parse can name a kind: `unknown` 6, `user_pending` 1. Silence, not a wrong claim |
+| sessions whose reported state moved | **38** of 103 |
+| what the tail read costs | three adjacent A/B pairs, `/api/sessions` cold, `AGENTHANDOFF_PREWARM=0`: **+4.5%, −1.1%, −1.8%** - no regression against the 20% gate. The cold build itself measured 11.3–13.5 s across these runs; that is not comparable to the 5.4 s in `docs/limitations.md` item 7, which was a different day and a different store size |
+| how the widened read is locked | `test_end_event_above_a_full_tail_window` fails against a fixed 64 KB window (`clean`) and passes against the widening one (`cancelled`) |
+| tests | `tests/test_codex_peek.py`: 8 cases (tail beats an older completion, an abort outranks a success, an event past row 400, an event above a full window, the resumed-session fallback, silence without either); suite **504 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| not run | the nine-rule component audit: this slice touches no `web/` file and no CSS, so there is no rendered rule for it to re-measure |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
