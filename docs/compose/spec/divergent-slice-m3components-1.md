@@ -1361,6 +1361,52 @@ sessions by this very change.
 | gates | suite **515 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
 | browser audit | all nine rules run against the rebuilt app: **0 rules read component tokens and reach nothing**. Two of its own notes are not passes: the eclipse sweep reached 12 of 17 entries ("the ones it never reached are not evidence"), and the pane rule found no pane frame at 1440 / 1000 / 700 px. `web/` changed here, so the dist in this commit is the built output the audit looked at |
 
+### Round 40 — the probe and the page now ask the same question once
+
+**Why this round exists.** Round 39 stopped the model from claiming an ending it
+had no record of. Measuring that change with a corrected ruler - comparing the
+probe against the **bundle** the detail page actually renders, where the earlier
+audit had compared it against the raw parse - found 23 of 225 sampled rows where
+the two disagreed, and that Round 39 had caused some of it.
+
+Three different causes, all fixed here:
+
+**A recorded ending was being hidden.** WorkBuddy keeps `sessions.status` and
+CodeBuddy keeps `state.json`. Round 39 made the detail page silent unless a
+parser proved something, and neither parser had ever passed its own status
+column along - so 156 + 16 sessions had the fact in the store, showed it on the
+row, and refused to say it in the handoff. `STORE_END_STATES` now translates the
+store's word into an `Interruption` at build time, and it lists terminal words
+only: `working` and `idle` describe a live job and `archived` describes the task
+board, none of which is an ending, and none of them is allowed to become
+"clean".
+
+**The same row read twice, with two standards.** ZCode's `peek_status` asked
+`turn_usage` for failure flags and answered **`clean` when none were set**, while
+`_interruption` - reading the same tables, and carrying a comment saying absence
+of evidence is not evidence of a clean end - answered nothing. 7 of 12 sampled
+rows carried a badge the detail page refused to claim. The probe now calls
+`_interruption`, so there is one derivation; the store's `finish_reason=length`
+signal reaches the list for free.
+
+**Two vocabularies for one field.** The probes forwarded store words (`completed`,
+`failed`, `working`) into a field the detail page fills with canonical kinds, so
+the strings could never match even when the meaning did. `peek_status` for these
+stores now returns the canonical kind, which is also what makes the comparison
+below possible at all.
+
+| Claim | Measured (2026-09-19, `python scripts/probe_audit.py --per-store 12`) |
+|---|---|
+| rows where a probe contradicts the detail page | **23 → 0** of 225 sampled |
+| workbuddy | 12 lying → **0**; its `completed` is now evidence on both sides |
+| codebuddy | 11 → **0** (`failed` reports `error`; `working` reports nothing) |
+| zcode | 7 → **0** (458 sessions; the probe asks `_interruption` now) |
+| words the probes emit afterwards | `None` 107, `clean` 19, `error` 5, `cancelled` 1 - every one a word `STATUS_TONES` and both locales already carry |
+| what that costs on the list | zcode's green badge disappears where its store holds only an absence of failure flags (2 of 12 sampled went from a claim to blank), the same trade Round 39 made at model level |
+| the instrument | `scripts/probe_audit.py` is in the repo and in the self-check block of `docs/limitations.md`, so this is re-runnable on any machine's stores instead of a claim about mine |
+| gates | suite **516 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| browser audit | not run: this slice touches no `web/` file, and `dist` is unchanged from 947921e |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

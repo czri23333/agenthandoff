@@ -72,3 +72,38 @@ def test_clean_is_a_claim_a_store_has_to_make_not_a_default() -> None:
     proven = Interruption(kind="clean", detail="task_complete carried no error")
     assert proven.kind == "clean"
     assert proven.detected is False  # a clean end is not an interruption either
+
+
+def test_only_a_terminal_store_status_counts_as_an_ending() -> None:
+    """The other half of Round 39: a recorded ending must not be hidden.
+
+    Making `unknown` the default also silenced the two stores that *do* keep a
+    status column, so their rows said nothing while their own list badge said
+    `completed`. The mapping below is what reconnects them - and it is limited
+    to terminal words, because `working` and `idle` describe a live job and
+    `archived` describes the task board, none of which says how a turn ended.
+    """
+    from agent_handoff.parsers.jsonl_family import STORE_END_STATES, _CodebuddyHybridParser
+
+    class Stub(_CodebuddyHybridParser):
+        cli = "stub"
+
+        def __init__(self, word: str | None) -> None:  # skip the filesystem
+            self._word = word
+
+        def _store_status_word(self, session_id: str) -> str | None:
+            return self._word
+
+    for word, kind in (("completed", "clean"), ("done", "clean"), ("failed", "error"),
+                       ("error", "error")):
+        s = Stub(word)
+        assert s.peek_status("s") == kind, (word, s.peek_status("s"))
+        got = s._proven_interruption("s")
+        assert got is not None and got.kind == kind, (word, got)
+    for word in ("working", "idle", "archived", "running", "", None):
+        s = Stub(word)
+        assert s.peek_status("s") is None, word
+        assert s._proven_interruption("s") is None, word
+
+    assert set(STORE_END_STATES.values()) <= set(END_STATE_WORDS)
+    assert not {"working", "idle", "archived", "running", "pending"} & set(STORE_END_STATES)

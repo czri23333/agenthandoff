@@ -357,6 +357,15 @@ sampled away.
     label is "this tool's log does not say", not "the cockpit broke". The one
     inference still available is positional: an un-answered final user message,
     which is how 2 of the 8 sampled opencode sessions surface as `user_pending`.
+    That inference was tried as a cheap probe on 2026-09-19 and **measured
+    away**: it answered for only **20 of the 2,291** family sessions, and of the
+    8 times it did answer, **6 contradicted the detail page** (qodercn-ide 2
+    agreeing against 5 conflicting), because `_finalize_interruption` also
+    requires that the session has an assistant reply and compares the two
+    timestamps - a 16 KB tail scan sees neither. Those 20 sessions already
+    surface through `peek_needs_reply`, which drives the "等你回复" count, the
+    filter and the tooltip, so the probe would have added a second, drift-prone
+    place to say the same thing. It is not in the product.
 
 ## How to check any of this yourself
 
@@ -365,6 +374,8 @@ handoff doctor                         # what is real on YOUR machine
 handoff matrix                         # the support table, derived from the fixtures
 handoff watch --cli codex --once       # one budget-ladder check on a live session
 handoff ui                             # the cockpit at http://127.0.0.1:8620
+python scripts/probe_audit.py          # do the cheap list probes contradict
+                                       # the detail page, on your own stores
 pip install -e ".[dev,zstd,server]"
 pytest                                 # parses every fixture, asserts its shape
 python -m agent_handoff.evidence --check      # README/JSON vs the fixtures

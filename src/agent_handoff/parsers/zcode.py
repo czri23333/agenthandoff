@@ -473,28 +473,23 @@ class ZcodeParser(Parser):
         }
 
     def peek_status(self, session_id: str) -> str | None:
-        """One SQL against turn_usage — cheap enough for list views."""
+        """One SQL against turn_usage — cheap enough for list views.
+
+        This deliberately asks the same function the full parse asks. It used to
+        read the same row twice, with a weaker rule: no failure flag meant
+        "clean" here, while `_interruption` - whose own comment says absence of
+        evidence is not evidence of a clean end - reported nothing. That made
+        7 of 12 sampled rows advertise an ending the detail page refused to
+        claim, which is the mistake spec Round 39 removed from the model itself.
+        """
         if not self.available():
             return None
         try:
             with self._connect() as con:
-                row = con.execute(
-                    "SELECT context_exceeded, cancelled_by_user, error_type "
-                    "FROM turn_usage WHERE session_id=? ORDER BY started_at DESC LIMIT 1",
-                    (session_id,),
-                ).fetchone()
-            if row is None:
-                return None
-            exceeded, cancelled, error_type = row
-            if cancelled:
-                return "cancelled"
-            if exceeded:
-                return "context_exceeded"
-            if error_type:
-                return "error"
-            return "clean"
+                kind = self._interruption(con, session_id).kind
         except sqlite3.Error:
             return None
+        return None if kind == "unknown" else kind
 
     @staticmethod
     def _interruption(con: sqlite3.Connection, session_id: str) -> Interruption:

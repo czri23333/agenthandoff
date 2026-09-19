@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_handoff.locations import home
-from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
+from agent_handoff.model import Interruption, Message, RawSession, SessionMeta, TodoItem, ts_to_iso
 from agent_handoff.parsers.base import Parser, as_text_blocks, file_entry, read_jsonl
 
 
@@ -153,6 +153,21 @@ def _parse_iso_local(iso):
         return datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+#: A store's own status word -> the end state it proves. Only the two stores
+#: that keep such a column/file reach for this, and only terminal words are
+#: listed: `working` and `idle` describe liveness, `archived` describes
+#: bookkeeping, and none of them says how the turn ended. Mapping a non-terminal
+#: word is the mistake this table exists to keep out - a recorded fact is worth
+#: reporting, an unrelated one is not allowed to become "clean".
+STORE_END_STATES = {
+    "completed": "clean",
+    "done": "clean",
+    "finished": "clean",
+    "error": "error",
+    "failed": "error",
+}
 
 
 class JsonlSessionParser(Parser):
@@ -954,7 +969,19 @@ class JsonlSessionParser(Parser):
             origin=self._origin(),
             notes=notes,
         )
-        return self.build_raw(meta, messages, todos, files, tools)
+        return self.build_raw(
+            meta, messages, todos, files, tools, self._proven_interruption(session_id)
+        )
+
+    def _proven_interruption(self, session_id: str) -> Interruption | None:
+        """An ending this store recorded, as evidence. None when it recorded none.
+
+        `Interruption.kind` no longer defaults to "clean" (spec Round 39), so a
+        store that does keep a terminal status would otherwise be reported as
+        unknown - trading one wrong answer for another. Each class that reads
+        such a column or file overrides this.
+        """
+        return None
 
     @staticmethod
     def _collect_row_signals(row: dict, surfaces: set[str], errors: list[str]) -> None:
@@ -1206,16 +1233,41 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                     out[sid] = st
         return out
 
-    def peek_status(self, session_id: str) -> str | None:
-        """codebuddy-family job state (working/idle/…) or None.
-
-        One glob over small state.json files — cheap enough for list views,
-        same cost class as _job_titles which list_sessions already pays.
-        """
+    def _store_status_word(self, session_id: str) -> str | None:
+        """The word this store keeps for the session, in its own vocabulary."""
         try:
             return self._job_states().get(session_id)
         except OSError:
             return None
+
+    def peek_status(self, session_id: str) -> str | None:
+        """The store's status word, translated into the product's end-state words.
+
+        Only an ending is reported: a job that is `working` or `idle`, or a row
+        that is merely `archived`, has not said how the turn ended, so those
+        report nothing rather than a borrowed word. That keeps the badge on the
+        row and the label on the detail page the same string, which is what lets
+        `scripts/probe_audit.py` compare the two at all.
+        """
+        word = self._store_status_word(session_id)
+        if word is None:
+            return None
+        return STORE_END_STATES.get(str(word))
+
+    def _proven_interruption(self, session_id: str) -> Interruption | None:
+        """The recorded ending, as evidence.
+
+        Both subclasses that keep a status column or file reach here through
+        `_store_status_word`, so the row badge and the handoff answer from one
+        record. Without it, `Interruption` no longer defaulting to "clean"
+        (spec Round 39) would have hidden an ending these two stores really do
+        store.
+        """
+        kind = self.peek_status(session_id)
+        if kind is None:
+            return None
+        word = self._store_status_word(session_id)
+        return Interruption(kind=kind, detail=f"{self.cli} recorded status={word}")
 
     def _cb_peek_dir(
         self, sid: str, agent_files: list[Path], scan_files: list[Path] | None = None
@@ -1636,10 +1688,12 @@ class WorkbuddyParser(_CodebuddyHybridParser):
                 out[str(sid)] = kind
         return out
 
-    def peek_status(self, session_id: str) -> str | None:
+    def _store_status_word(self, session_id: str) -> str | None:
         """workbuddy.db sessions.status (completed/archived/error/…).
 
-        Same cost class as the title lookup; deleted rows report None.
+        Same cost class as the title lookup; deleted rows report None. The
+        shared `peek_status` translates the word, so the list only ever shows a
+        recorded ending and the detail page treats the same column as evidence.
         """
         try:
             import sqlite3

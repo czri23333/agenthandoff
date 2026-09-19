@@ -134,8 +134,21 @@ def test_codebuddy_job_state(tmp_path):
         encoding="utf-8",
     )
     p = CodebuddyParser(tmp_path / ".codebuddy")
-    assert p.peek_status("aaa111") == "working"
+    # The job state is read...
+    assert p._store_status_word("aaa111") == "working"
+    # ...but "working" describes a live job, not an ending, so the end-state
+    # field refuses to borrow it: a badge the detail page would not claim is a
+    # contradiction waiting to be rendered (spec Round 39, scripts/probe_audit.py).
+    assert p.peek_status("aaa111") is None
+    assert p._proven_interruption("aaa111") is None
     assert p.peek_status("nope") is None
+    (jobs / "state.json").write_text(
+        json.dumps({"sessionId": "aaa111", "name": "Agent", "state": "failed"}),
+        encoding="utf-8",
+    )
+    p = CodebuddyParser(tmp_path / ".codebuddy")
+    assert p.peek_status("aaa111") == "error"
+    assert p._proven_interruption("aaa111").kind == "error"
 
 
 def test_qoder_and_qwen_share_dialect(tmp_path):
