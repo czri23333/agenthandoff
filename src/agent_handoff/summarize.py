@@ -364,7 +364,11 @@ def _finalize_interruption(raw: RawSession, bundle: HandoffBundle) -> None:
     for quota-dead sessions, and the successor must know it is the thing to
     resume.
     """
-    if raw.interruption.detected:
+    # Whatever the store recorded wins, proven-clean included. Keying this on
+    # `detected` instead would drop a store's "this finished" claim on the floor
+    # - which went unnoticed only while an unrecorded end defaulted to "clean",
+    # so the fallback and the claim were the same string.
+    if raw.interruption.kind != "unknown":
         bundle.interruption = raw.interruption
         if bundle.interruption.kind == "length_truncated" and bundle.context_notes:
             bundle.context_notes.pop(0)  # the truncated reply masquerading as oldest note

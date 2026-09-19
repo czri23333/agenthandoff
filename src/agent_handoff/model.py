@@ -143,6 +143,29 @@ class TodoItem:
     priority: str = ""
 
 
+#: Every end-state word the product can put on screen, from either layer: the
+#: kinds a parser proves about how a turn ended, and the state words the cheap
+#: list-page probes forward from a store's own status column (`completed`,
+#: `working`, `idle`, `archived`, `failed`). `tests/test_status_words.py` holds
+#: web/src/components.tsx and both i18n locales in step with this tuple, so a
+#: store that starts reporting a new word cannot render as a silent gap or as a
+#: borrowed colour.
+END_STATE_WORDS = (
+    "clean",
+    "completed",
+    "error",
+    "failed",
+    "cancelled",
+    "working",
+    "idle",
+    "archived",
+    "user_pending",
+    "context_exceeded",
+    "length_truncated",
+    "unknown",
+)
+
+
 @dataclass
 class Interruption:
     """Evidence about how the session actually ended.
@@ -152,17 +175,29 @@ class Interruption:
     session with a misleading picture unless surfaced explicitly. Parsers
     fill what their store can prove; summarize adds cross-CLI inference
     (e.g. a dangling user message with no reply).
+
+    The default is the honest one. `clean` is a claim that the turn finished,
+    so it has to come from a record; a store that writes no end marker at all
+    (qoder-ide keeps none across 2,259 sessions) must not end up claiming it by
+    falling off the end of a dataclass. `parsers/base.py` already demands
+    exactly this of the cheap probe - "callers must treat None as unknown,
+    never as clean" - and the detail page is the same promise.
     """
 
-    kind: str = "clean"
+    kind: str = "unknown"
     # clean | user_pending | cancelled | context_exceeded | length_truncated
     # | error | unknown
-    detail: str = ""
+    detail: str = "the store records no end marker, so how this ended is not proven"
     pending_user_text: str = ""  # set when kind == user_pending
 
     @property
     def detected(self) -> bool:
-        return self.kind != "clean"
+        """The store proved something went wrong.
+
+        Absence of proof is not proof of an interruption either: `unknown` says
+        nothing happened to be recorded, and must not be reported as a finding.
+        """
+        return self.kind not in ("clean", "unknown", "")
 
     def describe(self) -> str:
         labels = {

@@ -343,6 +343,20 @@ sampled away.
     column or fact reads it. `duration_ms` is now spent (the turn's `dur_ms`), but the
     other half of the same record is what separates a turn that was slow to *think*
     from one that was slow to *stream*, and this reader cannot yet say which happened.
+31. **Most sessions in the cockpit cannot have their ending proven, and never
+    could.** Of the 3,322 sessions on this machine, **2,710** belong to stores
+    whose parser never builds an `Interruption` at all - qoder-ide (2,259),
+    opencode (222), workbuddy (156) and nine smaller ones. That is not a probe
+    that could be written better: qoder-ide's transcript vocabulary is
+    `assistant / user / active-leaf / attachment / last-prompt / …` with **no
+    end, complete, error or abort row anywhere**, so nothing in the file records
+    how the turn stopped. Since spec Round 39 these read `unknown` (labelled
+    "结束状态未记录", coloured neutral) where they used to read `clean` by
+    falling off the end of a dataclass default. The gap is therefore upstream in
+    what those CLIs write, not in the reader - and the honest reading of a grey
+    label is "this tool's log does not say", not "the cockpit broke". The one
+    inference still available is positional: an un-answered final user message,
+    which is how 2 of the 8 sampled opencode sessions surface as `user_pending`.
 
 ## How to check any of this yourself
 

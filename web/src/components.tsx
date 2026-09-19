@@ -23,6 +23,30 @@ export function CliBadge({ cli, origin, title }: { cli: string; origin?: string 
   );
 }
 
+/**
+ * How each end-state word is coloured, as data. `agent_handoff.model
+ * .END_STATE_WORDS` is what the backend can emit; tests/test_status_words.py
+ * fails if the two drift, if a word loses its label in either locale, or if the
+ * fallback ever becomes the error colour.
+ *
+ * `unknown` is faint, not red: it means the store recorded nothing, which is not
+ * a finding about the session.
+ */
+const STATUS_TONES: Record<string, string> = {
+  clean: "ah-ok",
+  completed: "ah-ok",
+  user_pending: "ah-warn",
+  cancelled: "ah-warn",
+  working: "ah-warn",
+  idle: "ah-faint",
+  archived: "ah-faint",
+  unknown: "ah-faint",
+  error: "ah-err",
+  failed: "ah-err",
+  context_exceeded: "ah-err",
+  length_truncated: "ah-err",
+};
+
 /** Proven end-state of a session, as an honest label (never a bare dot). */
 export function StatusTag({ kind }: { kind: string | null }) {
   const t = useT();
@@ -34,17 +58,14 @@ export function StatusTag({ kind }: { kind: string | null }) {
         </span>
       </Tooltip>
     );
-  const tone =
-    kind === "clean" || kind === "completed"
-      ? "ah-ok"
-      : kind === "user_pending" || kind === "cancelled" || kind === "working"
-        ? "ah-warn"
-        : kind === "idle" || kind === "archived"
-          ? "ah-faint"
-          : "ah-err";
+  const modelled = kind in STATUS_TONES;
+  const tone = STATUS_TONES[kind] ?? "ah-faint";
+  // An unmodelled word is shown as the store's own word rather than a missing
+  // translation key - and never in the error colour.
+  const label = modelled ? t(`it_${kind}` as Parameters<typeof t>[0]) : kind;
   return (
     <Tooltip title={kind}>
-      <span className={`ah-meta ${tone}`}>{t(`it_${kind}` as Parameters<typeof t>[0])}</span>
+      <span className={`ah-meta ${tone}`}>{label}</span>
     </Tooltip>
   );
 }

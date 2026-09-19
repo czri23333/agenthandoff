@@ -77,7 +77,11 @@ def test_giant_final_turn_keeps_its_end():
 
 def test_dead_session_gets_a_deeper_tail_than_a_clean_one():
     turns = _dialogue(60, size=400)
-    clean = summarize(_raw(turns))
+    clean_raw = _raw(turns)
+    # "clean" has to be earned: the budget comparison is about a session whose
+    # store proved it finished, not about one that recorded nothing.
+    clean_raw.interruption = Interruption(kind="clean", detail="task_complete, no error")
+    clean = summarize(clean_raw)
     # An unanswered final user turn is exactly how a quota death looks.
     dead = summarize(_raw(turns + [("user", "继续，别停。")]))
     assert clean.interruption.kind == "clean", clean.interruption.describe()

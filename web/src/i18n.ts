@@ -247,7 +247,7 @@ const dict = {
     it_context_exceeded: "上下文超限",
     it_length_truncated: "回复被截断",
     it_error: "模型错误",
-    it_unknown: "异常结束",
+    it_unknown: "结束状态未记录",
   },
   en: {
     sessions: "Sessions",
@@ -489,7 +489,7 @@ const dict = {
     it_context_exceeded: "context exceeded",
     it_length_truncated: "reply truncated",
     it_error: "model error",
-    it_unknown: "abrupt end",
+    it_unknown: "end not recorded",
   },
 } as const;
 

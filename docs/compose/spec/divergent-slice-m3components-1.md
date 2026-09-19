@@ -1297,6 +1297,70 @@ assistant row in the probe too, for the same reason.
 | tests | `tests/test_codex_peek.py` gained 6 cases (user last ⇒ True, assistant answered ⇒ False, a sub-agent dispatch is the parent having spoken, widening past a full tail window, looking back through a resumed session's files, harness rows are not a turn); suite **510 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
 | not run | the nine-rule component audit: no `web/` file changed, so there is no rendered rule this moves |
 
+### Round 39 — "clean" was the default value of a field, not a finding
+
+**Why this round exists.** The cockpit's founding promise is that it tells the
+next session how this one actually ended. For most of the store it has never done
+that: `Interruption.kind` **defaulted to `"clean"`**, and a parser that recorded
+nothing about the ending got the strongest claim in the product for free. Of the
+3,322 sessions on this machine, **2,710** belong to parsers that never construct
+an `Interruption` at all - qoder-ide 2,259, opencode 222, workbuddy 156 and nine
+smaller ones. Every one of them reported a normal completion.
+
+This is the defect the rest of this round pair has been chasing, at its source,
+and pointed the other way: Round 34 and 36 fixed probes that *invented* a clean
+end while the store recorded a failure; the model itself was inventing one when
+the store recorded nothing. `parsers/base.py` already states the rule for the
+cheap probe - "callers must treat None as unknown, never as clean" - and the
+detail page was not held to it.
+
+The store cannot always be blamed: qoder-ide's transcript vocabulary is
+`assistant / user / active-leaf / attachment / workspace-directories /
+runtime-config / last-prompt / worktree-state / file-history-snapshot / system`,
+and a sweep of 60 sessions found **no row of the type end|complete|error|abort|
+stop|finish at all**. There is nothing to read. `unknown` is the only answer that
+is not invented.
+
+| Claim | Measured (2026-09-19) |
+|---|---|
+| sessions claiming a clean end with no record behind it | **2,710** of 3,322 |
+| stores that can prove an ending at all (their source constructs `Interruption`) | 3 of 16 populated: codex, zcode, dsh |
+| qoder-ide end-marker rows, 60 sessions swept | **none** (types above; last row of a file is `active-leaf` 34×, `last-prompt` 25×, `assistant` 1×) |
+| bundle kinds after the change, 8-session samples | qoder-ide **8 unknown**; opencode 6 unknown + **2 still `user_pending`** (the positional inference survives); codex **6 clean + 2 error** (proven claims untouched); zcode 1 cancelled + 1 error + 2 user_pending + 4 unknown |
+
+**What was built.** The default is `unknown`, with a detail that says why ("the
+store records no end marker, so how this ended is not proven"), and `detected`
+no longer conflates "not clean" with "the store proved something" - without that
+the flip would have switched off the `user_pending` inference entirely, which is
+how it was found: the first run failed 4 tests, and one of the 4 was that
+inference, not a stale assertion.
+
+Flipping the default exposed a second bug, which had been invisible only because
+the fallback and the claim were the same string: `_finalize_interruption` copies
+the parser's record into the bundle **when `raw.interruption.detected`**, so a
+store that proved a clean finish had its proof thrown away and replaced by the
+default. It keys on "the store said something" now. The two remaining failing
+tests were assertions that had encoded the default as evidence; both now supply
+the evidence they assume.
+
+Two consequences had to be handled in the UI rather than the model, and the
+audit trail for them is this: `StatusTag` chose its colour with a chain of
+`kind === "clean" || kind === "completed" ? ... : "ah-err"`, so a word the chain
+never heard of - which `unknown` now is - rendered as **a failed session**. The
+chain is a `STATUS_TONES` table now, unlisted words fall back to the neutral
+tone and are shown as the store's own word, and `it_unknown` was relabelled from
+"异常结束"/"abrupt end" (a claim that something went wrong) to "结束状态未记录"/
+"end not recorded" - the label that would otherwise have been applied to 2,710
+sessions by this very change.
+
+| Claim | Measured |
+|---|---|
+| word list held as data, checked from both ends | `model.END_STATE_WORDS` (12) ↔ `STATUS_TONES` keys ↔ `it_*` labels in zh and en; 4 new tests fail on drift, on a missing label in either locale, or if the fallback colour ever becomes the error one |
+| resume-pack cost of treating an unproven ending as one worth padding | 6 qoder-ide sessions measured against the same sessions forced to proven-clean: **+2,046 chars on average**, 0 for the three short sessions and +2,605 / +3,625 / +6,048 for the long ones (`_RECENT_BUDGET` 6,000 → `_RECENT_BUDGET_DEAD` 10,000) |
+| what this does NOT fix | nothing recovers these endings - the CLIs do not write them. See `docs/limitations.md` item 31 |
+| gates | suite **515 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| browser audit | all nine rules run against the rebuilt app: **0 rules read component tokens and reach nothing**. Two of its own notes are not passes: the eclipse sweep reached 12 of 17 entries ("the ones it never reached are not evidence"), and the pane rule found no pane frame at 1440 / 1000 / 700 px. `web/` changed here, so the dist in this commit is the built output the audit looked at |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
