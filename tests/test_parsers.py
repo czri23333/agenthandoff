@@ -151,6 +151,53 @@ def test_codebuddy_job_state(tmp_path):
     assert p._proven_interruption("aaa111").kind == "error"
 
 
+def test_an_unseen_row_shape_is_reported_not_swallowed(tmp_path):
+    """The store writing something new must not look like nothing happened.
+
+    Rows carrying no role fall out of the parse loop. For the bookkeeping types
+    the store actually writes (active-leaf, runtime-config, ...) that is by
+    design and stays quiet; for a shape nobody has seen it has to leave a
+    visible fact, and the bytes still have to be retrievable.
+    """
+    import json
+
+    root = tmp_path / ".codebuddy" / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "aaa111.jsonl").write_text(
+        "".join(
+            json.dumps(r) + "\n"
+            for r in [
+                {"type": "session_meta", "sessionId": "aaa111", "cwd": "D:/demo"},
+                {"type": "active-leaf", "sessionId": "aaa111", "leaf": 3},
+                {
+                    "type": "quantum_flux_report",
+                    "sessionId": "aaa111",
+                    "payload": {"volume": 42},
+                },
+                {
+                    "type": "message",
+                    "sessionId": "aaa111",
+                    "cwd": "D:/demo",
+                    "timestamp": 1756548000000,
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello there friend"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    p = CodebuddyParser(tmp_path / ".codebuddy")
+    raw = p.load("aaa111")
+    assert raw is not None
+    assert "unhandled_row:quantum_flux_report=1" in raw.meta.notes
+    assert not [n for n in raw.meta.notes if n.startswith("unhandled_row:active-leaf")]
+    assert [m.text for m in raw.messages] == ["hello there friend"]
+    # Retained and exportable: raw_archive hands out the file byte-faithfully,
+    # so an unread row is a row not yet interpreted, never a row that is gone.
+    archive = p.raw_archive("aaa111")
+    assert archive and "quantum_flux_report" in archive[0]["text"]
+
+
 def test_qoder_and_qwen_share_dialect(tmp_path):
     for cls, dirname, text in [
         (QoderworkParser, ".qoderwork", "qoder ask"),

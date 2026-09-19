@@ -366,6 +366,15 @@ sampled away.
     surface through `peek_needs_reply`, which drives the "等你回复" count, the
     filter and the tooltip, so the probe would have added a second, drift-prone
     place to say the same thing. It is not in the product.
+32. **Two row shapes the stores really write are still unread, and now say so.**
+    `attachment` appeared in **33 of 104** sampled sessions and
+    `resend-fork-notice` in **7**; neither carries a role, so both fell out of
+    the parse loop in silence until Round 41 made the fall-through report it.
+    The bytes are not lost - `raw_archive()` exports the file verbatim - but
+    nothing interprets them: no attachment is listed as a touched file, and no
+    fork relationship is drawn, which is the same hole item 25 left open for
+    Codex's 26 forked sessions seen from the other side. Reading them is a
+    parser change, not a reporting one; the reporting is what was missing.
 
 ## How to check any of this yourself
 

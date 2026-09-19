@@ -155,6 +155,37 @@ def _parse_iso_local(iso):
         return None
 
 
+#: Row types that legitimately carry no turn - bookkeeping and side-channel
+#: records the parser reads or ignores on purpose. Anything reaching the
+#: no-role fall-through outside this list becomes a visible `unhandled_row:`
+#: fact, because "the store started writing a shape nobody has seen" must not be
+#: indistinguishable from "nothing happened".
+#:
+#: The list is the set the live store actually produced, over 131 sampled
+#: family sessions (spec Round 41), with the count of sessions in which each
+#: appeared: runtime-config 54, last-prompt 49, workspace-directories 47,
+#: active-leaf 46, attachment 43, worktree-state 35, ai-title 24, session_meta
+#: 18, progress 14, system 8, session-meta 7, resend-fork-notice 7, custom-title
+#: 4. Two of those are deliberately NOT listed - `attachment` and
+#: `resend-fork-notice` - because both look like they carry something a session
+#: depended on, and until someone reads them the row should say so out loud
+#: rather than be filed under bookkeeping.
+ROLELESS_ROW_TYPES: frozenset[str] = frozenset({
+    "session_meta",
+    "session-meta",
+    "runtime-config",
+    "last-prompt",
+    "workspace-directories",
+    "active-leaf",
+    "worktree-state",
+    "ai-title",
+    "custom-title",
+    "progress",
+    "system",
+    "summary",
+    "isCompactSummary",
+})
+
 #: A store's own status word -> the end state it proves. Only the two stores
 #: that keep such a column/file reach for this, and only terminal words are
 #: listed: `working` and `idle` describe liveness, `archived` describes
@@ -653,6 +684,7 @@ class JsonlSessionParser(Parser):
         # Row-level provider signals that never surface as turns: compacted
         # summaries, errors, and the agent surface (cli vs IDE).
         row_errors: list[str] = []
+        unhandled: Counter[str] = Counter()
         compacted_summaries = 0
         agent_surfaces: set[str] = set()
         # Session-level pre-scan: does ANY row carry real text? A session of
@@ -800,6 +832,13 @@ class JsonlSessionParser(Parser):
 
                 role, text, raw_text, tool_blocks = self._row_content(row)
                 if not role:
+                    # Nothing matched this row and it carries no turn, so it
+                    # ends up unread here. For bookkeeping rows that is correct;
+                    # for a shape the parser has never seen it is invisible from
+                    # outside the process, which is how a store shipping a new
+                    # record type reads as "nothing happened". Count them all
+                    # first; ROLELESS_ROW_TYPES is what the live store showed.
+                    unhandled[str(rtype or "<no-type>")] += 1
                     continue
                 for tb in tool_blocks:
                     name, tool_input = self._tool_name_input(tb)
@@ -958,6 +997,13 @@ class JsonlSessionParser(Parser):
         if compacted_summaries:
             notes.append(f"compacted_turns:{compacted_summaries}")
         notes.extend(f"row_error:{e}" for e in row_errors[:5])
+        # Biggest signal first, same cap as row_error: a session that meets a
+        # thousand unread shapes should say so without burying the row payload.
+        _fresh = [(k, n) for k, n in unhandled.items() if k not in ROLELESS_ROW_TYPES]
+        for _kind, _n in sorted(_fresh, key=lambda kv: (-kv[1], kv[0]))[:5]:
+            notes.append(f"unhandled_row:{_kind}={_n}")
+        if len(_fresh) > 5:
+            notes.append(f"unhandled_row_kinds:{len(_fresh)}")
         meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,

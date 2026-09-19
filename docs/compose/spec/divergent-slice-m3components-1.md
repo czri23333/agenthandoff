@@ -1407,6 +1407,49 @@ below possible at all.
 | gates | suite **516 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
 | browser audit | not run: this slice touches no `web/` file, and `dist` is unchanged from 947921e |
 
+### Round 41 — a row nobody can read now says so on the session
+
+**Why this round exists.** Every parser walks a store's rows and reads the ones
+it knows. A row whose shape it has never seen carries no role, falls out of the
+loop at the `if not role: continue`, and leaves **no trace anywhere** - not a
+count, not a note, not a fact in the export. So "the CLI started writing a new
+record type" and "this session contained nothing extra" look identical from
+outside the process, which is the one pair of states the cockpit exists to tell
+apart.
+
+That was confirmed by feeding the live code exactly that case before writing
+any fix: a JSONL with a known user turn, a bookkeeping row and two rows of an
+invented type came back with `notes == []`. Nothing was reported.
+
+**What was built.** The fall-through now counts by row type, and anything that
+is not a declared bookkeeping type becomes `unhandled_row:<type>=<count>` in the
+session's notes - visible in the UI, carried in the memory export, and bounded
+(5 kinds, biggest first, plus an `unhandled_row_kinds:<n>` total) the same way
+`row_error` already is.
+
+The allowlist is data, and it is data from this machine, not a guess:
+`ROLELESS_ROW_TYPES` is the set of types the store actually produced over 131
+sampled family sessions, with the number of sessions each appeared in written
+beside it - runtime-config 54, last-prompt 49, workspace-directories 47,
+active-leaf 46, attachment 43, worktree-state 35, ai-title 24, session_meta 18,
+progress 14, system 8, session-meta 7, resend-fork-notice 7, custom-title 4.
+
+**Two of those are deliberately not in the list.** `attachment` and
+`resend-fork-notice` both look like they carry something a session depended on
+- a file, or the fact that a turn was re-sent as a fork - and the parser reads
+neither. Filing them under "bookkeeping" would have made the sweep quiet and
+buried the finding, so they stay reported.
+
+| Claim | Measured (2026-09-19, live store) |
+|---|---|
+| rows reported after the change, 104 sampled sessions across 5 stores | `attachment` **33**, `resend-fork-notice` **7** - and nothing else |
+| report noise from the 11 declared bookkeeping types | **0** |
+| retention | `raw_archive()` hands out the file byte-faithfully (path/encoding/sha256/text), so an unread row is a row not yet interpreted, not a row that is gone - asserted in the new test |
+| closure test | `test_an_unseen_row_shape_is_reported_not_swallowed`: an invented type is reported, a declared one is silent, the turn list is unchanged, and the bytes are still exportable |
+| gates | suite **517 passed, 2 skipped**, `ruff check .` clean, `scripts/ci_local.py --with-frontend` 10/10 |
+| not run | the nine-rule browser audit: no `web/` file and no CSS here; `dist` is byte-identical to 947921e |
+| what it does not do | it does not read `attachment`. That is the follow-up this round exists to make visible - see `docs/limitations.md` item 32 |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
