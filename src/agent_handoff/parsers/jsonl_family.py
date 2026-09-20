@@ -184,10 +184,12 @@ def _row_shape(row: dict) -> str:
 #: appeared: runtime-config 54, last-prompt 49, workspace-directories 47,
 #: active-leaf 46, attachment 43, worktree-state 35, ai-title 24, session_meta
 #: 18, progress 14, system 8, session-meta 7, resend-fork-notice 7, custom-title
-#: 4. Two of those are deliberately NOT listed - `attachment` and
+#: 4. Two of those are deliberately NOT here - `attachment` and
 #: `resend-fork-notice` - because both look like they carry something a session
-#: depended on, and until someone reads them the row should say so out loud
-#: rather than be filed under bookkeeping.
+#: depended on, and `_load_paths` reads them for exactly that reason: the
+#: attachment kinds that name files become touched paths, and a fork record
+#: marks the two turns it is about. Anything of theirs that cannot be placed
+#: says so.
 ROLELESS_ROW_TYPES: frozenset[str] = frozenset({
     "session_meta",
     "session-meta",
@@ -207,8 +209,9 @@ ROLELESS_ROW_TYPES: frozenset[str] = frozenset({
     # 2026-09-19 as task_reminder 3136, skill_listing 1460, agent_listing_delta
     # 1286, hook_output 190, queued_command 87, hook_non_blocking_error 55,
     # critical_system_reminder 37, goal_state 18, relevant_memories 11 rows.
-    # The three attachment kinds that name files are NOT here - `_build` reads
-    # those, and an attachment sub-type nobody has seen still gets reported.
+    # The three attachment kinds that name files are NOT here - `_load_paths`
+    # reads those, and an attachment sub-type nobody has seen still gets
+    # reported.
     "attachment/task_reminder",
     "attachment/skill_listing",
     "attachment/agent_listing_delta",
@@ -733,6 +736,15 @@ class JsonlSessionParser(Parser):
         # summaries, errors, and the agent surface (cli vs IDE).
         row_errors: list[str] = []
         unhandled: Counter[str] = Counter()
+        # In-file forks: `editedUserItemId` of every fork record seen, the turn
+        # each row id belongs to, and whether a re-send claim is still waiting
+        # for the turn the store wrote directly after its record.
+        fork_targets: list[str] = []
+        turn_by_row_id: dict[str, Message] = {}
+        pending_resent = False
+        # Forks the transcript can only show one end of — counted so the gap is
+        # a fact on the session instead of a silent absence.
+        fork_target_missing = 0
         compacted_summaries = 0
         agent_surfaces: set[str] = set()
         # Session-level pre-scan: does ANY row carry real text? A session of
@@ -878,6 +890,18 @@ class JsonlSessionParser(Parser):
                         files[fp] += 1
                     continue
 
+                if rtype == "resend-fork-notice":
+                    # The store's own record of an in-file fork: the user edited
+                    # a turn they had already sent and sent the new text again.
+                    # The row carries no turn of its own - only the id of the
+                    # turn that was edited - so both ends are settled once the
+                    # turns exist: the named turn below, the re-sent one at the
+                    # next turn this loop appends.
+                    eid = row.get("editedUserItemId")
+                    fork_targets.append(eid if isinstance(eid, str) else "")
+                    pending_resent = True
+                    continue
+
                 if rtype == "attachment" and isinstance(row.get("attachment"), dict):
                     # Several attachment kinds name a file the session opened or
                     # edited. The product models that as a touched path, so they
@@ -945,6 +969,12 @@ class JsonlSessionParser(Parser):
                             )
                         )
                 if text and not self.is_noise(text):
+                    # A re-send claim reaches only the turn written directly
+                    # after the fork record. Any turn takes it or clears it, so
+                    # a filtered or duplicated row cannot leave the flag live
+                    # for an unrelated turn further down the file.
+                    _resent_here = pending_resent
+                    pending_resent = False
                     key = (role, text)
                     if key in seen_ids:
                         continue  # the same turn mirrored into a companion file
@@ -1005,6 +1035,16 @@ class JsonlSessionParser(Parser):
                             subagent=sub_label,
                         )
                     )
+                    if role == "user":
+                        _turn = messages[-1]
+                        _rid = row.get("id")
+                        if isinstance(_rid, str) and _rid:
+                            # Fork records name turns by this id; keep the
+                            # first copy, since a companion file mirroring the
+                            # same row must not split the link across objects.
+                            turn_by_row_id.setdefault(_rid, _turn)
+                        if _resent_here:
+                            _turn.resent = True
 
         if len({m.at for m in messages if m.at}) > 1 and all(m.at for m in messages):
             messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
@@ -1052,6 +1092,19 @@ class JsonlSessionParser(Parser):
                     if m.role == "assistant" and not m.model:
                         m.model = top
 
+        # The other end of every fork: the turn the store named is the
+        # abandoned copy. It is a separate flag from `resent` because both hold
+        # of the same turn in most real sessions — editing the newest message
+        # again is how the product is used. A name matching no kept user turn
+        # is reported rather than dropped: the link is real, its target is not
+        # in this file.
+        for _tid in fork_targets:
+            _t = turn_by_row_id.get(_tid) if _tid else None
+            if _t is None:
+                fork_target_missing += 1
+                continue
+            _t.superseded = True
+
         notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
         if agent_surfaces:
             notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
@@ -1065,6 +1118,8 @@ class JsonlSessionParser(Parser):
             notes.append(f"unhandled_row:{_kind}={_n}")
         if len(_fresh) > 5:
             notes.append(f"unhandled_row_kinds:{len(_fresh)}")
+        if fork_target_missing:
+            notes.append(f"fork_target_missing:{fork_target_missing}")
         meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,

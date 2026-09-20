@@ -327,6 +327,13 @@ sampled away.
     turns reads them where they are. The same rule places a compaction divider by
     position (`after_messages`) rather than by timestamp, because 11 of the 14
     Codex sessions that have a divider put every row inside the same second.
+    The IDE family forks *inside* a file instead, and that one the reader is
+    shown: a record names the user turn the editor rewrote, and the transcript
+    marks both ends of it - the named copy as the abandoned version, the turn
+    written under the record as the re-send - without deleting either. Measured
+    over 77 such records in 7 real sessions: every record named a user turn in
+    the same file, and 63 of them named a turn that was itself a re-send, so
+    the two marks are separate flags rather than one label.
 26. **The pane geometry is official; the surfaces it frames are ours.** The
     adaptive directive gives the width classes, the partition count and the pane
     width, and `tests/test_official_panes.py` pins those against the vendored files
@@ -366,17 +373,14 @@ sampled away.
     surface through `peek_needs_reply`, which drives the "等你回复" count, the
     filter and the tooltip, so the probe would have added a second, drift-prone
     place to say the same thing. It is not in the product.
-32. **One row shape the stores really write is still unread, and says so.**
-    `resend-fork-notice` appears in 7 of 94 sampled sessions and carries no role,
-    so it falls out of the parse loop; Round 41 made that visible instead of
-    silent. It is the fork fact item 25 wants, seen from the other side.
-    (This entry used to also name `attachment`. Round 42 split that label by its
-    own sub-types and found it was twelve different things: nine kinds of
-    injected context, six kinds that name a file. The file-bearing ones are read
-    now - 47 paths across 94 sampled sessions - and the context ones are
-    declared per kind, so `attachment` is no longer a gap and was never the one
-    blob this entry described. The "33 of 104 sessions" figure here was also a
-    capped-sample artifact; the real count is 6,313 rows in 1,283 sessions.)
+32. **A fork record whose link leaves the file says so, and stops there.** The
+    transcript marks the two turns a `resend-fork-notice` names, but a claim that
+    cannot be placed is not carried onward: if the turn under the record never
+    became a turn at all (noise-filtered, or a mirror of one already kept) the
+    re-send mark is simply absent, and a record naming a turn this file does not
+    contain becomes a `fork_target_missing:N` note. Both happen in the shipped
+    fixture, where the sanitizer removed rows - 15 of its 17 records mark a
+    re-send, 14 mark the edited turn, and 3 report a missing target.
 
 ## How to check any of this yourself
 

@@ -590,6 +590,11 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
                 ),
                 **({"credits": m.credits} if m.credits is not None else {}),
                 **({"subagent": m.subagent} if m.subagent else {}),
+                # Which end of an in-file fork this turn is. Absent = no fork
+                # record touched it; both keys on one row mean the user re-sent
+                # this turn and then edited it again.
+                **({"resent": True} if m.resent else {}),
+                **({"superseded": True} if m.superseded else {}),
                 # Verbatim source beside the cleaned text (None = cleaning
                 # changed nothing); the cockpit offers a 原文 view off this.
                 **({"raw_text": m.raw_text} if m.raw_text else {}),

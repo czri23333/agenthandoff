@@ -86,6 +86,10 @@ export interface TranscriptMessage {
   tokens_estimated?: number;
   /** Sub-agent that produced this turn (absent = main conversation). */
   subagent?: string;
+  /** This turn is the re-sent copy of a turn the user edited. */
+  resent?: boolean;
+  /** The user edited this turn and sent a new copy; this one is the old version. */
+  superseded?: boolean;
   /** Verbatim source before cleaning (absent = cleaning changed nothing). */
   raw_text?: string;
   /** role="history" markers: the thread the earlier turns live in. */

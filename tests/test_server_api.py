@@ -530,3 +530,43 @@ def test_git_info_reads_head_instead_of_spawning_git(tmp_path):
     assert here is not None
     if "branch" in here:
         assert here["branch"]
+
+
+def test_detail_marks_which_copy_of_a_forked_turn_is_live(client, monkeypatch):
+    """The page must say which of two similar turns replaced the other.
+
+    The parser knows this from the store's own record; the transcript is the
+    surface the user reads, so the two flags have to survive into its rows -
+    and stay absent on every turn a fork record never touched.
+    """
+    from agent_handoff import server
+    from agent_handoff.model import Message, RawSession, SessionMeta
+
+    raw = RawSession(
+        meta=SessionMeta(cli="workbuddy", session_id="sess_fork", title="t", cwd="D:/demo"),
+        messages=[
+            Message(role="user", text="v1", at="2026-08-31T00:00:00+00:00", superseded=True),
+            Message(role="assistant", text="a1", at="2026-08-31T00:00:01+00:00"),
+            Message(role="user", text="v2", at="2026-08-31T00:00:02+00:00", resent=True),
+        ],
+    )
+
+    class StubParser:
+        cli = "workbuddy"
+
+        def usage(self, session_id):
+            return {"models": [], "totals": {}}
+
+        def last_request_tokens(self, session_id):
+            return None
+
+    monkeypatch.setattr(server.app, "_raw_or_404", lambda cli, sid: raw)
+    monkeypatch.setattr(server.app, "_parser_or_404", lambda cli: StubParser())
+    rows = client.get("/api/sessions/workbuddy/sess_fork/detail").json()["messages"]
+    by_text = {r["text"]: r for r in rows}
+    assert by_text["v1"].get("superseded") is True
+    assert by_text["v2"].get("resent") is True
+    # Absence is the store saying nothing, so the keys must not be invented.
+    assert "resent" not in by_text["v1"]
+    assert "superseded" not in by_text["v2"]
+    assert "superseded" not in by_text["a1"] and "resent" not in by_text["a1"]

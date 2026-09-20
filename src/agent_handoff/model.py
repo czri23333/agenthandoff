@@ -134,6 +134,16 @@ class Message:
     # or the dialect has no trimmable wrappers — either way text IS verbatim.
     # Lets the cockpit offer a 原文 view without re-reading the store.
     raw_text: str | None = None
+    # Which end of an in-file fork this turn is. A store writes a record when
+    # the user edits a turn they had already sent: the edited turn stays in the
+    # transcript as the abandoned copy (`superseded`) and the new text follows
+    # as a fresh turn (`resent`). Measured over 77 such records in 7 real
+    # sessions: every one names an earlier user turn in the same file and sits
+    # directly above the re-sent copy. Both are true of the same turn in 63 of
+    # those 77 — repeatedly editing the newest message is how the product is
+    # used — which is why these are two flags and not one label.
+    resent: bool = False
+    superseded: bool = False
 
 
 @dataclass

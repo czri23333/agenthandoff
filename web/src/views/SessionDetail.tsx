@@ -83,6 +83,10 @@ function TranscriptRow({
     thinking: string;
     toolCall: string;
     subagentCall: string;
+    forkResent: string;
+    forkResentTip: string;
+    forkSuperseded: string;
+    forkSupersededTip: string;
     agentMessage: string;
     openSubagent: string;
   };
@@ -169,6 +173,28 @@ function TranscriptRow({
     </button>
   ) : null;
 
+  // The two ends of a fork the store recorded inside this transcript. Listed
+  // rather than branched: 63 of the 77 records on this machine's stores name a
+  // turn that is itself a re-send, so two chips on one row is the ordinary
+  // case, not an edge one.
+  const forkChips = [
+    m.resent ? { glyph: "↩", text: labels.forkResent, tip: labels.forkResentTip } : null,
+    m.superseded
+      ? { glyph: "⊘", text: labels.forkSuperseded, tip: labels.forkSupersededTip }
+      : null,
+  ]
+    .filter((c): c is { glyph: string; text: string; tip: string } => c !== null)
+    .map((c) => (
+      <span
+        key={c.text}
+        className="ah-faint font-mono text-[11px]"
+        title={c.tip}
+        dir="auto"
+      >
+        {c.glyph} {c.text}
+      </span>
+    ));
+
   // — user: right-aligned bubble —
   if (m.role === "user") {
     return (
@@ -179,6 +205,7 @@ function TranscriptRow({
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="ah-time-tip font-mono" title={timeTipFull}>{durTip || timeTip}</span>
+            {forkChips}
             {rawToggle}
           </div>
         </div>
@@ -769,6 +796,10 @@ export default function SessionDetail({
                           thinking: t("thinking"),
                           toolCall: t("toolCall"),
                           subagentCall: t("subagentCall"),
+                          forkResent: t("forkResent"),
+                          forkResentTip: t("forkResentTip"),
+                          forkSuperseded: t("forkSuperseded"),
+                          forkSupersededTip: t("forkSupersededTip"),
                           agentMessage: t("agentMessage"),
                           openSubagent: t("openSubagent"),
                         }}

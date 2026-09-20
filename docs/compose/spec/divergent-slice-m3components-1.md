@@ -1490,6 +1490,49 @@ path it should not claim.
 | not run | the nine-rule browser audit: no `web/` file here, `dist` byte-identical to 947921e |
 | still open | `resend-fork-notice` is reported and still unread - it is the fork fact limitations item 25 wants, and reading it is a parser change with its own design question |
 
+### Round 43 — the last unread row shape turned out to be a fork the file keeps
+
+Round 42 left one name on the report surface, and the plan was to read it:
+`resend-fork-notice`. It appears in 7 of the 131 sessions probed across the
+family stores, carries no role, and is what limitations item 25's "a forked
+transcript is linked, not joined" needed from the other side.
+
+**What the row actually says** — measured over all 77 records on this machine,
+in 7 workbuddy sessions, before any code was written:
+
+| Question | Answer (2026-09-20) |
+|---|---|
+| fields it carries | `id`, `timestamp`, `type`, `cwd`, `editedUserItemId`, and `parentId` on 44 of 77 — nothing else, in either the fixtures or the live store |
+| does `editedUserItemId` name a turn in the same file | **77 of 77**, and always a `role: user` message |
+| what sits directly below the record | a user message, **77 of 77**; its text differs from the named turn's in **77 of 77** — this is an edited re-send, not a repeat |
+| is a turn ever edited twice | no: 0 of 77 targets named twice in one file |
+| does the 3-of-27 dangling links in the fixture mean something | no — the sanitizer deleted those rows. The live store has no dangling link. A fixture-only inference would have been wrong here, so the shape was re-measured on real data before designing |
+
+So the fact is: the user rewrote a turn they had already sent; the abandoned copy
+stays in the file, and the record sits above the new one. That is item 25's rule
+applied *inside* one transcript, where both ends are provable rather than linked
+across two pages.
+
+**What was built.** `_load_paths` reads the record instead of reporting it: the
+named turn becomes `Message.superseded`, the turn written directly under it
+becomes `Message.resent`, and the transcript shows both (`↩ 改后重发`,
+`⊘ 已被改写`) with the explanation in the tooltip. Neither copy is deleted — the
+store kept both, so the cockpit shows both. A re-send claim is positional and
+*bounded*: it applies to the next turn that reaches the transcript and is spent
+if any turn intervenes, because reaching past an assistant reply would mark a
+message the record never named.
+
+| Claim | Measured (2026-09-20) |
+|---|---|
+| first attempt, and why it is not the shipped one | one `fork: str` field. It marked 14 of 77 re-sends: a turn that was itself a re-send got overwritten by its later `superseded` label, so 63 facts vanished silently. Caught by counting marks against records on the real store — no test covered it. Two orthogonal booleans replaced it, and the overwrite case now has its own test |
+| parser layer, real store | 7 sessions, 77 records → `resent` **77**, `superseded` **77**, both on **63** turns, `fork_target_missing` **0**, and `unhandled_row:resend-fork-notice` gone from **7/7** sessions (before: present in all 7) |
+| API layer, the one the page maps over | `/api/sessions/workbuddy/<sid>/detail` over the same 7 sessions: 4,178 rows, `resent` **77**, `superseded` **77**, both **63**, mismatched sessions **0** — the same numbers as the parser, so no layer drift |
+| rendered DOM (in-app browser, real store, 19-row session) | 5 `↩ 改后重发` + 5 `⊘ 已被改写` over 7 user rows — 4 with both, 1 with only the re-send, 1 with only the abandoned marker; the tooltip text read back verbatim |
+| fixture layer | the sanitizer's own holes reproduce the bounded reach: 17 records → 15 re-send marks, 14 edited-turn marks, `fork_target_missing:3`. Asserted as 15/14/3, not rounded up to 17 |
+| report surface now | **empty** — no row shape the live stores write is unread, so the next new shape will be the only thing the note says |
+| gates | 6 parser tests + 1 server test added; suite **527 passed, 2 skipped**; `ruff check src tests` clean; `scripts/ci_local.py --with-frontend` **10/10** (tsc + vite build + the nine-rule audit) |
+| not verified | the screenshot path: the in-app browser reported a 0×0 hidden viewport, so the visual check is DOM text + the CI audit, not a pixel image |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
