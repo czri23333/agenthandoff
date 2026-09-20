@@ -574,6 +574,17 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
                 "text": m.text,
                 "at": m.at,
                 **({"dur_ms": _d} if _d is not None else {}),
+                # The store's own split of its own total. Paired with `_own`
+                # deliberately: a timestamp-derived total is a different clock,
+                # and a first-token figure against it would read as a fraction
+                # of a number the store never measured.
+                **(
+                    {"ttft_ms": m.ttft_ms}
+                    if _own is not None
+                    and isinstance(m.ttft_ms, int)
+                    and 0 <= m.ttft_ms < 86400 * 1000
+                    else {}
+                ),
                 # per-turn billing: which model answered, what it cost in tokens
                 **({"model": m.model} if m.model else {}),
                 **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),

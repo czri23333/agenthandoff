@@ -72,6 +72,12 @@ export interface TranscriptMessage {
   at: string | null;
   /** ms since the previous turn (store-clock cost proxy where tokens are absent). */
   dur_ms?: number;
+  /**
+   * ms this turn waited for its first answer token, from the store's own
+   * clock. Only ever sent beside a `dur_ms` the store measured, because it is
+   * a part of that total rather than a second one.
+   */
+  ttft_ms?: number;
   /** Which model answered this turn (assistant turns only, when the store records it). */
   model?: string;
   /** Input tokens this turn cost (only when the store records it). */

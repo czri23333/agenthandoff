@@ -345,11 +345,24 @@ sampled away.
     *vertical* partition this web layout does not have; the rail's 96dp and 44dp
     describe a container the collapsed form does not render). All three are written
     down beside the tokens rather than dressed up as used.
-27. **The store times the first token; nothing spends it.** `task_complete` carries
-    `time_to_first_token_ms` on 174 of its 218 rows (443 ms … 11,262 ms) and no field,
-    column or fact reads it. `duration_ms` is now spent (the turn's `dur_ms`), but the
-    other half of the same record is what separates a turn that was slow to *think*
-    from one that was slow to *stream*, and this reader cannot yet say which happened.
+27. **The first-token split is spent, and only where a store writes one.** A
+    codex `task_complete` times both the turn and its first token. Re-measured
+    here on 2026-09-20: **179 of 223** rows carry
+    `time_to_first_token_ms` (443 ms … 11,262 ms), and **0 of the 179** exceed
+    that row's own `duration_ms` — so the reader spends it as a *part* of that
+    total, never as a second one. It surfaces in the transcript row's hover
+    tip: `+35.1s · 首字 4.3s / 输出 30.8s`, measured in a real browser on a
+    live session, where the tip used to say only `+35.1s`. Two boundaries
+    stand. (a) The tip is the only surface: render rule #7 keeps billing out
+    of the message area, so this rides the same hover as the total and is not
+    a new chip. (b) A turn whose completion wrote no split shows the total
+    alone, and a total the server *derived* from adjacent timestamps never
+    borrows a store-written split — `app.py` requires the store's own
+    `duration_ms` beside it, and `test_detail_carries_the_first_token_half_only_of_its_own_total`
+    names that case. Of the 14 fixture stores, 3 time a first token at all:
+    codex per turn (the tip), zcode and CherryStudio per model (the usage
+    table's `ttft` column, spent since well before this item); the other 11
+    write no such number.
 31. **Most sessions in the cockpit cannot have their ending proven, and never
     could.** Of the 3,322 sessions on this machine, **2,710** belong to stores
     whose parser never builds an `Interruption` at all - qoder-ide (2,259),

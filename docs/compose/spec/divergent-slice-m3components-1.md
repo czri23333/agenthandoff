@@ -1566,6 +1566,24 @@ this machine carry a `parentId`. Measured what that means:
 | falsified before committing | the agreement test passes untouched, and fires when one below-row's parent is moved off (`…jsonl:148: the turn below is elsewhere`) |
 | coverage of the shipped rule | the 33 records with no `parentId` are still position-only — that is the store's limit, recorded in limitations item 32, not a claim this reader can fix |
 
+### Round 46 — the store's other clock is spent beside the first
+
+`task_complete` reports two numbers and the reader spent one. `duration_ms` became
+the turn's `dur_ms` long ago; `time_to_first_token_ms` sat beside it unread, which
+is limitations item 27. Spending it is what makes a turn legible as *slow to start*
+rather than *slow to finish*.
+
+| Claim | Measured (2026-09-20) |
+|---|---|
+| does the store write it | **179 of 223** `task_complete` rows on this machine (443 ms … 11,262 ms); **56 of 56** in the sanitized codex fixture |
+| is it a part of the total, or a second total | 0 of the 179 live rows, and 0 of the 56 fixture rows, exceed their own `duration_ms`. It is spent as a part; nothing about it is additive |
+| where it is spent | the transcript row's hover tip, beside the total: `+35.1s · 首字 4.3s / 输出 30.8s`. Render rule #7 keeps billing out of the message area, so no chip was added and the visible text is still `35.1s` |
+| where it must not be spent | a `dur_ms` the server *derived* from adjacent timestamps is a different clock, so `app.py` pairs `ttft_ms` only with a store-measured total. The row cannot show a split of a number the store never wrote |
+| real-machine read | the live cockpit in a browser, `#/session/codex/01a09918…`: 1 element carries the split in its `title`, and its ms reconcile with the API's `{ttft_ms: 4254, dur_ms: 35075}` to the millisecond. A second check over 13 live sessions found 15 split rows, 0 bad pairs, and 0 in a workbuddy session of 2,551 rows — absent where the store is silent |
+| falsified before committing, three ways | stop the reader spending it → 3 tests red; emit it beside a derived total → the server test red; attribute it to a neighbour when `turn_id` matches nothing → 3 tests red, including one that predates this round |
+| suite | **548 collected / 546 passed / 2 skipped**; the 5 new tests are 5 passed + 543 deselected under a `-k` of their own names. Headline totals are not comparable across rounds: fixture-driven `parametrize("cli", PRESENT)` moves with the environment, so the derived form (543 + 5) is what carries here |
+| what item 27 now says | not "nothing spends it" but "it is spent where a store writes one": 3 of the 14 fixture stores time a first token (codex per turn, zcode and CherryStudio per model), 11 write no such number, and the 44 codex rows without it show the total alone |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

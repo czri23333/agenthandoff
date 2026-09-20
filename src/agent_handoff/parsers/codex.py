@@ -544,10 +544,17 @@ class CodexParser(Parser):
                     # guess which row owned the request.
                     duration = completion.get("duration_ms")
                     turn_id = str(completion.get("turn_id") or "").strip()
-                    if isinstance(duration, int) and turn_id in last_assistant:
-                        answer = last_assistant[turn_id]
-                        if answer.dur_ms is None:
+                    ttft = completion.get("time_to_first_token_ms")
+                    answer = last_assistant.get(turn_id)
+                    if answer is not None:
+                        if isinstance(duration, int) and answer.dur_ms is None:
                             answer.dur_ms = duration
+                        # Same turn, same attribution rule: the store splits the
+                        # wall clock it just reported into "waited" and
+                        # "streamed". A row that names no answer here gives up
+                        # both halves together rather than crediting a neighbour.
+                        if isinstance(ttft, int) and answer.ttft_ms is None:
+                            answer.ttft_ms = ttft
                 elif ptype == "turn_aborted":
                     # The product's own record that the user stopped a turn.
                     aborts.append(payload if isinstance(payload, dict) else {})

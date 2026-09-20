@@ -54,6 +54,10 @@ function guessLinkedCli(_id: string, fromCli: string): string {
   return fromCli;
 }
 
+function fmtMs(v: number): string {
+  return v < 1000 ? `${v}ms` : `${(v / 1000).toFixed(1)}s`;
+}
+
 /**
  * Official-grade transcript row (WorkBuddy asar ground truth):
  * - user: right-aligned bubble (M3E large radius, sender corner cut)
@@ -87,6 +91,8 @@ function TranscriptRow({
     forkResentTip: string;
     forkSuperseded: string;
     forkSupersededTip: string;
+    firstToken: string;
+    streaming: string;
     agentMessage: string;
     openSubagent: string;
   };
@@ -114,14 +120,19 @@ function TranscriptRow({
   // ("usage = header waterlevel hover") — but it is no longer a chip standing
   // in the transcript. It used to be: `⏱ 1.2s` sat beside every assistant
   // message that had no token rows, which is the deviation this closes.
-  const durTip =
-    typeof m.dur_ms === "number"
-      ? m.dur_ms < 1000
-        ? `${m.dur_ms}ms`
-        : `${(m.dur_ms / 1000).toFixed(1)}s`
-      : "";
+  const durMs = typeof m.dur_ms === "number" ? m.dur_ms : null;
+  const ttftMs = typeof m.ttft_ms === "number" ? m.ttft_ms : null;
+  const durTip = durMs !== null ? fmtMs(durMs) : "";
   const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
-  const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
+  // Where the store split its own total, the tip says which half was waiting
+  // for the first token and which was spent answering — the difference between
+  // a turn that was slow to start and one that was slow to finish.
+  const splitTip =
+    durMs !== null && ttftMs !== null
+      ? ` · ${labels.firstToken} ${fmtMs(ttftMs)} / ${labels.streaming} ` +
+        fmtMs(Math.max(0, durMs - ttftMs))
+      : "";
+  const timeTipFull = durTip ? `${timeTip} · +${durTip}${splitTip}` : timeTip;
 
   // Cost chip priority: model+tokens > model+credits > model+≈estimate >
   // model > tokens > credits > measured duration. Turns without vendor
@@ -800,6 +811,8 @@ export default function SessionDetail({
                           forkResentTip: t("forkResentTip"),
                           forkSuperseded: t("forkSuperseded"),
                           forkSupersededTip: t("forkSupersededTip"),
+                          firstToken: t("firstToken"),
+                          streaming: t("streaming"),
                           agentMessage: t("agentMessage"),
                           openSubagent: t("openSubagent"),
                         }}

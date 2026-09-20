@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agent_handoff.fixtures import cli_dir
 from agent_handoff.model import Interruption, Message
 from agent_handoff.parsers.codex import CodexParser
 from agent_handoff.summarize import summarize
@@ -767,6 +768,69 @@ def test_a_completion_duration_is_dropped_without_a_turn_match(tmp_path):
     assert raw.messages[0].dur_ms is None
 
 
+def test_the_stores_first_token_split_lands_on_the_turn_it_measured(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("assistant", "answer", turn_id="t1"),
+            _row(
+                "event_msg",
+                {
+                    "type": "task_complete",
+                    "turn_id": "t1",
+                    "duration_ms": 5000,
+                    "time_to_first_token_ms": 900,
+                },
+            ),
+        ],
+    )
+    assert raw.messages[0].dur_ms == 5000
+    assert raw.messages[0].ttft_ms == 900
+
+
+def test_a_first_token_time_is_dropped_without_a_turn_match(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("assistant", "answer", turn_id="t1"),
+            _msg("assistant", "second", turn_id="t2"),
+            _row(
+                "event_msg",
+                {"type": "task_complete", "turn_id": "nope", "time_to_first_token_ms": 900},
+            ),
+        ],
+    )
+    assert [m.ttft_ms for m in raw.messages] == [None, None]
+
+
+def test_the_first_completion_wins_both_halves_of_the_split(tmp_path):
+    _parser, raw = _load(
+        tmp_path,
+        [
+            _msg("assistant", "answer", turn_id="t1"),
+            _row(
+                "event_msg",
+                {
+                    "type": "task_complete",
+                    "turn_id": "t1",
+                    "duration_ms": 5000,
+                    "time_to_first_token_ms": 900,
+                },
+            ),
+            _row(
+                "event_msg",
+                {
+                    "type": "task_complete",
+                    "turn_id": "t1",
+                    "duration_ms": 200,
+                    "time_to_first_token_ms": 50,
+                },
+            ),
+        ],
+    )
+    assert (raw.messages[0].dur_ms, raw.messages[0].ttft_ms) == (5000, 900)
+
+
 def test_failed_turns_and_collaboration_mode_are_notes(tmp_path):
     _parser, raw = _load(
         tmp_path,
@@ -839,3 +903,29 @@ def test_summarize_does_not_duplicate_a_pending_step(tmp_path):
     ]
     assert len(pending_steps) == 1
     assert pending_steps[0] == "[pending from interrupted session] one more thing"
+
+
+def test_the_shipped_codex_store_times_its_first_tokens():
+    """The fixture's `task_complete` rows carry a split clock; the reader spends it.
+
+    Asserted against the sanitized store rather than the rows above because the
+    store is what decides whether this feature has any data at all: if the field
+    stops being read, the count goes to zero and the check that its every value
+    sits inside that turn's own `duration_ms` goes with it.
+    """
+    root = cli_dir("codex") / "sessions"
+    parser = CodexParser(root)
+    split = []
+    for meta in parser.list_sessions():
+        raw = parser.load(meta.session_id)
+        if raw is None:
+            continue
+        split.extend((m.dur_ms, m.ttft_ms) for m in raw.messages if m.ttft_ms is not None)
+    assert len(split) == 51, (
+        "the shipped codex fixture records first-token time on 51 of its turns; "
+        f"the reader surfaced {len(split)}"
+    )
+    assert all(d is not None and t <= d for d, t in split), (
+        "a first-token figure outside its turn's own duration is a different "
+        "clock's number, not a part of this one"
+    )

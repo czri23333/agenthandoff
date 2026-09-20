@@ -570,3 +570,57 @@ def test_detail_marks_which_copy_of_a_forked_turn_is_live(client, monkeypatch):
     assert "resent" not in by_text["v1"]
     assert "superseded" not in by_text["v2"]
     assert "superseded" not in by_text["a1"] and "resent" not in by_text["a1"]
+
+
+def test_detail_carries_the_first_token_half_only_of_its_own_total(client, monkeypatch):
+    """A split clock rides the row whose total the store measured.
+
+    `dur_ms` can come from two places: the store's own figure, or arithmetic on
+    adjacent timestamps. Only the first has a half to report, so the second
+    must not get a `ttft_ms` that would read as a fraction of a number the
+    store never wrote.
+    """
+    from agent_handoff import server
+    from agent_handoff.model import Message, RawSession, SessionMeta
+
+    raw = RawSession(
+        meta=SessionMeta(cli="codex", session_id="sess_ttft", title="t", cwd="D:/demo"),
+        messages=[
+            Message(role="user", text="go", at="2026-08-31T00:00:00+00:00"),
+            Message(
+                role="assistant",
+                text="measured",
+                at="2026-08-31T00:00:05+00:00",
+                dur_ms=5000,
+                ttft_ms=900,
+            ),
+            Message(
+                role="assistant",
+                text="derived",
+                at="2026-08-31T00:00:11+00:00",
+                ttft_ms=900,
+            ),
+        ],
+    )
+
+    class StubParser:
+        cli = "codex"
+
+        def usage(self, session_id):
+            return {"models": [], "totals": {}}
+
+        def last_request_tokens(self, session_id):
+            return None
+
+    monkeypatch.setattr(server.app, "_raw_or_404", lambda cli, sid: raw)
+    monkeypatch.setattr(server.app, "_parser_or_404", lambda cli: StubParser())
+    rows = client.get("/api/sessions/codex/sess_ttft/detail").json()["messages"]
+    by_text = {r["text"]: r for r in rows}
+    assert (by_text["measured"].get("dur_ms"), by_text["measured"].get("ttft_ms")) == (
+        5000,
+        900,
+    )
+    assert "ttft_ms" not in by_text["derived"], (
+        "this row's total is timestamp arithmetic; a first-token figure "
+        "beside it claims a split the store never measured"
+    )

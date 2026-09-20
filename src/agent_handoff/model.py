@@ -129,6 +129,14 @@ class Message:
     # where token billing is absent. Server fills it from timestamps when the
     # store records none.
     dur_ms: int | None = None
+    # When the first answer token arrived, from the store's own clock (codex
+    # `task_complete.time_to_first_token_ms`). `dur_ms` alone cannot tell a turn
+    # that was slow to start from one that was slow to finish, and this is the
+    # half that says. Measured on this machine's codex store: 179 of 223
+    # `task_complete` rows carry it, always beside `duration_ms`, and none of
+    # the 179 exceeds it — so it is read as a part of that turn's wall clock,
+    # never as a second total. Absent wherever the store did not write it.
+    ttft_ms: int | None = None
     # The turn exactly as the store holds it, before clean_text/is_noise
     # trimming. None means the parser kept everything (nothing was trimmed)
     # or the dialect has no trimmable wrappers — either way text IS verbatim.
