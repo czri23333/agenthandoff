@@ -68,21 +68,36 @@ sampled away.
 4. **Single-binary cockpit is unverified.** `docs/portable-single-exe.md` is a
    build recipe that has never been executed (`dist/` does not exist, PyInstaller
    is not installed here). Treat it as a proposal.
-5. **The international QoderWake has no store to sample here.** QoderWake reads
-   two stores — team-group chats in SQLite under `~/.qoderwake*`, worker
-   transcripts in the shared qoder store (`~/.qoder/projects`, `~/.qoder-cn/…`).
-   The fixture writer mirrors both now, keeping the relative shape the parser
-   derives them from, and `qoderwake-cn` is fixture-proven. `qoderwake` is not:
-   this machine has no `~/.qoderwake/data/store` and no `~/.qoder/projects`, so
-   there is nothing to sample. Its reader is the CN reader with a different store
-   name, which is evidence, but "the same code with a different constant" is not
-   a fixture.
+5. **The international QoderWake's own half has no store to sample here.**
+   QoderWake reads two stores — team-group chats in SQLite under `~/.qoderwake*`,
+   worker transcripts in the shared qoder store (`~/.qoder/projects`,
+   `~/.qoder-cn/…`). The fixture writer mirrors both now, keeping the relative
+   shape the parser derives them from, and `qoderwake-cn` is fixture-proven.
+   `qoderwake` is not, and the reason is narrower than this item used to say:
+   re-measured 2026-09-20, `~/.qoder/projects` **does** exist on this machine and
+   holds **4,211** `.jsonl` transcripts — this item previously claimed it did
+   not, which was simply stale. Those transcripts are not lost to the product:
+   the `qoder-ide` reader lists **2,259** sessions out of that same directory.
+   What is missing is the daemon half — `~/.qoderwake/data/store` is absent — so
+   `qoderwake` itself yields 0 sessions and there is nothing to sanitize. One
+   reading to keep in mind: `doctor` prints `readable yes · parses yes (0)` for
+   it, because `readable` measures *either* half (the shared one has content) and
+   `parses` measures what the wake reader itself returns (nothing). Neither field
+   is false; together they are easy to misread as a contradiction.
 6. **`claude` parser has never parsed Claude Code data.** Written against
    documented JSONL shapes; the family parser is shared by five CLIs that *are*
    proven, so it probably works — "probably" is what this list exists to expose.
-   The same is true of `codebuddy-cn`, `qoder-ide` (roadmap: its sessions live in
-   an Electron leveldb) and `qwenwork-app` (the store exists here with zero
-   message rows in it).
+   `codebuddy-cn` is the same case: probed 2026-09-20, this machine has no store
+   for it, so there is nothing to parse. `qwenwork-app` is a different shape of
+   the same gap — its store exists, opens, and holds **0** message rows, so the
+   reader has been run against the real file and found nothing in it to prove.
+   This item also used to name `qoder-ide`, with "its sessions live in an
+   Electron leveldb" as the reason. Measured 2026-09-20 that was stale twice
+   over: the reader points at `~/.qoder/projects`, lists **2,259** `.jsonl`
+   sessions, and **25 of 25** sampled ones load with dialogue (**14,487**
+   messages between them). What `qoder-ide` still lacks is a *fixture* — the
+   shipped set carries `qodercn-ide` and no `qoder-ide`, so CI cannot re-run what
+   this machine proves.
 7. **The session list is now profiled into stages, and the first paint is the
    stage that was slow.** Search went 15.3 s → 7 ms (warm, in-process) / 0.39 s
    (fresh process, warm disk cache) on the maintainer's machine. The list was
