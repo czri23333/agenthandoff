@@ -381,6 +381,18 @@ sampled away.
     contain becomes a `fork_target_missing:N` note. Both happen in the shipped
     fixture, where the sanitizer removed rows - 15 of its 17 records mark a
     re-send, 14 mark the edited turn, and 3 report a missing target.
+33. **The brief carries the abandoned copy of a fork, unannotated.** The cockpit's
+    transcript marks both ends of a fork the store records (item 25), but the
+    handoff brief is a verbatim surface: `build_full_transcript` quotes every
+    turn it kept, so a turn the user retracted rides into the successor's
+    context with no marker. Measured on this machine's 7 sessions with fork
+    records: **77 of 4,096** turns in the lossless brief and **4 of 109** in the
+    budgeted tail are abandoned copies, and **0** of them reach `<rules>` (the
+    directives a successor actually obeys). The replacement sits directly below
+    each one, oldest-first, so the live instruction is always present; the cost
+    is a reader who must notice which of two similar turns came later. Annotating
+    it means putting the parser's own words inside quoted dialogue, which is the
+    one thing a byte-faithful brief is not allowed to do.
 
 ## How to check any of this yourself
 

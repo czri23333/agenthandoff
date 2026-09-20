@@ -1530,6 +1530,7 @@ message the record never named.
 | rendered DOM (in-app browser, real store, 19-row session) | 5 `↩ 改后重发` + 5 `⊘ 已被改写` over 7 user rows — 4 with both, 1 with only the re-send, 1 with only the abandoned marker; the tooltip text read back verbatim |
 | fixture layer | the sanitizer's own holes reproduce the bounded reach: 17 records → 15 re-send marks, 14 edited-turn marks, `fork_target_missing:3`. Asserted as 15/14/3, not rounded up to 17 |
 | report surface now | **empty** — no row shape the live stores write is unread, so the next new shape will be the only thing the note says |
+| what the brief carries (checked, deliberately not changed) | the lossless brief quotes **77 of its 4,096** turns as abandoned copies and the budgeted tail **4 of 109**; **0** reach `<rules>`. Annotating them would put the parser's words inside quoted dialogue, so item 33 records the exposure instead |
 | gates | 6 parser tests + 1 server test added; suite **527 passed, 2 skipped**; `ruff check src tests` clean; `scripts/ci_local.py --with-frontend` **10/10** (tsc + vite build + the nine-rule audit) |
 | not verified | the screenshot path: the in-app browser reported a 0×0 hidden viewport, so the visual check is DOM text + the CI audit, not a pixel image |
 
