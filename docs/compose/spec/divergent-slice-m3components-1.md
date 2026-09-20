@@ -1650,6 +1650,19 @@ and `sweep_row_shapes.py` exits **1** on a hand-made store containing an unknown
 `qoder-ide` stores — the checker was demonstrated able to fail before it was
 trusted to pass. `scripts/ci_local.py`: 8/8 gates green.
 
+**Corroboration, three instruments that share no code path.** After the round shipped, the parallel
+full-store sweep (`full_sweep2.py`, one detached child per CLI) finished `qoder-ide`:
+**2,259 listed / 2,259 loaded / 0 problems** in 9,795 s -- the sampled "25 of 25 load" in
+`matrix.UNPROVEN` is now a full-store number, and every listed session of the largest store on this
+machine (68 % of its 3,322) is proven to parse. Its note tally: `invoked_skills` 2,
+`hook_system_message` 2, `auto_mode_exit` 1, `plan_mode_reentry` 1 = **6 occurrences, exactly the four
+shapes above and nothing else** -- identical to the row-level census (which never constructs a
+session). The v1 whole-machine sweep reported 5, one fewer `invoked_skills`; **the cause is not
+established** -- the store is live and grew between those runs, and v1's per-session cap of 5 fresh
+kinds could also hide one -- but ±1 row of a shape already classified does not change the shape set.
+Three different instruments, one set of four: the store is closed, and Round 41's 131-session sample
+had simply never met these.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

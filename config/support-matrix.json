@@ -131,7 +131,7 @@
       "empty_store": false,
       "status": "unverified",
       "notes": [
-        "the store is here and reads (`~/.qoder/projects`, 2,259 sessions listed and 25 of 25 sampled ones load dialogue), but no fixture was ever taken from it, so CI cannot re-run it: run `python scripts/sanitize_fixtures.py --cli qoder-ide`"
+        "the store is here and reads (`~/.qoder/projects`, 2,259 sessions listed and all 2,259 load -- full-store sweep, 2026-09-20, 0 failures; 25 of 25 sampled ones also carry dialogue), but no fixture was ever taken from it, so CI cannot re-run it: run `python scripts/sanitize_fixtures.py --cli qoder-ide`"
       ]
     },
     {
