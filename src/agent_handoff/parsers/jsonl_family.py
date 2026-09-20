@@ -222,12 +222,34 @@ ROLELESS_ROW_TYPES: frozenset[str] = frozenset({
     "attachment/goal_state",
     "attachment/relevant_memories",
     "attachment/hook_error_during_execution",
+    # Found by asking the whole store instead of a sample (spec Round 48): the
+    # 131-session sample behind the list above had never met these three.
+    # Counted 2026-09-20 over every jsonl this store holds - 4,214 files,
+    # 328,530 rows - as invoked_skills 2, hook_system_message 2, auto_mode_exit 1
+    # rows. Two are excused for what they are, not for being rare:
+    # `auto_mode_exit` is an empty `{"type": ...}` marker, and
+    # `hook_system_message` is a hook printing at the user, i.e. the same
+    # side-channel family as `hook_output` above. `invoked_skills` is the one
+    # carrying real content (skill names plus their SKILL.md text): it is
+    # excused because a skill file the harness loaded is not a file the session
+    # worked on, so it must not join the touched-paths list - the fact that no
+    # surface shows "which skills ran" is recorded in docs/limitations.md
+    # instead of being quietly dropped here.
+    "attachment/invoked_skills",
+    "attachment/hook_system_message",
+    "attachment/auto_mode_exit",
 })
 
 #: Attachment sub-types whose payload names files the product models as touched.
 #: The three `plan_*` kinds were found by reporting attachments per sub-type:
 #: as one `attachment` blob they were invisible, and all three carry
 #: `planFilePath`.
+#:
+#: `plan_mode_reentry` is the fourth, and it was missed: the full sweep met it on
+#: 2026-09-20 and it was falling through as unread while its siblings were read.
+#: Its payload is `{"type": "plan_mode_reentry", "planFilePath": ...}` - the same
+#: key `_attachment_files` already lifts - so excluding it under-reported the
+#: files a planning session touched.
 FILE_BEARING_ATTACHMENTS = frozenset({
     "file",
     "edited_text_file",
@@ -235,6 +257,7 @@ FILE_BEARING_ATTACHMENTS = frozenset({
     "plan_file_reference",
     "plan_mode",
     "plan_mode_exit",
+    "plan_mode_reentry",
 })
 
 #: A store's own status word -> the end state it proves. Only the two stores

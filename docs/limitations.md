@@ -162,9 +162,16 @@ sampled away.
     oversight — but a functional limit from a user's point of view.
 13. **Everything rests on one user, one OS family, one toolchain.** CI covers
     3 OSes × 3 Pythons for code paths that are unit-testable, and the fixtures
-    make that part reproducible — but the store *shapes* were sampled from a
-    single machine, and a locale, filesystem or permission model unlike this one
-    is still untested ground.
+    make that part reproducible — but the store *shapes* come from one machine.
+    That basis is now partly measured instead of sampled: the sweep that asked
+    *every* file of one live store (this machine's `qoder-ide`, **4,214 jsonl /
+    328,530 rows** — 100 % of the rows that store holds, spec Round 48) found four
+    sub-types the 131-session sample had never met, one of which was a real
+    under-reporting bug (item 34). The other readers are still sample-backed, and
+    "complete" is therefore machine-relative:
+    `python scripts/sweep_row_shapes.py --cli <id>` re-asks the question of
+    whoever's store you point it at, and exits 1 on any shape nobody classified.
+    A locale, filesystem or permission model unlike this one is untested ground.
 14. **Not published on PyPI** (the badge was removed for that reason); install
     instructions work from source only.
 15. **The focus sweep is synthetic and single-browser.** `--focus` calls
@@ -443,6 +450,30 @@ sampled away.
     it means putting the parser's own words inside quoted dialogue, which is the
     one thing a byte-faithful brief is not allowed to do.
 
+34. **Nothing shows which skills a session invoked, and `plan_mode` siblings
+    were only half-read until now.** Two findings from the first sweep that asked
+    every file in a live store instead of a sample (spec Round 48; this machine's
+    `qoder-ide` store, **4,214 jsonl / 328,530 rows**, run
+    `python scripts/sweep_row_shapes.py --cli qoder-ide` to reproduce it on yours):
+
+    - `attachment/invoked_skills` (**2 rows**) names the skills a session ran,
+      with each `SKILL.md` path and its text. No surface renders that, and the
+      product's model has nowhere honest to put it: a skill file the harness
+      loaded is not a file the session worked on, so it is excluded from
+      touched-paths rather than inflating that list with the toolchain's own
+      files. It is therefore excused in the parser and named here, which is the
+      difference between a gap and a silence.
+    - `attachment/plan_mode_reentry` was reading as *unread* while its three
+      `plan_*` siblings were read, so a plan opened on re-entry did not count
+      toward the files a session touched. Fixed in the same round
+      (`FILE_BEARING_ATTACHMENTS`), verified against the live session that
+      carried it.
+
+    The deeper limit is the one item 13 already states: the shape lists were
+    derived from this machine. `scripts/sweep_row_shapes.py` exists so "complete"
+    is a question any user can ask of their own store rather than something this
+    file asserts.
+
 ## How to check any of this yourself
 
 ```bash
@@ -458,17 +489,19 @@ python -m agent_handoff.evidence --check      # README/JSON vs the fixtures
 python -m agent_handoff.conformance --check   # format fingerprints vs the baseline
 ```
 
-Two checks need more than a checkout, and are therefore commands a maintainer
+Three checks need more than a checkout, and are therefore commands a maintainer
 runs rather than tests CI runs:
 
 ```bash
 python scripts/sanitize_fixtures.py --cli <id>   # needs that CLI's live store
+python scripts/sweep_row_shapes.py --cli <id>    # same, and exits 1 on a shape
+                                                 # no list accounts for
 python scripts/audit_component_rules.py          # needs playwright + `npm ci`
 python scripts/audit_component_rules.py --app http://127.0.0.1:8620/ \
   --route '#/' --route '#/memory' --focus          # the ring, in both themes
 ```
 
-The second one asks the browser whether each Material rule in `web/src/m3.css`
+The last of those asks the browser whether each Material rule in `web/src/m3.css`
 reaches an element at all. Its absence is what let five families of dead CSS ship
 — including a white snackbar on the dark theme — while every static gate was
 green, because a rule can read every token it names and still apply to nothing.

@@ -1611,6 +1611,45 @@ key resembling `status`/`finish`/`error`/`abort`/`exit` — the fields are
 unrecorded in both places a session exists, which is the strongest form of the
 negative this reader can be given.
 
+### Round 48 — the sample that excused rows met four shapes it had never seen
+
+Rounds 43/44 said the report surface was empty of `unhandled_row` notes, measured
+over 104–131 sampled sessions, and `ROLELESS_ROW_TYPES` was itself built from a
+131-session sample (Round 41). The full-store question had never been asked. It
+now has an instrument shipped for it: `scripts/sweep_row_shapes.py --cli <id>`
+censuses every row of every file with the parser's own `_row_shape`, then loads a
+session carrying each shape and reports *read / read (names a touched file) /
+excused / UNREAD*, exiting 1 if any shape is unclassified.
+
+Measured on this machine's `qoder-ide` store, **all 4,214 jsonl / 328,530 rows**
+(2,259 listed sessions plus 1,940 sub-agent transcripts; 0 malformed lines), 33
+distinct shapes:
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| "no unread shapes in the wild" | **false** | 4 shapes outside both lists: `attachment/invoked_skills` 2 rows, `attachment/hook_system_message` 2, `attachment/auto_mode_exit` 1, `attachment/plan_mode_reentry` 1. The v1 full sweep over every session of every store independently found exactly these 4. |
+| every other shape is accounted for | holds | 29 of 33 read or excused; `message`/`user`/`assistant` read, the 6 file-bearing attachments read for their path, the rest excused by name |
+| `plan_mode_reentry` is harmless bookkeeping | **false — a real bug** | its payload is `{"type":"plan_mode_reentry","planFilePath":...}`, the same key `_attachment_files` already lifts. Its three `plan_*` siblings were in `FILE_BEARING_ATTACHMENTS`; it was not, so a plan opened on re-entry did not count toward the session's touched files |
+| a 0-byte redirect means the run died | **false** | the v1 sweep had finished `rc=0`; its stdout went to the harness task file, not the `> full_sweep.txt` I was reading. Recorded in memory so the next reader checks the task's own output path before declaring a loss |
+
+Fixed: `plan_mode_reentry` joins `FILE_BEARING_ATTACHMENTS`; the other three join
+`ROLELESS_ROW_TYPES` — `auto_mode_exit` is an empty marker, `hook_system_message`
+is hook output in `hook_output`'s family, and `invoked_skills` names a skill file
+the *harness* loaded rather than a file the session worked on, so promoting it to
+touched paths would have inflated that list with toolchain files. What it costs us
+is written as limitations item 34 instead of being quietly dropped, and item 13
+now states that "complete" is machine-relative.
+
+Verified three ways: `tests/test_parsers.py::test_the_shapes_a_full_store_sweep_inherited_are_each_classified`
+(synthetic rows, including a brand-new kind that must still be reported — widening
+an excuse list must not be able to muzzle the unknown); the live sessions that
+carried the four notes now report **no unread note at all**, with the plan path
+counted 107× among that session's touched files and no `SKILL.md` leaked into them;
+and `sweep_row_shapes.py` exits **1** on a hand-made store containing an unknown
+`attachment/gravity_wave_log` while exiting 0 on the real `codebuddy` and
+`qoder-ide` stores — the checker was demonstrated able to fail before it was
+trusted to pass. `scripts/ci_local.py`: 8/8 gates green.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

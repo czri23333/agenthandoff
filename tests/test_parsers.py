@@ -253,6 +253,65 @@ def test_attachment_is_reported_by_its_own_kind_not_as_one_blob(tmp_path):
     assert "unhandled_row:attachment/holographic_diff=1" in notes
 
 
+def test_the_shapes_a_full_store_sweep_inherited_are_each_classified(tmp_path):
+    """Round 48: the 131-session sample had never met four sub-types.
+
+    Three of them say nothing the product models (an empty mode marker, a hook
+    printing at the user, a skill file the harness loaded), so they join the
+    excused list. The fourth carries `planFilePath` and was simply missed while
+    its three siblings were read, so its plan must land in the touched files.
+    The unseen kind at the end is the point of the test: widening an excuse list
+    must not be able to quiet a shape nobody has actually seen.
+    """
+    import json
+
+    root = tmp_path / ".codebuddy" / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "bbb222.jsonl").write_text(
+        "".join(
+            json.dumps(r) + "\n"
+            for r in [
+                {"type": "session_meta", "sessionId": "bbb222", "cwd": "D:/demo"},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "plan_mode_reentry", "planFilePath": "D:/demo/reentry.md"}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "auto_mode_exit"}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "hook_system_message", "content": "a scanner said hi",
+                    "hookName": "PostToolUse:Write"}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "invoked_skills", "skills": [
+                        {"name": "quality-gate",
+                         "path": "D:/demo/.qoder/skills/quality-gate/SKILL.md",
+                         "content": "# quality-gate"}]}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "temporal_orbit_note", "whatever": 1}},
+                {
+                    "type": "message",
+                    "sessionId": "bbb222",
+                    "cwd": "D:/demo",
+                    "timestamp": 1756548000000,
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello there friend"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    raw = CodebuddyParser(tmp_path / ".codebuddy").load("bbb222")
+    assert raw is not None
+    notes = raw.meta.notes
+    # the missed sibling: read, like the plan_* kinds beside it
+    assert dict(raw.files_touched)["D:/demo/reentry.md"] == 1
+    # excused, each for what it is
+    for quiet in ("auto_mode_exit", "hook_system_message", "invoked_skills"):
+        assert not [n for n in notes if n.startswith(f"unhandled_row:attachment/{quiet}")]
+    # and the list still reports what it has never seen
+    assert "unhandled_row:attachment/temporal_orbit_note=1" in notes
+    # a skill file the harness loaded is not a file the session worked on
+    assert "D:/demo/.qoder/skills/quality-gate/SKILL.md" not in dict(raw.files_touched)
+
+
 def test_qoder_and_qwen_share_dialect(tmp_path):
     for cls, dirname, text in [
         (QoderworkParser, ".qoderwork", "qoder ask"),
