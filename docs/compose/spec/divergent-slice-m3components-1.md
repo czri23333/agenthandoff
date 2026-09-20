@@ -1534,6 +1534,23 @@ message the record never named.
 | gates | 6 parser tests + 1 server test added; suite **527 passed, 2 skipped**; `ruff check src tests` clean; `scripts/ci_local.py --with-frontend` **10/10** (tsc + vite build + the nine-rule audit) |
 | not verified | the screenshot path: the in-app browser reported a 0×0 hidden viewport, so the visual check is DOM text + the CI audit, not a pixel image |
 
+### Round 44 — the empty report surface is now a gate, not an accident
+
+Round 43 emptied the unread-shape surface. An empty surface is worth nothing if
+anything can refill it without anyone noticing, so it is pinned:
+`test_no_row_shape_in_the_fixture_goes_unread` parses **every session** of every
+shipped fixture (not a sample) and fails if any session comes back carrying an
+`unhandled_row:*` note, naming the session and the shape and saying what to do
+with it — read it, or declare it in `ROLELESS_ROW_TYPES` with the count it was
+measured at.
+
+| Claim | Measured (2026-09-20) |
+|---|---|
+| fixture corpus swept | **77 sessions across 14 CLIs**, 0 unread notes, 0 sessions that list but fail to load |
+| can the gate fail? (a green gate that cannot fail is decoration) | falsified on a synthetic store with one invented row shape: it collected `unhandled_row:brand_new_shape_from_a_store_update=1` and the assertion fires — checked before committing, not assumed |
+| cost | runs inside `tests/test_fixtures.py`; suite **541 passed, 2 skipped**, `ruff check src tests` clean, `ci_local.py --with-frontend` **10/10** — and that run rebuilt the bundle with **zero churn** in `server/static/`, so the shipped JS is reproducible from these sources |
+| scope note | fixtures only: a test must never read the real stores, and the live-store half of this invariant is `scripts/probe_audit.py`, which the user runs |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
