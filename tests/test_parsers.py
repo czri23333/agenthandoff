@@ -780,3 +780,95 @@ def test_ide_telemetry_anchors_exact(tmp_path):
         "src/other.ts": 1,
     }
     assert p.telemetry_anchors("sid-missing", stats_dir=projects) == {}
+
+
+def test_one_open_does_not_reread_the_store_for_the_model_hint(tmp_path):
+    """The workspace-model hint must cost the session, not the workspace.
+
+    qoder writes no model on task-class sessions, so the hint searches for a
+    same-cwd, time-overlapping sibling. That search once began by re-listing the
+    whole store: measured on this machine at **6,501 of the 6,667 file reads in a
+    single `load()`** -- so opening a two-message session cost as much as the
+    largest workspace on disk (1,334 sessions live in one directory here).
+
+    Bounding it is only honest if the answer survives, so the test asserts both
+    halves: the hint is still given, a second open reads a bounded number of
+    files, and touching a sibling makes the cache let go.
+    """
+    import json
+    import os
+    import time
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    jf._ANCHOR_FACTS.clear()
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--w"
+    proj.mkdir(parents=True)
+
+    def write(sid: str, cwd: str, model: str | None, minute: int) -> Path:
+        cfg = {"type": "runtime-config", "sessionId": sid, "cwd": cwd, "timestamp": 1}
+        if model:
+            cfg["model"] = model
+        rows = [
+            cfg,
+            {
+                "type": "user",
+                "sessionId": sid,
+                "cwd": cwd,
+                "timestamp": f"2026-08-30T10:{minute:02d}:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "ask"}]},
+            },
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "cwd": cwd,
+                "timestamp": f"2026-08-30T10:{minute:02d}:30Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+            },
+        ]
+        path = proj / f"{sid}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    # The sibling that carries the answer, written first so the search need not
+    # go far; then 12 decoys in other workspaces that must be ruled out.
+    write("sib-anchor", "C:/w", "gemini-x", 0)
+    decoys = [write(f"sib-{i:02d}", f"C:/other-{i}", "gpt-z", 1 + i) for i in range(12)]
+    write("ask-me", "C:/w", None, 2)
+
+    real = jf.read_jsonl
+    reads = {"n": 0}
+
+    def counted(path, *a, **kw):
+        reads["n"] += 1
+        return real(path, *a, **kw)
+
+    jf.read_jsonl = counted
+    try:
+        p = QodercnIdeParser(tmp_path / ".qoder-cn")
+        p.list_sessions()
+
+        reads["n"] = 0
+        first = p.load("ask-me")
+        first_reads = reads["n"]
+        hints = [n for n in first.meta.notes if n.startswith("workspace_model:")]
+        assert hints and "gemini-x" in hints[0], first.meta.notes
+
+        reads["n"] = 0
+        again = p.load("ask-me")
+        second_reads = reads["n"]
+        assert [n for n in again.meta.notes if n.startswith("workspace_model:")] == hints
+
+        # The store has 14 sessions; a bounded repeat must not scale with it.
+        assert second_reads <= 4, f"second open still read {second_reads} files"
+        assert second_reads < first_reads, "the hint cache never engaged"
+
+        os.utime(decoys[3], (time.time() + 2, time.time() + 2))
+        reads["n"] = 0
+        after = p.load("ask-me")
+        touched_reads = reads["n"]
+        assert [n for n in after.meta.notes if n.startswith("workspace_model:")] == hints
+        assert touched_reads > second_reads, "a changed sibling did not recompute"
+    finally:
+        jf.read_jsonl = real
+        jf._ANCHOR_FACTS.clear()

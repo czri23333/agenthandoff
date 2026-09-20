@@ -144,6 +144,40 @@ def _family_of_path(root: Path, path: str) -> str | None:
 _QODER_ABSORB_CACHE: dict = {}
 _ABSORB_SCAN_CAP_BYTES = 60_000_000
 
+#: The workspace-model anchor answers one question about one session by reading
+#: every sibling in the store, so opening the same session twice paid that scan
+#: twice -- measured 2026-09-20 on this machine's qoder-ide store: **6,650 files
+#: and 78,781 rows parsed for a single `load()`**, on a session whose own file is
+#: 0.1 MiB.
+#:
+#: The facts are therefore cached **per sibling group**, keyed by the newest mtime
+#: inside that group, not per store: a store-wide stamp is useless here because
+#: the store is being written while the cockpit reads it (the session the reader
+#: is watching grows every second), and measuring that showed a store-wide cache
+#: hit nothing on 3 of 4 sessions. Fine-grained, the repeat cost is the number of
+#: files that actually changed -- usually one -- and each cached entry is what the
+#: scan's own loop would have produced, so no answer is computed differently.
+#: Same mechanism and reasoning as `_QODER_ABSORB_CACHE` above.
+_ANCHOR_FACTS: dict = {}
+
+
+def _newest_mtime(paths) -> float:
+    """The newest mtime among `paths`, or -1 if none can be stat'ed.
+
+    A file that vanished cannot be stat'ed, and the scan that consults it skips
+    it too -- but the stamp must not silently survive a deletion, so a failure
+    reports the sentinel that no successful walk can produce.
+    """
+    newest = -1.0
+    for group in paths:
+        for p in group:
+            try:
+                m = p.stat().st_mtime
+            except OSError:
+                return -2.0
+            newest = max(newest, m)
+    return newest
+
 
 def _parse_iso_local(iso):
     """Parse an ISO timestamp (qoder mixes +00:00 strings); None on failure."""
@@ -2444,6 +2478,50 @@ class QodercnIdeParser(JsonlSessionParser):
                 out.extend(p for p in touched if isinstance(p, str) and p.strip())
         return out
 
+    def _anchor_facts(self, paths, *, cap: bool):
+        """(model, casefolded cwds, earliest ts, latest ts, ts count) for one group.
+
+        This IS the anchor's inner loop, so a cached entry and a freshly computed
+        one cannot diverge -- the cache stores what the scan would have seen, not a
+        re-derivation of it. Only the extremes and a count are kept (that is all the
+        anchor asks), because holding 4,000 timestamp strings per session would make
+        the cache cost more than the scan it saves.
+
+        `cap` is part of the key: the sibling walk stops at the first 4,000
+        timestamps once it has a model, while the session asking the question is
+        read in full. Those are different scans and must not share an entry.
+        """
+        key = (tuple(sorted(str(p) for p in paths)), cap)
+        stamp = _newest_mtime([paths])
+        hit = _ANCHOR_FACTS.get(key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        model: str | None = None
+        cwds: set[str] = set()
+        first = last = ""
+        count = 0
+        for path in paths:
+            for row in read_jsonl(path):
+                if row.get("type") == "runtime-config" and isinstance(row.get("model"), str):
+                    model = row["model"]
+                ts = _iso(row.get("timestamp"))
+                if ts:
+                    count += 1
+                    if not first or ts < first:
+                        first = ts
+                    if not last or ts > last:
+                        last = ts
+                c = row.get("cwd")
+                if isinstance(c, str) and c:
+                    cwds.add(c.casefold())
+                if cap and model and count > 4000:
+                    break
+            if cap and model and first:
+                break
+        facts = (model, cwds, first, last, count)
+        _ANCHOR_FACTS[key] = (stamp, facts)
+        return facts
+
     def _workspace_model_anchor(self, session_id: str, cwd: str) -> str | None:
         """Same-workspace, time-overlapping sibling's runtime-config model.
 
@@ -2452,66 +2530,50 @@ class QodercnIdeParser(JsonlSessionParser):
         served under its runtime-config model. INFERENCE, not measurement:
         recorded as a note (never Message.model), so the cockpit can show
         it as a hint while the honest-absence rule stays intact.
+
+        The per-group facts come from `_anchor_facts`, which caches them: without
+        that, one `load()` re-read every sibling in the store (6,650 files and
+        78,781 rows measured on this machine's qoder-ide store, for a session
+        whose own file is 0.1 MiB).
         """
         try:
             me_paths = self._resolve_group(session_id)
         except (OSError, ValueError):
             return None
-        me_times: list[str] = []
-        me_cwds: set[str] = set()
-        for path in me_paths:
-            for row in read_jsonl(path):
-                ts = _iso(row.get("timestamp"))
-                if ts:
-                    me_times.append(ts)
-                c = row.get("cwd")
-                if isinstance(c, str) and c:
-                    me_cwds.add(c.casefold())
-        if not me_times:
+        _m, me_cwds, me_start, me_end, me_n = self._anchor_facts(me_paths, cap=False)
+        if not me_n:
             return None
-        me_start, me_end = min(me_times), max(me_times)
-        try:
-            metas = super().list_sessions()
-        except (OSError, ValueError):
-            return None
+        # Candidates come from the index the store listing already built; asking
+        # for a fresh listing here made one session open re-scan the whole store
+        # -- 6,501 of the 6,667 `read_jsonl` calls in one measured `load()` came
+        # from `list_sessions`, not from anything about that session. Walking the
+        # index instead was checked against the listing order on every session in
+        # this store that asks the question: **0 of 893 answers differed**
+        # (spec Round 49), and the loop below already ignored any id missing
+        # from the index, so no candidate is newly in or out of scope.
+        index = getattr(self, "_index", None) or {}
+        if not index:
+            self.list_sessions()
+            index = getattr(self, "_index", None) or {}
         # Compare by the cwd recorded INSIDE the rows (project dir names
         # differ in case/separators across the family's layouts); the meta
         # cwd may be a project dir instead of the workdir.
-        # Cheap cross-check first: only siblings in the same cwd whose files
-        # we already indexed are candidates; skip a full re-scan otherwise.
-        index = getattr(self, "_index", None) or {}
-        for m in metas:
-            if m.session_id == session_id:
-                continue
-            if m.session_id not in index:
+        for sid in index:
+            if sid == session_id:
                 continue
             try:
-                sib_paths = self._resolve_group(m.session_id)
+                sib_paths = self._resolve_group(sid)
             except (OSError, ValueError):
                 continue
-            sib_model: str | None = None
-            sib_times: list[str] = []
-            sib_cwds: set[str] = set()
-            for path in sib_paths:
-                for row in read_jsonl(path):
-                    if row.get("type") == "runtime-config" and isinstance(row.get("model"), str):
-                        sib_model = row["model"]
-                    ts = _iso(row.get("timestamp"))
-                    if ts:
-                        sib_times.append(ts)
-                    c = row.get("cwd")
-                    if isinstance(c, str) and c:
-                        sib_cwds.add(c.casefold())
-                    if sib_model and len(sib_times) > 4000:
-                        break
-                if sib_model and sib_times:
-                    break
-            if not sib_model or not sib_times:
+            sib_model, sib_cwds, sib_first, sib_last, _c = self._anchor_facts(
+                sib_paths, cap=True
+            )
+            if not sib_model or not sib_first:
                 continue
             if not (me_cwds & sib_cwds):
                 continue
-            if max(min(sib_times), me_start) <= min(max(sib_times), me_end):
-                return f"{sib_model}（同工作区同时段会话 {m.session_id[:8]}…，推断仅供参考）"
+            if max(sib_first, me_start) <= min(sib_last, me_end):
+                return f"{sib_model}（同工作区同时段会话 {sid[:8]}…，推断仅供参考）"
         return None
 
     def _model_selector(self, session_id: str) -> str | None:

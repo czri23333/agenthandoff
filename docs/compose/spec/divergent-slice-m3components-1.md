@@ -1657,11 +1657,68 @@ full-store sweep (`full_sweep2.py`, one detached child per CLI) finished `qoder-
 machine (68 % of its 3,322) is proven to parse. Its note tally: `invoked_skills` 2,
 `hook_system_message` 2, `auto_mode_exit` 1, `plan_mode_reentry` 1 = **6 occurrences, exactly the four
 shapes above and nothing else** -- identical to the row-level census (which never constructs a
-session). The v1 whole-machine sweep reported 5, one fewer `invoked_skills`; **the cause is not
-established** -- the store is live and grew between those runs, and v1's per-session cap of 5 fresh
-kinds could also hide one -- but ±1 row of a shape already classified does not change the shape set.
+session). The v1 whole-machine sweep reported 5, one fewer `invoked_skills`; **the cap explanation is
+now ruled out by evidence** -- the signal the parser emits when a session exceeds 5 fresh kinds
+(`unhandled_row_kinds:N`) appears **zero** times across both sweeps, so no count was truncated, which
+leaves store growth between the two runs as the remaining explanation. ±1 row of a shape already
+classified does not change the shape set either way.
 Three different instruments, one set of four: the store is closed, and Round 41's 131-session sample
 had simply never met these.
+
+### Round 49 — one session open was costing the whole workspace
+
+`load()` on the qoder IDE family took **3.2–7.6 s** for sessions whose own file is
+0.1 MiB (median 163 KiB over a 40-session stride; single process). Blaming that on
+parse volume would be wrong: `corr(file size, time)` was **+0.399**, and the fastest
+load in the sample was the *largest* one (683 messages, 3.53 s) while a
+**2-message session took 6.88 s**. The floor was not the session at all.
+
+Attribution, by counting the parser's own file reads instead of a wall clock (this
+machine runs six python processes and the store is being written by the session doing
+the measuring, so a timing claim here would be worthless):
+
+| What | Measured |
+|---|---|
+| `read_jsonl` calls in one `load()` | **6,667**, of which **6,501 issued by `list_sessions`** |
+| rows JSON-parsed by one `load()` | 78,781 |
+| sessions sharing the largest project directory on this machine | **1,334** -- "look beside the session" is not a small scan |
+| what the anchor hint (`workspace_model:`) actually cost | 163 of those reads; the listing it forced was the other 6,501 |
+
+So the model-hint search re-listed the entire store to answer a question about one
+session. Two changes, both with the answer held fixed:
+
+1. **Facts cached per sibling group**, keyed by that group's own newest mtime, not by
+   the store's. A store-wide stamp was tried first and **measured useless**: it hit for
+   1 of 4 sessions, because the session the cockpit is watching is being appended to
+   every second. Fine-grained, a repeat open costs the files that actually changed.
+   Only the extremes and a count are kept per group -- holding 4,000 timestamp strings
+   per session would make the cache dearer than the scan it saves.
+2. **Candidates walked from the index the listing already built** (`self._index`,
+   assigned in exactly one place, and the old loop already skipped any id missing from
+   it -- so the candidate set is identical by construction). Order is no longer
+   `updated_at desc`, which could name a different sibling and therefore a different
+   model, so that was measured rather than assumed: over **all 893 sessions in this
+   store that ask the question, 0 answers differed** under index order, and 0 under a
+   best-time-overlap order too. The one cross-directory anchor Round 48's A/B found is
+   still reached, because nothing is filtered out -- only the re-listing is gone.
+
+Result on the same stride: first open **6,667 → 3 files** and **4.6 → 0.77 s** for a
+session with a qualifying sibling nearby; repeat opens **2–5 files**; the pathological
+case (a workspace where no sibling qualifies anywhere) still walks the store **once**,
+then serves from cache.
+
+`tests/test_parsers.py::test_one_open_does_not_reread_the_store_for_the_model_hint`
+pins the cost, not just the answer: 14 synthetic sessions, a repeat open must read ≤4
+files, and a touched sibling must recompute. Mutation proof: replacing the cache with a
+dict that cannot engage fails with `second open still read 16 files`; the control passes.
+
+**A trap this round walked into, recorded because it nearly produced a false proof.**
+The first mutation attempt "failed" -- but at the *hint-existence* assert, not the cost
+assert. Cause: the whole model-fallback path sits behind `if rooted:` (the store must
+live under the user's home), and the scratch store was on `D:\`, so the code under test
+never ran and its red proved nothing. A mutation that fails is only evidence once a
+control run shows the same path reachable and passing; the proof was redone under a
+home-directory temp path.
 
 ## [S1] Problem
 
