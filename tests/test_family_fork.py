@@ -189,3 +189,99 @@ def test_the_sanitized_store_fixture_marks_the_same_shape():
     assert sum(1 for m in raw.messages if m.superseded) == 14
     assert "fork_target_missing:3" in raw.meta.notes
     assert not [n for n in raw.meta.notes if n.startswith("unhandled_row:resend-fork-notice")]
+
+
+def _notice_with_parent(ts, edited, parent):
+    row = _notice(ts, edited)
+    row["parentId"] = parent
+    return row
+
+
+def _user_with_parent(rid, text, ts, parent):
+    row = _user(rid, text, ts)
+    row["parentId"] = parent
+    return row
+
+
+def test_a_parent_link_does_not_widen_the_claim_to_a_distant_turn(tmp_path):
+    """Grouping ids cover many rows, so they may not be followed instead of read.
+
+    `parentId` in this store is a request-level group (measured: one parent
+    shared by up to 41 rows, 21 of them user turns), so "same parent" is not
+    "the re-send". The mark stays on the turn written under the record; a later
+    row that merely shares the group must not be pulled in.
+    """
+    raw = _load(
+        tmp_path,
+        [
+            _user_with_parent("u1", "first", 100, "req-7"),
+            _notice_with_parent(120, "u1", "req-7"),
+            _user_with_parent("u2", "second", 130, "req-7"),
+            _user_with_parent("u3", "third", 140, "req-7"),
+        ],
+    )
+    assert [(m.text, m.resent) for m in raw.messages] == [
+        ("first", False),
+        ("second", True),
+        ("third", False),
+    ]
+
+
+def test_the_store_writes_the_same_fork_the_reader_infers():
+    """The positional rule is checked against the store's own link, on real rows.
+
+    The reader marks the turn written under a fork record because of where it
+    sits. This store also records a parent: measured on this machine, 44 of 77
+    records carry one and in 44 of 44 the record, the edited turn and the turn
+    below it share it - and 8 of 8 in this fixture, the same agreement. If a
+    store update ever stops agreeing, the inference became a guess and this
+    fails here instead of mislabelling a transcript.
+
+    It asserts about the file, not about the parser: the parser's marks are
+    pinned by the cases above, so this cannot be satisfied by changing the
+    reader to match itself.
+    """
+    import pytest
+
+    from agent_handoff import fixtures
+
+    store = fixtures.cli_dir("workbuddy")
+    if not store.is_dir():
+        pytest.skip("workbuddy fixture not shipped in this checkout")
+    with_parent = 0
+    for path in sorted(store.rglob("*.jsonl")):
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        index = {}
+        for i, row in enumerate(rows):
+            rid = row.get("id")
+            if isinstance(rid, str) and rid not in index:
+                index[rid] = i
+        for i, row in enumerate(rows):
+            if row.get("type") != "resend-fork-notice":
+                continue
+            parent = row.get("parentId")
+            if not isinstance(parent, str):
+                continue
+            with_parent += 1
+            edited_id = row.get("editedUserItemId")
+            edited = rows[index[edited_id]] if edited_id in index else None
+            below = rows[i + 1] if i + 1 < len(rows) else None
+            where = f"{path.name}:{i + 1}"
+            assert isinstance(edited, dict), f"{where}: named turn is not in the file"
+            assert edited.get("parentId") == parent, f"{where}: edited turn is elsewhere"
+            assert isinstance(below, dict), f"{where}: nothing under the record"
+            assert below.get("parentId") == parent, f"{where}: the turn below is elsewhere"
+            assert below.get("role") == "user", f"{where}: the turn below is not a user turn"
+    assert with_parent == 8, (
+        f"expected the 8 parent-linked records this fixture holds, got {with_parent}"
+    )

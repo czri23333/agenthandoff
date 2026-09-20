@@ -381,6 +381,16 @@ sampled away.
     contain becomes a `fork_target_missing:N` note. Both happen in the shipped
     fixture, where the sanitizer removed rows - 15 of its 17 records mark a
     re-send, 14 mark the edited turn, and 3 report a missing target.
+    The re-send end is inferred from position, and the store's own link was
+    checked against that inference rather than trusted: where a record carries
+    `parentId` (44 of 77 on this machine, 8 of 27 in the fixture) the record,
+    the edited turn and the turn below it share one parent in **44 of 44** and
+    **8 of 8** cases, so the two readings of the fork agree wherever both
+    exist. The remaining records carry no parent at all, which is why the
+    reader keeps the positional rule instead of the id - and `parentId` is a
+    request-level group here (one parent shared by up to 41 rows, 21 of them
+    user turns), so following it instead of adjacency would mark turns the
+    record never introduced. `tests/test_family_fork.py` pins both halves.
 33. **The brief carries the abandoned copy of a fork, unannotated.** The cockpit's
     transcript marks both ends of a fork the store records (item 25), but the
     handoff brief is a verbatim surface: `build_full_transcript` quotes every

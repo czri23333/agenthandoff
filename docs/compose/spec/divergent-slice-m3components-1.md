@@ -1551,6 +1551,21 @@ measured at.
 | cost | runs inside `tests/test_fixtures.py`; suite **541 passed, 2 skipped**, `ruff check src tests` clean, `ci_local.py --with-frontend` **10/10** — and that run rebuilt the bundle with **zero churn** in `server/static/`, so the shipped JS is reproducible from these sources |
 | scope note | fixtures only: a test must never read the real stores, and the live-store half of this invariant is `scripts/probe_audit.py`, which the user runs |
 
+### Round 45 — the store's own parent link audits the rule the reader uses
+
+Round 43 infers the re-send from position. Position is an argument about where a
+row sits, so the check it deserves is the store's own: 44 of the 77 records on
+this machine carry a `parentId`. Measured what that means:
+
+| Claim | Measured (2026-09-20) |
+|---|---|
+| does the record and the turn it names share one parent | **44 of 44** (live stores), **8 of 8** (fixture) — the record sits at a real branch point |
+| does the turn *below* the record share it too | **44 of 44**, **8 of 8** — the positional rule and the id link say the same thing everywhere both exist |
+| so should the reader switch to the id | no, and the measurement says why: `parentId` is a **request-level group**, not a chain edge — one parent is shared by up to **41 rows, 21 of them user turns**. Marking "everything with this parent" would flag turns no record introduced |
+| what is pinned instead | a test asserting the agreement **about the file** (not about the parser, so it cannot be satisfied by editing the reader), plus a test that a shared parent does not widen the mark past the row under the record |
+| falsified before committing | the agreement test passes untouched, and fires when one below-row's parent is moved off (`…jsonl:148: the turn below is elsewhere`) |
+| coverage of the shipped rule | the 33 records with no `parentId` are still position-only — that is the store's limit, recorded in limitations item 32, not a claim this reader can fix |
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
