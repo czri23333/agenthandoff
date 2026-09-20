@@ -65,12 +65,49 @@ def _projects_store(cli: str, dirname: str) -> StoreInfo | None:
     p = home() / dirname / "projects"
     if not p.is_dir():
         return None
-    n = sum(1 for _ in p.rglob("*.jsonl"))
-    detail = f"{n} session file(s)"
+    top = sub = 0
+    for f in p.rglob("*.jsonl"):
+        if "subagents" in f.parts:
+            sub += 1
+        else:
+            top += 1
+    detail = f"{top} session file(s)"
+    # A store that holds 4,213 transcripts and lists 2,259 sessions is only
+    # honest once the reader says where the other 1,939 are: these live under a
+    # `subagents/` directory and belong to the session above them. Counted here
+    # as a fact about the layout, not as a claim about any one parser.
+    if sub:
+        detail += f"; {sub} transcript(s) under subagents/"
+    orphan = _transcriptless_session_dirs(p)
+    if orphan:
+        detail += f"; {orphan} dir(s) with session state and no transcript"
     accounts = _count_account_configs(home() / dirname)
     if accounts is not None:
         detail += f"; {accounts} account config(s)"
-    return StoreInfo(cli, "jsonl-dir", p, n > 0, detail)
+    # A store holding only sub-agent traces is still a store: those transcripts
+    # load by their own id, so `readable` counts them. The split lives in `detail`.
+    return StoreInfo(cli, "jsonl-dir", p, (top + sub) > 0, detail)
+
+
+def _transcriptless_session_dirs(root: Path) -> int:
+    """Session directories that hold state but no transcript, in either position.
+
+    These products write `<cwd>/<uuid>.jsonl` beside a `<cwd>/<uuid>/` directory
+    carrying `state.json`. When the transcript is gone but the directory is not,
+    there is no dialogue to show - so the count has to be visible rather than
+    silently absent from the list.
+    """
+    n = 0
+    for st in root.rglob("state.json"):
+        d = st.parent
+        if not _UUID_DIRNAME.fullmatch(d.name):
+            continue
+        if any(f.suffix == ".jsonl" for f in d.iterdir()):
+            continue
+        if (d.parent / f"{d.name}.jsonl").is_file():
+            continue
+        n += 1
+    return n
 
 
 def _count_account_configs(store_root: Path) -> int | None:
@@ -116,6 +153,29 @@ def qoderwork_cn_store() -> StoreInfo | None:
 
 def qodercn_ide_store() -> StoreInfo | None:
     return _projects_store("qodercn-ide", ".qoder-cn")
+
+
+def qoder_ide_store() -> StoreInfo | None:
+    """Qoder IDE, international edition.
+
+    This probe was missing while its parser was not, so `doctor` reported no row
+    for the largest store on the maintainer's machine (2,259 of 3,322 sessions)
+    and showed its transcripts only under `qoderwake`, whose own reader lists
+    nothing there.
+    """
+    return _projects_store("qoder-ide", ".qoder")
+
+
+def opencode_store() -> StoreInfo | None:
+    root = home() / ".local" / "share" / "opencode"
+    db = root / "opencode.db"
+    if not db.is_file():
+        return None
+    # `path` is the directory, not the file: OpenCodeParser takes the store root
+    # and looks for `opencode.db` inside it, and `_doctor_rows` hands this path
+    # straight to `with_root`. Reporting the file made the doctor claim
+    # `parses yes (0)` for a store whose parser lists 222 sessions.
+    return StoreInfo("opencode", "sqlite", root, _can_open_sqlite(db))
 
 
 def qwenwork_store() -> StoreInfo | None:
@@ -172,7 +232,13 @@ def _wake_store(cli: str, dirname: str, shared: str) -> StoreInfo | None:
         sum(1 for _ in shared_projects.rglob("*.jsonl")) if shared_projects.is_dir() else 0
     )
     detail = f"{len(dbs)} daemon db file(s); {groups} group conversation(s)"
-    detail += f"; shared store {shared}: {transcripts} transcript file(s)"
+    # Name the reader that actually lists those transcripts, so a wake row that
+    # parses 0 sessions is not read as 4,211 files going unread.
+    owner = {".qoder": "qoder-ide", ".qoder-cn": "qodercn-ide"}.get(shared, "")
+    detail += (
+        f"; shared store {shared}: {transcripts} transcript file(s)"
+        + (f", listed as {owner}" if owner else "")
+    )
     return StoreInfo(
         cli,
         "qoderwake-dir",
@@ -365,6 +431,8 @@ def discover() -> list[StoreInfo]:
         qoderwork_store,
         qoderwork_cn_store,
         qodercn_ide_store,
+        qoder_ide_store,
+        opencode_store,
         qwenwork_store,
         dsh_store,
         kimi_store,

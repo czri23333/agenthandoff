@@ -1584,6 +1584,33 @@ rather than *slow to finish*.
 | suite | **548 collected / 546 passed / 2 skipped**; the 5 new tests are 5 passed + 543 deselected under a `-k` of their own names. Headline totals are not comparable across rounds: fixture-driven `parametrize("cli", PRESENT)` moves with the environment, so the derived form (543 + 5) is what carries here |
 | what item 27 now says | not "nothing spends it" but "it is spent where a store writes one": 3 of the 14 fixture stores time a first token (codex per turn, zcode and CherryStudio per model), 11 write no such number, and the 44 codex rows without it show the total alone |
 
+### Round 47 — the doctor could not see 2,481 of the 3,322 sessions on this machine
+
+Round 46's numbers came from pointing every parser at its live store. Doing that
+exposed a bigger thing: two of the twenty readers have **no store probe at all**, so
+`handoff doctor` — the one command the docs tell a user to run — prints no row for
+the largest store on the machine.
+
+| Claim | Measured (2026-09-20) |
+|---|---|
+| what was missing | `qoder-ide` (**2,259** sessions, 68% of this machine's data) and `opencode` (**222**) had parsers, stores and no entry in `discover()` — so no doctor row, and no row on any surface that reads it |
+| why it stayed missing | `matrix.ROADMAP` exempted both from the lockstep gate that would have caught it, on two claims about their *format*: "Electron leveldb — no session files on disk" and "storage layout undocumented". Both are false here: `~/.qoder/projects/*.jsonl` and `~/.local/share/opencode/opencode.db`, read by their own parsers, 25 of 25 sampled qoder-ide sessions loading dialogue |
+| what the counts reconcile to | the store holds **4,213** transcripts: **2,274** session files + **1,939** under a `subagents/` directory (verified as *reachable*, not lost: the parent lists 76 sub-agent-labelled messages and `load()` on a trace id returns its 76 messages). **19** session dirs hold `state.json` with no transcript in either position — two independent methods agree on 19 |
+| what the row says now | `qoder-ide … parses yes (2259) · 2274 session file(s); 1939 transcript(s) under subagents/; 19 dir(s) with session state and no transcript; 1 account config(s)` — read from the live machine, and `qoderwake`'s line now ends `listed as qoder-ide` so 4,213 files beside a `yes (0)` is no longer a puzzle |
+| a bug this round created and caught | the first `opencode_store` reported the `.db` **file** as `StoreInfo.path`; `_doctor_rows` feeds that to `with_root`, whose parser appends `opencode.db` again → doctor printed `parses yes (0)` for a 222-session store. Fixed by reporting the directory, and pinned by a test that asks the parser to resolve the probe's own path |
+| falsified before committing | rename the probe's cli → the lockstep gate fails naming `qoder-ide`; drop the "transcript beside the dir" check → 2 tests red; drop the uuid-directory filter → the `jobs/*/state.json` test red (that layout has no transcript *by design*, so counting it would report a gap that is not one) |
+| gates | 8/8 with the regenerated `support-matrix.json`. **555 passed / 0 skipped** (was 546 / 2): +7 new tests in `tests/test_locations.py`, and the 2 skips that disappeared were the `qoder-ide` and `opencode` lockstep exemptions this round removed — they are assertions now. `ROADMAP` holds only `trae`, and the exemption's rule is written where it can be read: an exemption must be a claim about the *format*, and a claim about a format can be measured |
+
+### Round 47b — the store's other artifact kind was asked the ending question too
+
+Item 31's "the transcript has no end row" was only ever about the transcript. The
+qoder store also writes 2,341 `state.json` sidecars: all parse, and none holds a
+key resembling `status`/`finish`/`error`/`abort`/`exit` — the fields are
+`createdAt`, `revision`, `updatedAt` and a `state` dict of client bookkeeping
+(`replacementDecisions`, `seenFunctionResponseIds`). The ending is therefore
+unrecorded in both places a session exists, which is the strongest form of the
+negative this reader can be given.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

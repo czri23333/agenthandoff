@@ -402,6 +402,16 @@ sampled away.
     surface through `peek_needs_reply`, which drives the "等你回复" count, the
     filter and the tooltip, so the probe would have added a second, drift-prone
     place to say the same thing. It is not in the product.
+    Widened on 2026-09-20, because "the transcript has no end row" is a claim
+    about one of a store's two artifact kinds: `~/.qoder/projects` also writes
+    **2,341** `state.json` sidecars, all of which parse (0 unreadable), and not
+    one of them holds a key resembling `status`/`finish`/`error`/`abort`/`exit`
+    - the fields are `createdAt`/`revision`/`updatedAt` and a `state` dict of
+    client bookkeeping (`replacementDecisions`, `seenFunctionResponseIds`). So
+    the ending is unrecorded in **both** places, and `unknown` is the whole of
+    what can be said. The same sweep did find 19 session directories holding
+    state with no transcript at all - nothing to show, and `doctor` now counts
+    them rather than letting them go silently missing (spec Round 47).
 32. **A fork record whose link leaves the file says so, and stops there.** The
     transcript marks the two turns a `resend-fork-notice` names, but a claim that
     cannot be placed is not carried onward: if the turn under the record never

@@ -66,8 +66,6 @@ STORE_KINDS: dict[str, str] = {
 EXPERIMENTAL: set[str] = {"kimi"}
 
 ROADMAP: dict[str, str] = {
-    "qoder-ide": "Electron leveldb — no session files on disk",
-    "opencode": "storage layout undocumented",
     "trae": "IDE SQLite; read-only only, never written",
 }
 
@@ -91,20 +89,24 @@ UNPROVEN: dict[str, str] = {
         "--cli codebuddy-cn` closes it on a machine with the CN store"
     ),
     "qoder-ide": (
-        "Qoder IDE keeps sessions in an Electron leveldb and this machine has "
-        "no session files on disk; run `python scripts/sanitize_fixtures.py "
-        "--cli qoder-ide` where the IDE has been used"
+        "the store is here and reads (`~/.qoder/projects`, 2,259 sessions listed "
+        "and 25 of 25 sampled ones load dialogue), but no fixture was ever taken "
+        "from it, so CI cannot re-run it: run `python "
+        "scripts/sanitize_fixtures.py --cli qoder-ide`"
     ),
     "opencode": (
-        "no OpenCode store here and its storage layout is undocumented upstream; "
-        "run `python scripts/sanitize_fixtures.py --cli opencode` with a store "
-        "present, then record what the layout turned out to be"
+        "the store is here (`~/.local/share/opencode/opencode.db`, 222 sessions "
+        "listed) and its layout turned out to be readable SQLite, not the "
+        "undocumented form this row used to claim; no fixture exists, so run "
+        "`python scripts/sanitize_fixtures.py --cli opencode`"
     ),
     "qoderwake": (
-        "the shared `~/.qoder/projects` store reads fine but holds 0 transcript "
-        "files (the CN sibling has 132 and is proven, which is why the parser is "
-        "pinned by `tests/test_edition_parity.py`); run `python "
-        "scripts/sanitize_fixtures.py --cli qoderwake` once it holds a session"
+        "the shared `~/.qoder/projects` store reads fine and holds 4,213 "
+        "transcripts (measured 2026-09-20; this row used to say it held none), "
+        "but they are listed as qoder-ide's 2,259 sessions and 1,939 sub-agent "
+        "traces, and the daemon half this reader needs "
+        "(`~/.qoderwake/data/store`) is absent here; run `python "
+        "scripts/sanitize_fixtures.py --cli qoderwake` where that daemon has run"
     ),
     "qwenwork-app": (
         "the store exists (`AppData/Roaming/QwenWorkCN/data/agents.db`) and is "

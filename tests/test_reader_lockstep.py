@@ -110,9 +110,15 @@ def test_every_reader_has_a_matrix_row(cli: str):
 def test_every_reachable_reader_has_a_doctor_probe(cli: str):
     """A roadmap reader has no store *by definition*; anything else needs a probe.
 
-    `ROADMAP` is the documented list of formats with nothing on disk to read
-    (`opencode` storage is undocumented, Qoder IDE keeps its sessions in an
-    Electron leveldb), so those are exempt and everything else is not.
+    `ROADMAP` is the documented list of formats with nothing on disk to read, so
+    those are exempt and everything else is not. Two readers used to sit in it on
+    reasons that measurement disproved: `qoder-ide` keeps its sessions as
+    `.jsonl` under `~/.qoder/projects` (not an Electron leveldb) and `opencode`
+    is a readable SQLite file (not an undocumented layout). Both are asserted
+    here now, which is only possible because `locations.py` gained the probes
+    they never had - `doctor` could not report 2,481 of the 3,322 sessions on
+    this machine. An exemption in this list must be a claim about the *format*,
+    and a claim about the format can be measured.
     """
     if cli in matrix.ROADMAP:
         pytest.skip(f"{cli} is roadmap: {matrix.ROADMAP[cli]}")
