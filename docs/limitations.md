@@ -376,8 +376,9 @@ sampled away.
     `duration_ms` beside it, and `test_detail_carries_the_first_token_half_only_of_its_own_total`
     names that case. Of the 14 fixture stores, 3 time a first token at all:
     codex per turn (the tip), zcode and CherryStudio per model (the usage
-    table's `ttft` column, spent since well before this item); the other 11
-    write no such number.
+    table's 首字延迟 / `ttft` column, spent since well before this item — the tip
+    deliberately reuses that word so the two surfaces name one thing); the other
+    11 write no such number.
 31. **Most sessions in the cockpit cannot have their ending proven, and never
     could.** Of the 3,322 sessions on this machine, **2,710** belong to stores
     whose parser never builds an `Interruption` at all - qoder-ide (2,259),
