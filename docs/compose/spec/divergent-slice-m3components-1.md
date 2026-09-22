@@ -2265,13 +2265,13 @@ waiting row costs a highlight, `answered` beside one hides the work — it silen
 rows, 7 of them answers the window had right, and removes the wrong one.
 **The gate that was supposed to catch this could not have.** `probe_audit.py`
 opens by saying it audits "`peek_status` and `peek_needs_reply`" and judged only
-`peek_status` — since the day it was written (`c173e12`), the column it names first
-has been compared to the detail page and the one it names second never has. It now
-has two columns per store and exits 1 on either, which is how this round's two
-ordering disagreements were found rather than asserted away. Its truth is read from
-the rows, not from `raw.messages`: the rendered text is a different string from the
-one `_row_content` hands the probe, and comparing one representation against the
-other audits the renderer.
+`peek_status` — since the day it was written (`c173e12`, before Round 44), so twelve
+rounds of spec shipped with the first probe compared to the detail page and the one
+it names second never. It now has two columns per store and exits 1 on either, which
+is how this round's two ordering disagreements were found rather than asserted away.
+Its truth is read from the rows, not from `raw.messages`: the rendered text is a
+different string from the one `_row_content` hands the probe, and comparing one
+representation against the other audits the renderer.
 
 Measured today, sampled 40 rows per store where the store is larger, over 3,352
 sessions: **0 rows where either probe contradicts its own detail page.** With the
