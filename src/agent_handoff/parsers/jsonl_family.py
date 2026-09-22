@@ -278,6 +278,36 @@ _ABSORB_SCAN_CAP_BYTES = 60_000_000
 #: Same mechanism and reasoning as `_QODER_ABSORB_CACHE` above.
 _ANCHOR_FACTS: dict = {}
 
+#: The ai-stats file telemetry, indexed once per stats-tree change rather than
+#: re-read for every detail page. Keyed by the store directory; the value is the
+#: (path, size, mtime) signature the index was built from and the map itself.
+_TELE_INDEX: dict[str, tuple] = {}
+
+
+def _tele_line(line: str, index: dict[str, Counter[str]]) -> None:
+    """Fold one telemetry row into the index.
+
+    A row credits its ``filePath`` to every session named in its ``lineDetails``,
+    **once each**: asked about one session at a time, the per-session scan this
+    replaces matched the first detail belonging to that session and stopped, so a
+    row listing the same session twice counts once. Collapsing that to "the first
+    session in the list" would quietly stop counting the others.
+    """
+    try:
+        row = json.loads(line)
+    except ValueError:
+        return
+    fp = row.get("filePath")
+    if not isinstance(fp, str) or not fp.strip():
+        return
+    sids = {
+        str(ld["sessionId"])
+        for ld in row.get("lineDetails") or []
+        if isinstance(ld, dict) and ld.get("sessionId")
+    }
+    for sid in sids:
+        index.setdefault(sid, Counter())[fp] += 1
+
 
 def _newest_mtime(paths) -> float:
     """The newest mtime among `paths`, or -1 if none can be stat'ed.
@@ -3009,33 +3039,54 @@ class QodercnIdeParser(JsonlSessionParser):
 
         ``~/.qoder-cli/ai-stats/projects/*/*.jsonl`` rows carry ``filePath``
         plus ``lineDetails[].sessionId`` — the same id space as this parser's
-        sessions. Only the international ``qoder-ide`` variant keeps this
-        store; the CN twin has none (returns empty there).
+        sessions. Only the international ``qoder-ide`` variant keeps this store;
+        the CN twin has none (returns empty there).
+
+        The whole tree is indexed once and the session looked up in it. Asking
+        per session used to re-read everything: measured on this machine, **3,332
+        files and 73.9 MB for one detail page** — 53% of that page's wall time and
+        99.7% of its reads — and 171 GB for a pass over all 2,305 sessions the
+        store lists. The index is keyed on a stat-only signature of the tree, so a
+        write to the stats store re-reads and an unchanged one reads nothing, and
+        files are streamed line by line: a ``read_text`` of an unbounded file is
+        what reached ``MemoryError`` here once (2026-09-22, on a 全量 probe audit).
         """
+        return Counter(self._telemetry_index(stats_dir).get(session_id) or {})
+
+    def _telemetry_index(self, stats_dir: Path | None) -> dict[str, Counter[str]]:
+        """``sessionId -> filePath counts`` for every row the stats tree holds."""
         from agent_handoff.locations import home
 
-        out: Counter[str] = Counter()
         base = stats_dir or home() / ".qoder-cli" / "ai-stats" / "projects"
         if not base.is_dir():
-            return out
-        for path in base.rglob("*.jsonl"):
+            return {}
+        key = str(base)
+        stamp: list[tuple[str, int, int]] = []
+        try:
+            for p in sorted(base.rglob("*.jsonl")):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                stamp.append((str(p), st.st_size, st.st_mtime_ns))
+        except OSError:
+            return {}
+        signature = tuple(stamp)
+        hit = _TELE_INDEX.get(key)
+        if hit is not None and hit[0] == signature:
+            return hit[1]
+        index: dict[str, Counter[str]] = {}
+        for path, _size, _mtime in stamp:
             try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                with Path(path).open(encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        _tele_line(line, index)
             except OSError:
                 continue
-            for line in lines:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                fp = row.get("filePath")
-                if not isinstance(fp, str) or not fp.strip():
-                    continue
-                for ld in row.get("lineDetails") or []:
-                    if isinstance(ld, dict) and ld.get("sessionId") == session_id:
-                        out[fp] += 1
-                        break
-        return out
+        if len(_TELE_INDEX) > 8:
+            _TELE_INDEX.clear()
+        _TELE_INDEX[key] = (signature, index)
+        return index
 
     def _wake_titles(self) -> dict[str, str]:
         """qs_* session titles from the QoderWake board projection (read-only)."""

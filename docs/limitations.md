@@ -705,6 +705,34 @@ sampled away.
     tests carry that), and a store whose messages arrive without timestamps, where
     the two definitions coincide again.
 
+41. **The detail page reads the ai-stats tree once per change; three things are still
+    true about that.** `telemetry_anchors` used to answer one session's file list by
+    reading every file under `~/.qoder-cli/ai-stats/projects` — measured here: **3,331
+    files and 74 MB per page view**, and 12 answered views cost 39,972 reads and
+    1.1 GB. Round 62 built the `sessionId -> filePath counts` index behind a
+    `(path, size, mtime_ns)` signature of the tree instead. What is left:
+
+    - **The signature cannot see a rewrite that leaves both size and mtime alone.**
+      This is the hole Round 58 closed for SQLite by putting the change counter in the
+      key, and it cannot be closed here without paying back the read the index exists
+      to avoid. It is accepted because the store is an append-only JSONL log — reaching
+      that state means truncating a session's history into exactly the same byte count.
+      No fixture can show the cache invalidating on a change it cannot detect, so the
+      honest claim is "not observable", not "observed not to happen".
+    - **The per-page side cost is now a stat walk of ~70 ms over 3,331 files.**
+      Measured on a session that does carry telemetry: `load()` took 3.35 s with a cold
+      index and 0.17 s with a warm one. Grouping the cache per project directory, the
+      way `_ANCHOR_FACTS` caches per sibling group, would take the 70 ms to about
+      nothing; it has not been done because the walk is now under the cost of reading
+      the session's own transcripts.
+    - **One `MemoryError` was seen in this path** (2026-09-22, during a 全量
+      `probe_audit` that parses every row of every store). Its cause is unproven: the
+      largest file in the tree is 4.0 MB, the tree is 0.09 GB in 3,332 files, and
+      14.9 GB of the 32 GB RAM was free when that was re-measured minutes later.
+      Reading files line by line instead of `read_text`-ing them removes the one
+      unbounded allocation the path had, whatever the cause turned out to be; no
+      measurement here pins the cause, and this entry does not claim one.
+
 ## How to check any of this yourself
 
 ```bash

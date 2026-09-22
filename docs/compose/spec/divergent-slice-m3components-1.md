@@ -2752,6 +2752,61 @@ exercise today (role precedence, a user row ending on a tool call, same-instant 
 are pinned by fixtures, and the 55 rows item 39 still lists are untouched.
 
 
+### Round 62 — the detail page stopped reading the whole telemetry store to name one session's files
+
+This one started with a crash in the tool rather than in the product:
+`probe_audit.py --per-store 10000` — the 全量 pass that parses every row of every
+store — died with `MemoryError` inside `jsonl_family.telemetry_anchors`. Going to read
+the function for a culprit, it turned out the crash was the least interesting thing
+about it. The function answers "which files did this session touch", and it answered
+it by opening **every file** under `~/.qoder-cli/ai-stats/projects`: measured here,
+3,331 files and 73.9 MB for one detail page — 12 answered pages cost 39,972 reads and
+1,076 MB — and a pass over the 2,306 sessions that store lists would ask 171 GB of it.
+That is where the audit's twenty minutes went, and it was also 53% of the wall time of
+opening any one qoder-ide session in the cockpit.
+
+**One index, keyed on a signature of the tree.** `_telemetry_index` walks the tree once
+into `sessionId -> Counter[filePath]` and returns the row for whoever asks; the cache
+holds the walk's `(path, size, mtime_ns)` tuple and re-reads only when it moves. Files
+are read line by line rather than `read_text`-ed, which is the difference between an
+index that grows with the data and a slurp of a file of unknown size — the shape the
+crash pointed at, though the crash's cause is still not pinned (item 41 says what was
+and was not measured). Warm, a page view costs ~70 ms of stats and **0** reads;
+the `load()` of a session that does carry telemetry went from 3.35 s to 0.17 s.
+
+**The translation had one real trap, and it is the `break`.** The old loop scanned a
+row's `lineDetails` until it found the session being asked about, then counted once and
+stopped — so a row naming two sessions answered `True` for each of them when asked
+twice, and a row naming one session twice counted it once. Read literally as
+"first session in the row", the generalisation would silently drop the second session's
+file. `_tele_line` therefore credits the path to *every distinct* session in the row,
+which reproduces both behaviours; `test_a_row_naming_two_sessions_counts_both` pins it
+with a path no other row mentions, because a path that also appears alone in a second
+project makes the wrong code look right.
+
+**Evidence.** 11 tests in `tests/test_telemetry_index.py`. The equivalence claim is a
+fixture oracle, not a scratch measurement: `_old_scan()` is the previous implementation,
+kept verbatim in the test file, and every fixture session is compared against it — on
+this machine the live store also agreed on all 12 sessions with answers (up to 364 files
+each) and on 40 with none, where the second number is worth little on its own: 40 empty
+Counters agreeing is arithmetic on a null set, which is why the answered 12 and the
+fixture are the evidence and the empty batch is not. The mutation sweep
+(`D:/tmp-agenthandoff/r62_mutation.py`, log kept) ran 7 arms: 6 red on their named
+witness (credit only the first session, count a repeated session twice, never notice
+the tree moved, flatten the walk, hand the caller the index's own Counter, drop the
+bytes from the signature) and 1 green **as argued equivalent** — keying the cache by a
+constant instead of the store path changes no answer, because the signature already
+carries the paths; the sweep fails if that arm ever goes red, so the argument is itself
+under test. Two harness notes from the same run: `jsonl_family.py` is CRLF, so the
+first version's line-spanning patch targets matched nothing and reported an arm as
+"never reached the tests"; and the summary originally counted an equivalent arm as red,
+which is how a tool's own bookkeeping can turn a non-result into a pass.
+`ci_local.py --with-frontend`: 10 gates, 640 tests green. What is not covered is in
+item 41: a rewrite that keeps size and mtime is invisible to the signature, the stat
+walk itself is still per page view, and no measurement here proves what raised the
+`MemoryError`.
+
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
