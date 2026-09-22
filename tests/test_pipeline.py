@@ -119,13 +119,34 @@ def test_user_pending_detected_and_promoted():
     assert "然后跑回归测试" in b.next_steps[0]
 
 
-def test_clean_when_assistant_replied_last():
-    raw = make_raw(messages=[
+def _ask_and_answer() -> list[Message]:
+    return [
         Message(role="user", text="ask", at="2026-08-30T10:00:00+00:00"),
         Message(role="assistant", text="all done, tests green.", at="2026-08-30T10:05:00+00:00"),
-    ])
-    b = summarize(raw)
-    assert b.interruption.kind == "clean"
+    ]
+
+
+def test_clean_needs_evidence_and_gets_it_from_the_store():
+    raw = make_raw(
+        messages=_ask_and_answer(),
+        # A store that records the turn finishing may say so; this one does.
+        interruption=Interruption(kind="clean", detail="task_complete carried no error"),
+    )
+    assert summarize(raw).interruption.kind == "clean"
+
+
+def test_a_store_with_no_end_marker_says_unknown_not_clean():
+    """The default must not be a claim.
+
+    qoder-ide writes no end/complete/error row at all across its 2,259 sessions,
+    so nothing here proves the turn finished; reporting `clean` in that case is
+    the product asserting a fact it does not have.
+    """
+    b = summarize(make_raw(messages=_ask_and_answer()))
+    assert b.interruption.kind == "unknown"
+    # ...and "unknown" is absence of evidence, not a detected problem: it must
+    # not be framed as an interruption the successor has to work around.
+    assert b.interruption.detected is False
 
 
 def test_parser_cancelled_survives_and_truncated_note_dropped():

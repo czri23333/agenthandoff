@@ -364,3 +364,83 @@ def qoderapp_store(tmp_path: Path) -> Path:
     con.commit()
     con.close()
     return tmp_path
+
+
+@pytest.fixture
+def statement_counter():
+    """Count the SQL a parser sends, for the probes' cost assertions.
+
+    A warm list rebuild must read nothing it has already answered, and a bounded
+    window must stay bounded as the session grows. Neither is visible in the
+    answer, so it is measured where it happens: the statements the parser issues.
+    """
+
+    def install(cls):
+        real = cls._connect
+
+        class Cursor:
+            def __init__(self, cur, outer):
+                self._cur = cur
+                self._outer = outer
+
+            def fetchall(self):
+                rows = self._cur.fetchall()
+                self._outer.rows += len(rows)
+                return rows
+
+            def fetchone(self):
+                row = self._cur.fetchone()
+                self._outer.rows += row is not None
+                return row
+
+            def __iter__(self):
+                return iter(self.fetchall())
+
+            def __getattr__(self, name):
+                return getattr(self._cur, name)
+
+        class Connection:
+            def __init__(self, con, outer):
+                self._con = con
+                self._outer = outer
+
+            def execute(self, sql, *a, **kw):
+                if not sql.strip().upper().startswith("PRAGMA"):
+                    self._outer.statements += 1
+                return Cursor(self._con.execute(sql, *a, **kw), self._outer)
+
+            def __enter__(self):
+                self._con.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._con.__exit__(*exc)
+
+            def __getattr__(self, name):
+                return getattr(self._con, name)
+
+        class Counter:
+            def __init__(self):
+                self.statements = 0
+                self.rows = 0
+
+            def __enter__(self):
+                outer = self
+
+                def connect(parser_self):
+                    return Connection(real(parser_self), outer)
+
+                cls._connect = connect
+                return self
+
+            def __exit__(self, *exc):
+                cls._connect = real
+                return False
+
+            def reset(self):
+                self.statements = 0
+                self.rows = 0
+
+        return Counter()
+
+    return install

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Input, Segmented, Select, Tooltip, Typography, type GetRef } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Button, Segmented, Select, Tooltip, Typography } from "antd";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   api,
   relTime,
@@ -10,9 +10,10 @@ import {
   type SessionMeta,
   type StoreInfo,
 } from "../api";
-import { CliBadge, CopyButton, Highlight, StatusTag } from "../components";
+import { CliBadge, CopyButton, EmptyState, Highlight, StatusTag } from "../components";
+import { ROW_SCOPE } from "../keys";
 import { ActivityGrid } from "../charts";
-import { useFmt, useT, type TKey } from "../i18n";
+import { hasKey, useFmt, useT, type TKey } from "../i18n";
 
 /**
  * Session dashboard: grouping by project domain, plus two search modes.
@@ -83,6 +84,23 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     }
   }, [collapsed]);
   const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
+  const [showHidden, setShowHidden] = useState(() => {
+    // Refresh-safe, like the fold state: revealing the tool loops is a reading
+    // choice, not a per-page-load one.
+    try {
+      return sessionStorage.getItem("ah-showhidden") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (showHidden) sessionStorage.setItem("ah-showhidden", "1");
+      else sessionStorage.removeItem("ah-showhidden");
+    } catch {
+      /* storage full/blocked: the reveal just won't survive a reload */
+    }
+  }, [showHidden]);
   const [groupMode, setGroupMode] = useState<GroupMode>(() => {
     // Refresh-safe like the fold state below.
     try {
@@ -100,7 +118,9 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     }
   }, [groupMode]);
   const [, tick] = useState(0);
-  const inputRef = useRef<GetRef<typeof Input.Search>>(null);
+  /* The search control is our own M3 search bar now, so the ref is a plain
+     input rather than antd's `InputRef` proxy. */
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
     async (manual = false) => {
@@ -120,7 +140,45 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   // Incremental poll (§4-3): ask only for sessions changed since the newest
   // updated_at we hold, then merge. A changed child arrives with its parent
   // shell so the tree mounts without a full reload.
+  // The delta merge below re-sorts by `updated_at`, so a session that gets a new
+  // turn jumps to the top and the row a reader is looking at -- or the row the
+  // keyboard cursor is on -- moves out from under them. While the search field or
+  // a row has focus the poll is held instead (spec Round 53): a query typed into
+  // 2,600 rows must not have its result set reshuffled under it, which is what
+  // Obsidian's quick switcher and Linear's list do. The manual refresh button
+  // still reloads, and the hint row says the clock is held so a stale badge is
+  // never mistaken for a live one.
+  const navHeld = useRef(false);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    /* Both events, not just `focusin`. A first version listened only for
+       focusin -- and when focus leaves for the page body (a click on the gap
+       between rows, an Escape that blurs the field) no focusin fires, so the
+       flag stayed true and the list silently stopped refreshing for the rest of
+       the session. `relatedTarget` is where focus is going; on a blur with
+       nowhere to go it is null, which is the same as "nothing is focused". */
+    const held = (el: EventTarget | null) =>
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      !!(el instanceof Element && el.closest?.(ROW_SCOPE));
+    const onIn = (e: FocusEvent) => {
+      navHeld.current = held(e.target);
+      setPaused(navHeld.current);
+    };
+    const onOut = (e: FocusEvent) => {
+      navHeld.current = held(e.relatedTarget);
+      setPaused(navHeld.current);
+    };
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => {
+      document.removeEventListener("focusin", onIn);
+      document.removeEventListener("focusout", onOut);
+    };
+  }, []);
+
   const pollDelta = useCallback(async () => {
+    if (navHeld.current) return;
     setSessions((prev) => {
       if (!prev) {
         void load();
@@ -137,6 +195,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       void api
         .sessionsDelta(newest, { cli: cliFilter || undefined })
         .then(({ changed }) => {
+          /* The clock this feeds answers "when was the list on screen last
+             verified", not "when did a row last move": a poll that found nothing
+             changed is a fresh answer, and aging the badge on it would cry wolf
+             on an idle machine. */
+          setUpdatedAt(Date.now());
           if (!changed.length) return;
           setSessions((cur) => {
             if (!cur) return cur;
@@ -298,8 +361,22 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const visible = sorted.filter(
     (s) =>
       (!domainFilter || s.domain === domainFilter) &&
-      (!needsReplyOnly || s.needs_reply === true),
+      (!needsReplyOnly || s.needs_reply === true) &&
+      (!s.hidden_reason || showHidden),
   );
+  /* How many conversations the parsers dropped, counted over the rows the list
+     is already showing (domain and needs-reply filters applied) so it answers
+     "hidden from *what you are looking at*", not a store-wide total this view
+     cannot reproduce. It is deliberately NOT the number of rows that appear when
+     revealed: a group renders 50 at a time, so revealing 126 added 19 rendered
+     rows in grouped mode, and in flat mode left the page at 50 while 4 of the
+     revealed rows moved into it -- measured, spec Round 54. The tooltip says so. */
+  const hiddenInView = sorted.filter(
+    (s) =>
+      !!s.hidden_reason &&
+      (!domainFilter || s.domain === domainFilter) &&
+      (!needsReplyOnly || s.needs_reply === true),
+  ).length;
   const grouped = useMemo(() => {
     if (groupMode === "flat") return [["", visible] as [string, SessionMeta[]]];
     if (groupMode === "activity") {
@@ -338,6 +415,30 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const freshSecs = updatedAt === null ? null : Math.round((Date.now() - updatedAt) / 1000);
   const unreadable = stores.filter((s) => !s.readable).length;
 
+  /* What the clock says: how old the rows on screen are, and it always says it
+     with a number. A hold that said only "paused" left the reader to guess how
+     stale the list was, and the guess is always the optimistic one (spec Round
+     60), so the pause became a prefix to the age rather than a replacement for
+     it. The age also covers the case the old label could not: `pollDelta`
+     swallows a failing request and retries on the next tick, and past a minute
+     the badge went on claiming "auto-refreshes every 30s" while the data aged
+     behind the claim. */
+  const ageText = (secs: number) => {
+    if (secs < 60) return fmt("ageSec", { n: secs });
+    if (secs < 3600) return fmt("ageMin", { n: Math.floor(secs / 60) });
+    if (secs < 86400) return fmt("ageHr", { n: Math.floor(secs / 3600) });
+    return fmt("ageDay", { n: Math.floor(secs / 86400) });
+  };
+  const freshnessLabel = () => {
+    if (refreshing) return t("updating");
+    if (freshSecs === null) return paused ? t("refreshPaused") : t("loading");
+    const age = ageText(freshSecs);
+    return paused ? fmt("pausedAgo", { age }) : age;
+  };
+  /* Past two minutes without a landing is older than a healthy poll lets this
+     get, so the badge stops being quiet about it. */
+  const staleBadge = freshSecs !== null && freshSecs > 120;
+
   const indexLine = () => {
     if (mode !== "full") return null;
     if (searchError) return <span className="ah-err ah-meta">{searchError}</span>;
@@ -369,7 +470,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
           {t("bundleStale")}
         </button>
       )}
-      <div className="ah-bar ah-toolbar px-4 py-2.5">
+      {/* DockedToolbarTokens: a 64dp surface-container strip with 16dp leading
+          and trailing space. The toolbar used to be a `.ah-bar` (a 1px rule on
+          the app-bar surface), which made the app bar, the toolbar and the list
+          three white bands separated by hairlines. */}
+      <div className="ah-docked-toolbar">
         <Segmented
           size="small"
           value={mode}
@@ -379,22 +484,49 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             { label: t("searchModeFull"), value: "full" },
           ]}
         />
-        <Input.Search
-          ref={inputRef}
-          allowClear
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onSearch={(v) => setQ(v)}
-          placeholder={mode === "titles" ? t("searchTitles") : t("searchFull")}
-          className="ah-search-input"
-          loading={searching}
-        />
+        {/* M3's docked search bar (SearchBarTokens): 56dp, corner-full,
+            surface-container-high, elevation 3. This was an antd `Input.Search`
+            — a 32px rounded rectangle with a square button bolted to its right
+            edge — which is the single clearest "this is not Material" tell on
+            the screen. Behaviour is unchanged and still ours: `/` focuses it
+            from anywhere, Escape clears it, and a submit warms the index. */}
+        <div className="ah-searchbar ah-search-input">
+          <span className="ah-searchbar__icon" aria-hidden="true">
+            <SearchOutlined />
+          </span>
+          <input
+            ref={inputRef}
+            className="ah-searchbar__input"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void api.searchWarm().then(setIndex);
+              if (e.key === "Escape") setQ("");
+            }}
+            placeholder={mode === "titles" ? t("searchTitles") : t("searchFull")}
+            aria-label={mode === "titles" ? t("searchTitles") : t("searchFull")}
+          />
+          {searching ? (
+            <span className="ah-loading ah-loading--uncontained" aria-hidden="true" />
+          ) : (
+            q.length > 0 && (
+              <button
+                type="button"
+                className="ah-searchbar__icon ah-searchbar__icon--trailing"
+                onClick={() => setQ("")}
+                aria-label={t("clear")}
+              >
+                ✕
+              </button>
+            )
+          )}
+        </div>
         <Select
           value={cliFilter || undefined}
           onChange={setCliFilter}
           placeholder={t("allClis")}
           allowClear
-          className="w-44"
+          className="ah-select-chip w-44"
           options={cliOptions.map((c) => ({ value: c, label: c }))}
         />
         <Tooltip title={t("domainsHint")}>
@@ -403,7 +535,7 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             onChange={setDomainFilter}
             placeholder={t("allDomains")}
             allowClear
-            className="ah-narrow-hide min-w-56 max-w-80"
+            className="ah-select-chip ah-narrow-hide min-w-56 max-w-80"
             options={domains.map(([d, n]) => ({
               value: d,
               label: `${d.split(/[\\/]/).filter(Boolean).pop() ?? d} (${n})`,
@@ -423,17 +555,36 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
           />
         </Tooltip>
         <Tooltip title={needsReplyHint}>
-          <Button
-            size="small"
-            type={needsReplyOnly ? "primary" : "default"}
+          <button
+            type="button"
+            className="ah-filterchip"
+            aria-pressed={needsReplyOnly}
             onClick={() => setNeedsReplyOnly((v) => !v)}
           >
             ⚠ {t("needsReply")}
             {needsReplyCount > 0 && (
-              <span className="ml-1 font-mono">{needsReplyCount}</span>
+              <span className="ah-num">{needsReplyCount}</span>
             )}
-          </Button>
+          </button>
         </Tooltip>
+        {/* The store holds more conversations than this list shows, and the only
+            honest way to say that is a number the list can reproduce (spec
+            Round 54). Tool loops are not conversations — the product's own UI
+            does not list them either — but "hidden" and "lost" look identical
+            from a row count, so the chip both states and undoes it. */}
+        {hiddenInView > 0 && (
+          <Tooltip title={t("hiddenHint")}>
+            <button
+              type="button"
+              className="ah-filterchip"
+              aria-pressed={showHidden}
+              onClick={() => setShowHidden((v) => !v)}
+            >
+              ⊘ {t("hiddenChip")}
+              <span className="ah-num">{hiddenInView}</span>
+            </button>
+          </Tooltip>
+        )}
         <div className="ml-auto flex items-center gap-3">
           {indexLine()}
           {showHits && !building && (
@@ -448,17 +599,30 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
               </span>
             </Tooltip>
           )}
-          <span className="ah-md-hide ah-faint flex items-center gap-1.5">
+          <Tooltip title={paused ? t("refreshPausedWhy") : fmt("refreshWhy", { n: POLL_MS / 1000 })}>
             <span
-              className="freshness-dot h-1.5 w-1.5 rounded-full"
-              style={{ opacity: refreshing ? 0.5 : 1 }}
-            />
-            {refreshing
-              ? t("updating")
-              : freshSecs !== null && freshSecs < 60
-                ? fmt("updatedAgo", { n: freshSecs })
-                : t("autoRefresh")}
-          </span>
+              id="ah-freshness"
+              /* `.ah-faint` stays on in both states: the warning is meant to be a
+                 colour change only, and swapping the two classes would take the
+                 small type with it. `.ah-warn` is declared after `.ah-faint` in
+                 the sheet, so at equal specificity it wins the colour. */
+              className={`ah-md-hide ah-faint flex items-center gap-1.5 ${
+                staleBadge ? "ah-warn" : ""
+              }`}
+              /* The quantity behind the prose, for anything that has to check the
+                 prose says it: `data-*` carries the instant the rows on screen
+                 landed, so a reader script compares the number in the label with
+                 the clock instead of parsing two locales. (spec Round 60) */
+              data-updated-ms={updatedAt ?? undefined}
+              data-held={paused || undefined}
+            >
+              <span
+                className="freshness-dot h-1.5 w-1.5 rounded-[var(--ah-shape-full)]"
+                style={{ opacity: refreshing ? 0.5 : paused ? 0.3 : 1 }}
+              />
+              {freshnessLabel()}
+            </span>
+          </Tooltip>
           <Button size="small" type="text" onClick={() => setShowActivity((v) => !v)}>
             {t("activity")}
           </Button>
@@ -480,9 +644,9 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
         ) : sessions === null ? (
           <SkeletonRows n={10} />
         ) : visible.length === 0 ? (
-          <Empty description={t("noSessions")}>
+          <EmptyState text={t("noSessions")}>
             <FirstRun />
-          </Empty>
+          </EmptyState>
         ) : (
           groupMode === "flat" ? (
             <ul className="m-0 list-none space-y-1.5 p-0">
@@ -509,6 +673,30 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             ))
           )
         )}
+      </div>
+      {/* Shortcut strip (spec Round 53). Every key here is wired and tested in the
+          browser; nothing is advertised that the app does not do. It sits outside
+          the scroll area on purpose -- a hint you have to scroll to find is not a
+          hint -- and it is the only place the cockpit states that the rows are a
+          keyboard list, which is otherwise invisible to a first-time reader who
+          arrives with the mouse in hand. */}
+      <div className="ah-kbdhint flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-1.5">
+        <span>
+          <kbd>↑</kbd>
+          <kbd>↓</kbd> {t("hintSelect")}
+        </span>
+        <span>
+          <kbd>↵</kbd> {t("hintOpen")}
+        </span>
+        <span>
+          <kbd>/</kbd> {t("hintSearch")}
+        </span>
+        <span>
+          <kbd>1</kbd>–<kbd>5</kbd> {t("hintViews")}
+        </span>
+        <span>
+          <kbd>T</kbd> {t("hintTheme")}
+        </span>
       </div>
     </div>
   );
@@ -582,7 +770,7 @@ function PagedRows({
         <li>
           <button
             onClick={() => setShown((n) => n + PAGE)}
-            className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+            className="ah-more ah-faint w-full py-1.5 text-center font-mono text-[12px]"
           >
             {t("showMore")} ({rows.length - shown})
           </button>
@@ -622,6 +810,9 @@ function SessionRow({
     });
   };
   const kids = s.children ?? [];
+  // The store owns this vocabulary, so the key is built before it is looked up:
+  // `hasKey` narrows a value, not a template expression.
+  const kindKey = `kind_${s.task_type ?? ""}`;
   return (
     <li className="row-enter">
       <div className="flex items-stretch gap-1">
@@ -652,7 +843,13 @@ function SessionRow({
             <span className="ah-faint block truncate font-mono text-[11px] leading-tight">
               {s.session_id.slice(0, 8)}
               {s.git?.branch && (
-                <span className="ml-1.5 ah-accent">⎇ {s.git.branch}</span>
+                <span
+                  className="ml-1.5 ah-accent"
+                  title={s.git.source === "session" ? t("gitSession") : t("gitLive")}
+                >
+                  ⎇ {s.git.branch}
+                  {s.git.commit ? `@${s.git.commit.slice(0, 7)}` : ""}
+                </span>
               )}
               {s.cwd && (
                 <span className="ml-1.5" dir="auto">· {s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd}</span>
@@ -669,7 +866,7 @@ function SessionRow({
           )}
           {s.automation && (
             <Tooltip title={`${t("automation")} · ${s.automation}`}>
-              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-pill)] px-2 py-px font-mono text-[11px] lg:inline">
+              <span className="ah-tonal-accent hidden shrink-0 rounded-[var(--ah-shape-full)] px-2 py-px font-mono text-[11px] lg:inline">
                 ⚙ {s.automation.length > 18 ? `${s.automation.slice(0, 17)}…` : s.automation}
               </span>
             </Tooltip>
@@ -686,7 +883,9 @@ function SessionRow({
           )}
           {s.task_type && s.task_type !== "quest-task" && s.task_type !== "interactive" && (
             <Tooltip title={`${t("taskKind")} · ${s.task_type}`}>
-              <span className="ah-faint hidden shrink-0 font-mono text-[11px] lg:inline">⬣ {t(`kind_${s.task_type}` as Parameters<typeof t>[0])}</span>
+              <span className="ah-faint hidden shrink-0 font-mono text-[11px] lg:inline">
+                ⬣ {hasKey(kindKey) ? t(kindKey) : s.task_type}
+              </span>
             </Tooltip>
           )}
           {s.provider && (
@@ -704,7 +903,7 @@ function SessionRow({
           </span>
           {s.needs_reply === true && (
             <Tooltip title={t("needsReplyHint")}>
-              <span className="ah-warn shrink-0 text-[13px]">⚠</span>
+              <span className="ah-warn shrink-0 text-[14px]">⚠</span>
             </Tooltip>
           )}
           <span className="w-24 shrink-0 text-right max-sm:hidden">
@@ -713,7 +912,7 @@ function SessionRow({
         </button>
       </div>
       {open && kids.length > 0 && (
-        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
+        <ul className="ah-expand m-0 mt-1.5 list-none space-y-1.5 p-0 pl-5">
           {kids.map((k) => (
             <SessionRow key={`${k.cli}:${k.session_id}`} s={k} onOpen={onOpen} depth={depth + 1} />
           ))}
@@ -757,7 +956,7 @@ function HitList({
         )}
       </div>
       {hits.length === 0 && !building && (
-        <Empty description={<span className="ah-meta">{t("noFullHits")}</span>} />
+        <EmptyState text={t("noFullHits")} />
       )}
       <ul className="m-0 list-none space-y-1.5 p-0">
         {hits.map((h) => (
@@ -848,7 +1047,7 @@ function SkeletonRows({ n }: { n: number }) {
   return (
     <div className="space-y-2">
       {Array.from({ length: n }).map((_, i) => (
-        <div key={i} className="ah-skeleton h-11" />
+        <div key={i} className="ah-skeleton" />
       ))}
     </div>
   );

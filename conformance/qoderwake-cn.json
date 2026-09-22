@@ -1,0 +1,28 @@
+{
+  "cli": "qoderwake-cn",
+  "env": {
+    "zstandard": true
+  },
+  "parse": {
+    "file_anchors": 0,
+    "files": 11,
+    "messages": 21,
+    "nonempty_messages": 21,
+    "proven": true,
+    "sampled": false,
+    "sessions": 8,
+    "shape_only": false,
+    "source_messages": 42,
+    "supplement_files": 0,
+    "tool_calls": 0,
+    "unusable": false
+  },
+  "store": {
+    "files_by_suffix": {},
+    "keys_by_type": {},
+    "record_types": {},
+    "tables": {},
+    "top_key_sets": {}
+  },
+  "version": "1"
+}

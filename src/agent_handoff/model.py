@@ -68,6 +68,11 @@ class SessionMeta:
     provider: str | None = None
     origin: str | None = None
     parent_session_id: str | None = None
+    # The revision the *session* ran on, when the store records it. Distinct
+    # from the live branch of its cwd, which moves after the session ends: 19 of
+    # 95 Codex sessions on this machine ran on a branch the repo has left.
+    git_branch: str | None = None
+    git_commit: str | None = None
     # Assistant identity as the product shows it (workbuddy
     # assistant-display snapshots: expert name + avatar URL). Display-only;
     # never a credential, URLs point at the vendor's public CDN.
@@ -85,6 +90,13 @@ class SessionMeta:
     # Files the user attached to the conversation (zcode file parts:
     # filename + path). Distinct from files a tool touched mid-run.
     attachments: list[str] = field(default_factory=list)
+    # Why this conversation is not in ``list_sessions()``. A transcript with no
+    # user turn of its own is an internal tool loop rather than a conversation,
+    # and the product's own UI does not list those — but "this store holds 107
+    # rows we did not show you" is a fact a surface has to be able to state, so
+    # the dropped rows are kept and tagged instead of vanishing. ``None`` means
+    # listed; see ``Parser.hidden_sessions``.
+    hidden_reason: str | None = None
 
 
 @dataclass
@@ -98,6 +110,10 @@ class Message:
 
     role: str  # "user" | "assistant"
     text: str
+    # The store's own split between the two assistant surfaces the product
+    # shows: "commentary" (the working stream) and "final_answer" (the reply).
+    # Parsers fill it only when the store wrote it; None means it said nothing.
+    phase: str | None = None
     at: str | None = None
     model: str | None = None
     tokens_in: int | None = None
@@ -120,11 +136,29 @@ class Message:
     # where token billing is absent. Server fills it from timestamps when the
     # store records none.
     dur_ms: int | None = None
+    # When the first answer token arrived, from the store's own clock (codex
+    # `task_complete.time_to_first_token_ms`). `dur_ms` alone cannot tell a turn
+    # that was slow to start from one that was slow to finish, and this is the
+    # half that says. Measured on this machine's codex store: 179 of 223
+    # `task_complete` rows carry it, always beside `duration_ms`, and none of
+    # the 179 exceeds it — so it is read as a part of that turn's wall clock,
+    # never as a second total. Absent wherever the store did not write it.
+    ttft_ms: int | None = None
     # The turn exactly as the store holds it, before clean_text/is_noise
     # trimming. None means the parser kept everything (nothing was trimmed)
     # or the dialect has no trimmable wrappers — either way text IS verbatim.
     # Lets the cockpit offer a 原文 view without re-reading the store.
     raw_text: str | None = None
+    # Which end of an in-file fork this turn is. A store writes a record when
+    # the user edits a turn they had already sent: the edited turn stays in the
+    # transcript as the abandoned copy (`superseded`) and the new text follows
+    # as a fresh turn (`resent`). Measured over 77 such records in 7 real
+    # sessions: every one names an earlier user turn in the same file and sits
+    # directly above the re-sent copy. Both are true of the same turn in 63 of
+    # those 77 — repeatedly editing the newest message is how the product is
+    # used — which is why these are two flags and not one label.
+    resent: bool = False
+    superseded: bool = False
 
 
 @dataclass
@@ -132,6 +166,29 @@ class TodoItem:
     content: str
     status: str = "pending"  # pending | in_progress | completed
     priority: str = ""
+
+
+#: Every end-state word the product can put on screen, from either layer: the
+#: kinds a parser proves about how a turn ended, and the state words the cheap
+#: list-page probes forward from a store's own status column (`completed`,
+#: `working`, `idle`, `archived`, `failed`). `tests/test_status_words.py` holds
+#: web/src/components.tsx and both i18n locales in step with this tuple, so a
+#: store that starts reporting a new word cannot render as a silent gap or as a
+#: borrowed colour.
+END_STATE_WORDS = (
+    "clean",
+    "completed",
+    "error",
+    "failed",
+    "cancelled",
+    "working",
+    "idle",
+    "archived",
+    "user_pending",
+    "context_exceeded",
+    "length_truncated",
+    "unknown",
+)
 
 
 @dataclass
@@ -143,17 +200,29 @@ class Interruption:
     session with a misleading picture unless surfaced explicitly. Parsers
     fill what their store can prove; summarize adds cross-CLI inference
     (e.g. a dangling user message with no reply).
+
+    The default is the honest one. `clean` is a claim that the turn finished,
+    so it has to come from a record; a store that writes no end marker at all
+    (qoder-ide keeps none across 2,259 sessions) must not end up claiming it by
+    falling off the end of a dataclass. `parsers/base.py` already demands
+    exactly this of the cheap probe - "callers must treat None as unknown,
+    never as clean" - and the detail page is the same promise.
     """
 
-    kind: str = "clean"
+    kind: str = "unknown"
     # clean | user_pending | cancelled | context_exceeded | length_truncated
     # | error | unknown
-    detail: str = ""
+    detail: str = "the store records no end marker, so how this ended is not proven"
     pending_user_text: str = ""  # set when kind == user_pending
 
     @property
     def detected(self) -> bool:
-        return self.kind != "clean"
+        """The store proved something went wrong.
+
+        Absence of proof is not proof of an interruption either: `unknown` says
+        nothing happened to be recorded, and must not be reported as a finding.
+        """
+        return self.kind not in ("clean", "unknown", "")
 
     def describe(self) -> str:
         labels = {
@@ -179,9 +248,30 @@ class CompactionEvent:
 
     at: str | None = None
     reason: str = ""  # e.g. context_limit
+    # How many turns had been written when the divider appeared. A divider's
+    # *position* is the fact - everything before it exists only as a summary -
+    # and 11 of the 14 Codex sessions that have one put every row inside the same
+    # second, where sorting by timestamp is a coin flip.
+    after_messages: int | None = None
     pre_tokens: int | None = None
     post_tokens: int | None = None
     auto: bool = True
+
+
+@dataclass
+class HistoryStart:
+    """This transcript begins mid-conversation, and the rest is elsewhere.
+
+    Codex forks a thread and writes only the turns after the fork: the header
+    names the ordinal this page begins at and the thread the earlier turns live
+    in. A reader that shows the page as the whole conversation is wrong by
+    omission - the same failure a hidden compaction is - so it is a first-class
+    fact about the transcript rather than a note nobody sees.
+    """
+
+    ordinal: int = 0
+    parent_session_id: str = ""
+    at: str | None = None
 
 
 @dataclass
@@ -195,6 +285,8 @@ class RawSession:
     tool_counts: Counter[str] = field(default_factory=Counter)
     interruption: Interruption = field(default_factory=Interruption)
     compactions: list[CompactionEvent] = field(default_factory=list)
+    # Set when the store says this file is one page of a longer thread.
+    history_start: HistoryStart | None = None
 
     @property
     def user_messages(self) -> list[Message]:
@@ -261,6 +353,8 @@ class HandoffBundle:
                 "provider": self.meta.provider,
                 "origin": self.meta.origin,
                 "parent_session_id": self.meta.parent_session_id,
+                "git_branch": self.meta.git_branch,
+                "git_commit": self.meta.git_commit,
                 "expert_name": self.meta.expert_name,
                 "expert_avatar": self.meta.expert_avatar,
                 "notes": self.meta.notes,

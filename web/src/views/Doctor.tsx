@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Button, Empty, Table, Tooltip, Typography } from "antd";
+import { Button, Table, Tooltip, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { api, type StoreInfo } from "../api";
-import { CliBadge } from "../components";
+import { CliBadge, EmptyState } from "../components";
 import { useT } from "../i18n";
 
 /** Which CLI stores exist here and whether we can actually read them. */
@@ -28,7 +28,7 @@ export default function Doctor() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {stores === null && <Typography.Text className="ah-meta">{t("loading")}</Typography.Text>}
-        {stores?.length === 0 && <Empty description={<span className="ah-meta">{t("noStores")}</span>} />}
+        {stores?.length === 0 && <EmptyState text={t("noStores")} />}
         {stores && stores.length > 0 && (
           <Table<StoreInfo>
             size="small"

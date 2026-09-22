@@ -170,3 +170,32 @@ def test_live_overlay_stays_out_of_committed_rows():
     assert all(not r.empty_store for r in rows)
     overlaid = ah_matrix.with_live_overlay([r for r in rows])
     assert all(r.status == ah_matrix.derive_status(r) for r in overlaid)
+
+
+@pytest.mark.parametrize("cli", PRESENT)
+def test_no_row_shape_in_the_fixture_goes_unread(cli: str):
+    """The unread-shape surface is empty now, and this keeps it empty.
+
+    Round 43 read the last row shape the stores really write that this reader
+    could not parse, so an `unhandled_row:*` note now means exactly one thing:
+    a shape nobody has looked at. Without a gate the label would refill quietly
+    and stop being a signal, so every session in this CLI's fixture is parsed -
+    not sampled - and nothing may come back unread.
+    """
+    target = fixtures.root_for(cli)
+    assert target is not None, f"{cli}: fixture present but has no root"
+    parser = _parser(cli).with_root(target)
+    unread = []
+    for meta in parser.list_sessions():
+        raw = parser.load(meta.session_id)
+        assert raw is not None, f"{cli}: {meta.session_id} is listed but does not load"
+        unread += [
+            f"{meta.session_id[:12]}: {note}"
+            for note in raw.meta.notes
+            if note.startswith("unhandled_row")
+        ]
+    assert not unread, (
+        f"{cli}: {len(unread)} sessions report a row nobody read - {unread[:4]}. "
+        "Read it in the parser, or declare the shape in ROLELESS_ROW_TYPES with "
+        "the session count it was measured at; do not leave it in the notes."
+    )

@@ -7,7 +7,10 @@ shipped inside the wheel). See docs/decisions.md ADR-006/007/008.
 
 from __future__ import annotations
 
+import contextlib
 import mimetypes
+import os
+import threading
 import time
 from dataclasses import asdict
 from importlib import resources
@@ -41,6 +44,7 @@ from agent_handoff.exchange import (
 )
 from agent_handoff.locations import discover
 from agent_handoff.parsers import all_parsers
+from agent_handoff.parsers.base import discovery_pass as ah_discovery_pass
 from agent_handoff.render import render_markdown
 from agent_handoff.resume import render_brief, render_full_brief
 from agent_handoff.summarize import build_full_transcript, summarize
@@ -52,7 +56,55 @@ from agent_handoff.threads import (
     title_tokens,
 )
 
-app = FastAPI(title="agenthandoff cockpit", version="0.1.0")
+
+def _prewarm_enabled() -> bool:
+    """Whether to warm the session list at startup.
+
+    On by default. `AGENTHANDOFF_PREWARM=0` turns it off, which two callers want:
+    a test that swaps the parser set after startup (the warm-up would cache the
+    *old* set under the same key for the next 20 seconds - exactly what a
+    monkeypatched store cannot survive), and anyone who starts the UI on a huge
+    store and would rather the first request pays than the boot.
+    """
+
+    return os.environ.get("AGENTHANDOFF_PREWARM", "1").strip().lower() not in (
+        "0",
+        "off",
+        "false",
+    )
+
+
+def _prewarm_sessions() -> None:
+    """Build the default session list once, off the request path.
+
+    The dashboard cannot paint a row before the sessions endpoint answers, and the
+    first answer after a server start used to cost the whole build: measured 0.23s
+    to the app shell, **9.21s** for that request, 10.91s to the first row and
+    12.43s to all 187 mounted rows. Starting the same build at process start moves
+    it off the critical path - the shell paints immediately and the list arrives
+    when the in-flight build finishes. Failures are swallowed: a warm-up is never
+    the reason a server does not come up.
+    """
+
+    def build() -> None:
+        with contextlib.suppress(Exception):
+            _session_roots(None, None, None)
+
+    threading.Thread(target=build, name="prewarm-sessions", daemon=True).start()
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    if _prewarm_enabled():
+        _prewarm_sessions()
+    yield
+
+
+app = FastAPI(
+    title="agenthandoff cockpit",
+    version="0.1.0",
+    lifespan=_lifespan,
+)
 
 # Windows MIME registries may map .js to text/plain, which makes browsers
 # refuse the module scripts and the cockpit boots blank. Pin the web types
@@ -109,6 +161,70 @@ def stores():
 # 30s poll doesn't re-decompress 46 zstd rolls per request (ADR-006).
 _sessions_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 20.0
+# One build per cache key. Measured on this machine (2026-09-13, 344 sessions): a
+# cold build is **5.4s**, a rebuild **2.8–3.4s**, and without this a second request
+# that arrives while the first is still building starts *its own* build. The
+# cockpit polls every 30s per open tab, so a handful of tabs was enough to keep
+# several builds in flight, saturate the thread pool, and leave the whole app —
+# even `/api/stores` — queued behind them for minutes. A per-key lock, a stale
+# answer and a background refresh are the whole fix; the warm-up at startup is
+# `_prewarm_sessions`.
+_sessions_locks: dict[str, threading.Lock] = {}
+_sessions_locks_guard = threading.Lock()
+
+
+def _session_lock(key: str) -> threading.Lock:
+    with _sessions_locks_guard:
+        lock = _sessions_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _sessions_locks[key] = lock
+        return lock
+
+
+def _session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
+    """The cached session list, with one build in flight per key.
+
+    Three cases, and the third is the one that mattered:
+
+    * **fresh** — return it, no work;
+    * **stale, and someone is already refreshing** — return the stale list. It is
+      at most one TTL out of date, which the 30s poll cannot tell apart from
+      "nothing changed", and answering it costs no CPU;
+    * **cold** — wait on the lock and then re-check, so N simultaneous first
+      requests produce one build instead of N.
+    """
+    key = f"{cli}|{cwd}|{q}"
+    hit = _sessions_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _CACHE_TTL:
+        return hit[1]
+    lock = _session_lock(key)
+    if hit:
+        # Stale: answer with what we have and rebuild off the request path. The
+        # previous shape let the request that *won* the lock rebuild
+        # synchronously, so a tab that polled every 30s blocked for a whole build
+        # every 20s (measured 4.07s to first row with everything else warm). The
+        # list is at most one TTL out of date, which the poll cannot tell apart
+        # from "nothing changed", and a stale answer beats a queue.
+        if lock.acquire(blocking=False):
+            def refresh() -> None:
+                try:
+                    roots = _build_session_roots(cli, cwd, q)
+                    _sessions_cache[key] = (time.monotonic(), roots)
+                except Exception:  # noqa: BLE001 - a failed refresh keeps the old list
+                    pass
+                finally:
+                    lock.release()
+
+            threading.Thread(target=refresh, name=f"refresh-{key}", daemon=True).start()
+        return hit[1]
+    with lock:
+        fresh = _sessions_cache.get(key)
+        if fresh is not None:
+            return fresh[1]
+        roots = _build_session_roots(cli, cwd, q)
+        _sessions_cache[key] = (time.monotonic(), roots)
+        return roots
 
 
 def _domain_for(cwd: str) -> str:
@@ -162,6 +278,88 @@ def _git_info(cwd: str) -> dict:
     hit = _git_cache.get(cwd)
     if hit and now - hit[0] < _GIT_TTL:
         return hit[1]
+    info = _git_info_from_files(cwd)
+    if info is None:
+        info = _git_info_from_git(cwd)
+    _git_cache[cwd] = (now, info)
+    return info
+
+
+def _git_info_from_files(cwd: str) -> dict | None:
+    """The same answer `git` gives, read off the files instead of spawned.
+
+    `git branch --show-current` and `git worktree list --porcelain` are two
+    processes per distinct cwd, and the cockpit has a cwd per session: measured
+    over 802 metas, **2.03s** of the 5.7s cold build was those spawns. The branch
+    is one line of `<gitdir>/HEAD` and the linked-worktree count is a directory
+    listing, so the whole thing is a few reads. `None` means "not the common
+    shape" (a packed ref, an unreadable store, a detached HEAD with no worktrees)
+    and the caller falls back to the real `git`, which stays the source of truth.
+    """
+    try:
+        p = Path(cwd)
+        # A relative cwd is resolved against *this process*, not against the CLI
+        # that recorded it, so the walk can land in an unrelated repository — it
+        # did: a session whose cwd is the literal string `workspace` reported this
+        # worktree's branch. And a path that is not there cannot have a repo, so
+        # `git -C <path>` would return nothing after paying for a process spawn;
+        # 41 of this machine's 53 cwds are stale like that, which was 1.4s of every
+        # build. Both cases answer `{}` here exactly as `git` answers it.
+        if not p.is_absolute() or not p.is_dir():
+            return {}
+        gitdir: Path | None = None
+        for _ in range(48):
+            candidate = p / ".git"
+            if candidate.is_dir():
+                gitdir = candidate
+                break
+            if candidate.is_file():
+                text = candidate.read_text(encoding="utf-8", errors="replace").strip()
+                if not text.lower().startswith("gitdir:"):
+                    return None
+                target = Path(text.split(":", 1)[1].strip())
+                gitdir = target if target.is_absolute() else (candidate.parent / target)
+                break
+            if p.parent == p:
+                return {}
+            p = p.parent
+        if gitdir is None:
+            return {}
+        head = (gitdir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+        info: dict = {}
+        if head.startswith("ref:"):
+            ref = head[4:].strip()
+            if not ref.startswith("refs/heads/"):
+                return None
+            info["branch"] = ref[len("refs/heads/") :]
+        elif head:
+            # Detached HEAD: `git branch --show-current` prints nothing and this
+            # path leaves `branch` unset too. Not adding a `detached` key here on
+            # purpose — the payload is what the frontend was written against, and
+            # this change is about cost, not about new fields.
+            pass
+        else:
+            return None
+        common = gitdir
+        commondir = gitdir / "commondir"
+        if commondir.is_file():
+            text = commondir.read_text(encoding="utf-8", errors="replace").strip()
+            if text:
+                target = Path(text)
+                common = target if target.is_absolute() else (gitdir / target)
+        worktrees = common / "worktrees"
+        count = 1
+        if worktrees.is_dir():
+            count += sum(1 for entry in worktrees.iterdir() if entry.is_dir())
+        if count > 1:
+            info["worktree_count"] = count
+        return info
+    except OSError:
+        return None
+
+
+def _git_info_from_git(cwd: str) -> dict:
+    """The subprocess path. Kept as the fallback, not as the common case."""
     import subprocess
     info: dict = {}
     try:
@@ -188,7 +386,6 @@ def _git_info(cwd: str) -> dict:
                 info["worktree_count"] = len(worktrees)
     except (OSError, subprocess.TimeoutExpired):
         pass
-    _git_cache[cwd] = (now, info)
     return info
 
 
@@ -210,14 +407,7 @@ def sessions(
     import hashlib
     import json as _json
 
-    cache_key = f"{cli}|{cwd}|{q}"
-    now = time.monotonic()
-    hit = _sessions_cache.get(cache_key)
-    if hit and now - hit[0] < _CACHE_TTL:
-        roots = hit[1]
-    else:
-        roots = _build_session_roots(cli, cwd, q)
-        _sessions_cache[cache_key] = (now, roots)
+    roots = _session_roots(cli, cwd, q)
     fingerprint = hashlib.sha1(
         _json.dumps(
             [(s.get("cli"), s.get("session_id"), s.get("updated_at")) for s in roots]
@@ -249,11 +439,26 @@ def sessions(
 
 
 def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
+    """One discovery pass over every store: the whole build sees one file list.
+
+    The build lists each store and then peeks each session it listed, and a
+    parser that answers "where are the transcripts" from the OS does it once per
+    question. The pass is the boundary that question cannot derive from.
+    """
+    with ah_discovery_pass():
+        return _collect_session_roots(cli, cwd, q)
+
+
+def _collect_session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
     out = []
     for p in all_parsers():
         if cli and p.cli != cli:
             continue
-        for m in p.list_sessions():
+        # Listed rows plus the ones this parser deliberately did not list
+        # (tool-loop transcripts): the cockpit hides them by default and says
+        # how many, instead of shipping a store of 2,638 conversations whose
+        # real size the reader cannot check (spec Round 54).
+        for m in [*p.list_sessions(), *p.hidden_sessions()]:
             if cwd and cwd.lower() not in m.cwd.lower():
                 continue
             if q and q.lower() not in m.title.lower():
@@ -283,6 +488,10 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                     # Task-panel entry whose session the readable snapshot no
                     # longer lists (archived or deleted) — the product's own tag.
                     **({"archived": True} if "snapshot_archived" in m.notes else {}),
+                    # Set on a row the parser did not list (a tool-loop
+                    # transcript). Absent otherwise, so the frontend's filter is
+                    # `!s.hidden_reason` and the count it shows is this many rows.
+                    **({"hidden_reason": m.hidden_reason} if m.hidden_reason else {}),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),
@@ -291,8 +500,22 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                     "needs_reply": p.peek_needs_reply(m.session_id),
                     # config-driven project domain (ADR-009): cwd by default
                     "domain": _domain_for(m.cwd),
-                    # live git branch/worktree for the session cwd (cached 30s)
-                    **({"git": g} if (g := _git_info(m.cwd)) else {}),
+                    # The store's own record of the revision the session ran on
+                    # wins over the live probe: 19 of 95 Codex sessions ran on a
+                    # branch the repository has since left, so the live answer is
+                    # about the *cwd today*, not about the session. The probe stays
+                    # as the fallback for the CLIs whose stores do not say.
+                    **(
+                        {
+                            "git": {
+                                "branch": m.git_branch,
+                                "commit": m.git_commit,
+                                "source": "session",
+                            }
+                        }
+                        if m.git_branch
+                        else ({"git": {**g, "source": "cwd"}} if (g := _git_info(m.cwd)) else {})
+                    ),
                 }
             )
     out.sort(key=lambda s: s["updated_at"] or "", reverse=True)
@@ -371,6 +594,17 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
                 "text": m.text,
                 "at": m.at,
                 **({"dur_ms": _d} if _d is not None else {}),
+                # The store's own split of its own total. Paired with `_own`
+                # deliberately: a timestamp-derived total is a different clock,
+                # and a first-token figure against it would read as a fraction
+                # of a number the store never measured.
+                **(
+                    {"ttft_ms": m.ttft_ms}
+                    if _own is not None
+                    and isinstance(m.ttft_ms, int)
+                    and 0 <= m.ttft_ms < 86400 * 1000
+                    else {}
+                ),
                 # per-turn billing: which model answered, what it cost in tokens
                 **({"model": m.model} if m.model else {}),
                 **({"tokens_in": m.tokens_in} if m.tokens_in is not None else {}),
@@ -387,6 +621,11 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
                 ),
                 **({"credits": m.credits} if m.credits is not None else {}),
                 **({"subagent": m.subagent} if m.subagent else {}),
+                # Which end of an in-file fork this turn is. Absent = no fork
+                # record touched it; both keys on one row mean the user re-sent
+                # this turn and then edited it again.
+                **({"resent": True} if m.resent else {}),
+                **({"superseded": True} if m.superseded else {}),
                 # Verbatim source beside the cleaned text (None = cleaning
                 # changed nothing); the cockpit offers a 原文 view off this.
                 **({"raw_text": m.raw_text} if m.raw_text else {}),
@@ -401,14 +640,41 @@ def session_detail(cli: str, sid: str, lang: str = "en", max_chars: int = 12000)
             f"{c.pre_tokens if c.pre_tokens is not None else '?'} → "
             f"{c.post_tokens if c.post_tokens is not None else '?'} tokens",
             "at": c.at,
+            "after": c.after_messages,
         }
         for n, c in enumerate(raw.compactions, 1)
     ]
-    if markers:
+    # A divider is placed where it happened, not when: a store that writes every
+    # row inside one second (11 of the 14 Codex sessions with a divider) leaves a
+    # timestamp sort with nothing to go on. Events without a position keep the
+    # timestamp ordering the other parsers have always used.
+    placed = [m for m in markers if m["after"] is not None]
+    floating = [m for m in markers if m["after"] is None]
+    if floating:
         # Verbatim like the turns: a 1000-turn session must read as 1000
         # turns, not the last 400. Paging/virtualization is the frontend's
         # job; the API must not silently drop history.
-        stream = sorted(stream + markers, key=lambda x: x["at"] or "")
+        stream = sorted(stream + floating, key=lambda x: x["at"] or "")
+    for marker in sorted(placed, key=lambda m: m["after"], reverse=True):
+        stream.insert(min(int(marker["after"]), len(stream)), marker)
+
+    if raw.history_start is not None:
+        # The header says this file begins at turn N of another thread. Its
+        # position is not a timestamp question: *by definition* it sits before
+        # the first turn of this page, and a session whose rows share one
+        # timestamp (this store has such sessions) would otherwise sort it to
+        # the newest end. `stream` is oldest-first; the endpoint reverses it.
+        history = raw.history_start
+        stream.insert(
+            0,
+            {
+                "role": "history",
+                "text": f"{history.ordinal} · {history.parent_session_id}",
+                "at": history.at,
+                "parent_session_id": history.parent_session_id,
+                "ordinal": history.ordinal,
+            },
+        )
 
     # The same measurement `handoff watch` ladder-steps, read-only: the UI must
     # not show a fuller or emptier session than the snapshots claim.
@@ -513,24 +779,76 @@ def session_raw(cli: str, sid: str):
 # result and let "recluster" bust it explicitly.
 _threads_cache: dict[tuple, tuple[float, list]] = {}
 _THREADS_TTL = 600.0
+# The file sets behind this view cost one full `load()` per session: measured on
+# this machine at **189ms each over 802 sessions, ~150s**, and the view sat on
+# "聚类中…（大库首次约 15 秒）" for two minutes because of it. Two changes make the
+# answer arrive: the sets are cached per session (keyed by `updated_at`, so an
+# edited session re-reads), and one pass runs under a time budget, newest first,
+# so a slow store produces a *smaller answer with a number attached* instead of
+# no answer at all.
+_files_cache: dict[tuple[str, str, str], frozenset[str]] = {}
+_THREADS_BUDGET = 15.0
+
+
+def _session_files(p, meta, deadline: float) -> frozenset[str] | None:
+    """The files a session touched, cached; `None` when the budget is spent."""
+    key = (meta.cli, meta.session_id, meta.updated_at or "")
+    hit = _files_cache.get(key)
+    if hit is not None:
+        return hit
+    if time.monotonic() > deadline:
+        return None
+    raw = p.load(meta.session_id)
+    files = frozenset(normalize_path(f) for f in raw.files_touched) if raw else frozenset()
+    _files_cache[key] = files
+    return files
 
 
 @app.get("/api/threads")
 def threads(cwd: str | None = None, min_overlap: float = 0.15, window_days: int = 21):
+    return _threads_payload(cwd, min_overlap, window_days, refresh=False)
+
+
+@app.get("/api/threads/refresh")
+def threads_refresh(cwd: str | None = None, min_overlap: float = 0.15, window_days: int = 21):
+    """One more budget's worth of file sets, on top of what is already cached.
+
+    The first call answers with whatever it could read in `_THREADS_BUDGET`
+    seconds; this is how the caller asks for the next batch without paying for
+    the previous one again.
+    """
+    return _threads_payload(cwd, min_overlap, window_days, refresh=True)
+
+
+def _threads_payload(
+    cwd: str | None, min_overlap: float, window_days: int, refresh: bool
+) -> dict:
+    started = time.monotonic()
     key = (cwd, min_overlap, window_days)
-    now = time.monotonic()
     hit = _threads_cache.get(key)
-    if hit and now - hit[0] < _THREADS_TTL:
+    if hit and not refresh and started - hit[0] < _THREADS_TTL:
         return hit[1]
 
-    nodes: list[SessionNode] = []
+    pairs: list[tuple] = []
     for p in all_parsers():
         for m in p.list_sessions():
             if cwd and cwd.lower() not in m.cwd.lower():
                 continue
-            raw = p.load(m.session_id)
-            files = {normalize_path(f) for f in raw.files_touched} if raw else set()
-            nodes.append(SessionNode(meta=m, files=files, tokens=title_tokens(m.title)))
+            pairs.append((p, m))
+    # Newest first: when the budget runs out, the sessions a reader is most
+    # likely to be looking at are the ones already covered.
+    pairs.sort(key=lambda pair: pair[1].updated_at or "", reverse=True)
+
+    deadline = started + _THREADS_BUDGET
+    nodes: list[SessionNode] = []
+    with_files = 0
+    for p, m in pairs:
+        files = _session_files(p, m, deadline)
+        if files is None:
+            files = frozenset()
+        else:
+            with_files += 1
+        nodes.append(SessionNode(meta=m, files=set(files), tokens=title_tokens(m.title)))
     result = []
     for t in sorted(
         build_threads(nodes, min_jaccard=min_overlap, window_days=window_days),
@@ -545,8 +863,18 @@ def threads(cwd: str | None = None, min_overlap: float = 0.15, window_days: int 
                 "last_active": t.last_active,
             }
         )
-    _threads_cache[key] = (now, result)
-    return result
+    payload = {
+        "threads": result,
+        "coverage": {
+            "sessions": len(nodes),
+            "with_files": with_files,
+            "seconds": round(time.monotonic() - started, 1),
+            "budget_s": _THREADS_BUDGET,
+            "budget_hit": with_files < len(nodes),
+        },
+    }
+    _threads_cache[key] = (started, payload)
+    return payload
 
 
 @app.get("/api/inbox")

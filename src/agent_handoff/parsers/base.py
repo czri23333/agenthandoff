@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import itertools
 import json
 import re
 from abc import ABC, abstractmethod
@@ -80,6 +83,77 @@ def json_records_entry(path: str, records: list[tuple[str, dict]]) -> dict:
     }
 
 
+def _change_stamp(path: Path, *, wal: bool) -> bytes | None:
+    """The bytes SQLite itself uses to say "this file has been written".
+
+    For a database that is the 4-byte file change counter at offset 24; for a
+    WAL header the checkpoint sequence and salt at offsets 12..20, which move
+    when the log restarts.
+    """
+    start, stop = (12, 20) if wal else (24, 28)
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            data = f.read(stop - start)
+    except OSError:
+        return None
+    return data or None
+
+
+def db_version(db_path: Path) -> tuple:
+    """A SQLite store's state as of this pass: the db file plus its live WAL.
+
+    Two signals are needed, and neither alone is enough:
+
+    * mtime and size catch a growth — but an in-place commit was measured to
+      leave **both** unchanged (40 rows rewritten inside one clock tick, the
+      file still 16,384 bytes), and a probe memo keyed on them would keep
+      serving the answer from before the conversation moved. That is the whole
+      failure mode of a cache over a database file, and it is why the change
+      counter is part of the key rather than an extra.
+    * the WAL sidecar, because a store in WAL mode commits there and the main
+      file's counter only moves at a checkpoint. A missing sidecar is part of
+      the version too: the WAL appearing is a change.
+    """
+    parts = []
+    for suffix in ("", "-wal"):
+        path = Path(f"{db_path}{suffix}")
+        try:
+            st = path.stat()
+        except OSError:
+            parts.append((None, None, None))
+        else:
+            parts.append((st.st_mtime_ns, st.st_size, _change_stamp(path, wal=bool(suffix))))
+    return tuple(parts)
+
+
+# store -> {session id: (the store version the answer was read at, the answer)}.
+# Module-level because `parsers/__init__.py` builds a fresh parser per call, so
+# instance state cannot outlive the pass that created it.
+_SQL_NEEDS_REPLY_CACHE: dict[str, dict] = {}
+
+
+def probe_memo(store: str, session_id: str, version: tuple, derive):
+    """One probe answer per store version, not one per poll.
+
+    The cockpit re-lists every session every 30 seconds, and a SQLite store is
+    one file holding every conversation: re-deriving means re-querying rows that
+    have not moved since the last answer. The caller passes the store version it
+    read at (see `db_version`), so a row re-derives as soon as the store changes
+    and not before. ``None`` is cached like any other answer — "this store could
+    not say" is itself a per-version fact, and re-asking costs the same.
+    """
+    memo = _SQL_NEEDS_REPLY_CACHE.setdefault(store, {})
+    hit = memo.get(session_id)
+    if hit is not None and hit[0] == version:
+        return hit[1]
+    answer = derive()
+    if len(memo) > 8192:
+        memo.clear()
+    memo[session_id] = (version, answer)
+    return answer
+
+
 class Parser(ABC):
     """A parser turns one CLI's private storage into a RawSession."""
 
@@ -87,6 +161,16 @@ class Parser(ABC):
 
     @abstractmethod
     def list_sessions(self) -> list[SessionMeta]: ...
+
+    def hidden_sessions(self) -> list[SessionMeta]:
+        """The rows ``list_sessions()`` drops, kept and tagged rather than gone.
+
+        The default is "this parser hides nothing", which is also the honest
+        answer for most dialects. A surface that counts conversations has to be
+        able to say how many it did not show, so the hiding is a filter with a
+        receipt, not a deletion (spec Round 54).
+        """
+        return []
 
     @abstractmethod
     def load(self, session_id: str) -> RawSession | None: ...
@@ -327,6 +411,39 @@ def is_injected(text: str) -> bool:
     """
     head = text.lstrip()[:80]
     return any(head.startswith(m) for m in INJECTED_TURN_PREFIXES)
+
+
+_PASS_IDS = itertools.count(1)
+_CURRENT_PASS: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "ah_discovery_pass", default=0
+)
+
+
+@contextlib.contextmanager
+def discovery_pass():
+    """Open a window in which a store is walked once, not once per session.
+
+    A cockpit rebuild lists every session and then peeks each one, and both
+    halves begin by asking where the transcripts are. Codex answered that with a
+    fresh recursive walk per session - 207 walks of its store per rebuild, which
+    cost as much as the work the walk's own memo was guarding (spec Round 52,
+    measured again in Round 55). The memo cannot key on the file list, because
+    the file list *is* the walk, so it needs a boundary that is not derived from
+    the answer: this window, closed by the caller that opens it.
+
+    Outside any window nothing is remembered. A pass token is unique per pass,
+    so a value recorded in one can never be honoured by the next.
+    """
+    token = _CURRENT_PASS.set(next(_PASS_IDS))
+    try:
+        yield
+    finally:
+        _CURRENT_PASS.reset(token)
+
+
+def current_pass() -> int:
+    """This thread's pass token, or 0 when no window is open."""
+    return _CURRENT_PASS.get()
 
 
 def read_jsonl(path: Path, limit: int | None = None) -> list[dict]:

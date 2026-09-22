@@ -10,6 +10,9 @@ shape decisions that exist for honesty/REST reasons:
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import pytest
 
 # Guard before import: without the [server] extra this module must skip, not fail
@@ -38,6 +41,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "_LISTING", (0.0, []))
     monkeypatch.setattr("agent_handoff.server.app.discover", lambda: [])
     monkeypatch.setattr("agent_handoff.server.app.all_parsers", lambda: [])
+    # The startup warm-up builds the session list once, off the request path.
+    # Under a test that swaps the parser set *after* startup it would cache the
+    # empty list under the same key for the next 20 seconds, and the test would
+    # read a build it never asked for.
+    monkeypatch.setenv("AGENTHANDOFF_PREWARM", "0")
     with Client(app) as c:
         yield c
 
@@ -246,12 +254,22 @@ def test_sessions_delta_and_etag(client, monkeypatch):
         M.SessionMeta(cli="zcode", session_id="s-new", title="new", cwd="D:/d",
                       updated_at="2026-09-03T00:00:00+00:00"),
     ]
+    # A row the parser did not list. It must reach the cockpit with its reason,
+    # so the list can say how much of the store it is not showing (Round 54).
+    hidden = [
+        M.SessionMeta(cli="zcode", session_id="s-loop", title="工具循环会话（无用户消息）",
+                      cwd="D:/d", updated_at="2026-01-02T00:00:00+00:00",
+                      hidden_reason="tool-loop"),
+    ]
 
     class FakeParser:
         cli = "zcode"
 
         def list_sessions(self):
             return metas
+
+        def hidden_sessions(self):
+            return hidden
 
         def peek_status(self, sid):
             return None
@@ -264,9 +282,358 @@ def test_sessions_delta_and_etag(client, monkeypatch):
     r = client.get("/api/sessions")
     assert r.status_code == 200
     assert r.headers.get("etag")
-    assert isinstance(r.json(), list) and len(r.json()) == 2
+    rows = {s["session_id"]: s for s in r.json()}
+    assert isinstance(r.json(), list) and len(r.json()) == 3, "listed rows plus the receipt"
+    assert "hidden_reason" not in rows["s-new"], "a listed row must not carry a reason"
+    assert rows["s-loop"]["hidden_reason"] == "tool-loop"
     r304 = client.get("/api/sessions", headers={"If-None-Match": r.headers["etag"]})
     assert r304.status_code == 304
     d = client.get("/api/sessions", params={"since": "2026-06-01T00:00:00+00:00"}).json()
     assert sorted(d.keys()) == ["changed", "snapshot"]
     assert [s["session_id"] for s in d["changed"]] == ["s-new"]
+
+
+# ── The list cache: one build at a time, and a stale answer beats a queue ────
+#
+# Measured on the maintainer's machine before this: a cold build was 5.7s of CPU
+# over 802 metas, the frontend polls every 30s per open tab, and nothing stopped
+# two requests from building at once. A handful of tabs kept several builds in
+# flight, the thread pool saturated, and `/api/stores` — which does nothing —
+# took 8.7s to answer while `/api/sessions` timed out at 150s.
+
+
+@pytest.fixture
+def clean_session_cache():
+    from agent_handoff.server import app as A
+
+    A._sessions_cache.clear()
+    A._sessions_locks.clear()
+    yield A
+    A._sessions_cache.clear()
+    A._sessions_locks.clear()
+
+
+def test_concurrent_callers_share_one_session_build(clean_session_cache, monkeypatch):
+    import threading
+
+    A = clean_session_cache
+    calls: list[int] = []
+
+    def slow_build(cli, cwd, q):
+        calls.append(1)
+        time.sleep(0.3)
+        return [{"cli": "zcode", "session_id": "s1"}]
+
+    monkeypatch.setattr(A, "_build_session_roots", slow_build)
+    results: list[list] = []
+
+    def worker():
+        results.append(A._session_roots(None, None, None))
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1, f"expected one build, got {len(calls)}"
+    assert results and all(r == results[0] for r in results)
+    assert results[0] == [{"cli": "zcode", "session_id": "s1"}]
+
+
+def test_a_stale_list_answers_and_refreshes_off_the_request_path(
+    clean_session_cache, monkeypatch
+):
+    """The point of the cache: a request never waits for a rebuild to finish.
+
+    The first version let the request that *won* the lock rebuild synchronously,
+    so one caller per TTL paid the whole build - measured 4.07s to the first row
+    with the list already warm. Now the winner starts the refresh in a thread and
+    answers with what it has, which is what this asserts: the answer is immediate,
+    the build happens once, and the cache is replaced when it finishes.
+    """
+
+    A = clean_session_cache
+    stale = [{"cli": "zcode", "session_id": "old"}]
+    A._sessions_cache["None|None|None"] = (
+        time.monotonic() - A._CACHE_TTL - 1.0,
+        stale,
+    )
+    calls: list[int] = []
+
+    def slow_build(cli, cwd, q):
+        calls.append(1)
+        time.sleep(0.3)
+        return [{"cli": "zcode", "session_id": "new"}]
+
+    monkeypatch.setattr(A, "_build_session_roots", slow_build)
+    started = time.perf_counter()
+    answer = A._session_roots(None, None, None)
+    elapsed = time.perf_counter() - started
+
+    assert answer == stale, "a stale caller is served the cached list"
+    assert elapsed < 0.2, f"it waited {elapsed:.2f}s for a build"
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        cached = A._sessions_cache.get("None|None|None")
+        if cached and cached[1] != stale:
+            break
+        time.sleep(0.02)
+    assert calls == [1], f"expected exactly one background refresh, got {calls}"
+    assert A._sessions_cache["None|None|None"][1] == [
+        {"cli": "zcode", "session_id": "new"}
+    ], "the background refresh should have replaced the list"
+
+
+# ── The thread view: an answer, with a number attached ──────────────────────
+#
+# Clustering needs each session's touched files, which costs one full `load()`
+# per session: measured 189ms each over 802 sessions, ~150s, and the view sat on
+# "clustering…" for two minutes because of it. The pass now runs under a budget
+# and reports what it covered, so these two tests are about the budget and the
+# increment, not about the clustering algorithm.
+
+
+def test_threads_respect_the_time_budget_and_say_what_they_covered(
+    client, monkeypatch, clean_session_cache
+):
+    from agent_handoff import model as M
+    from agent_handoff.server import app as A
+
+    A._threads_cache.clear()
+    A._files_cache.clear()
+    monkeypatch.setattr(A, "_THREADS_BUDGET", 0.25)
+
+    metas = [
+        M.SessionMeta(
+            cli="zcode",
+            session_id=f"s{i:02d}",
+            title=f"task {i}",
+            cwd="D:/d",
+            updated_at=f"2026-09-{i + 1:02d}T00:00:00+00:00",
+        )
+        for i in range(20)
+    ]
+    loads: list[str] = []
+
+    class SlowParser:
+        cli = "zcode"
+
+        def list_sessions(self):
+            return metas
+
+        def load(self, sid):
+            loads.append(sid)
+            time.sleep(0.05)
+            return None  # no files; the point here is the cost, not the content
+
+        def peek_status(self, sid):
+            return None
+
+        def peek_needs_reply(self, sid):
+            return None
+
+    monkeypatch.setattr(A, "all_parsers", lambda: [SlowParser()])
+    monkeypatch.setattr(A, "build_threads", lambda nodes, **kw: [])
+
+    body = client.get("/api/threads").json()
+    coverage = body["coverage"]
+    assert coverage["sessions"] == 20
+    assert 0 < coverage["with_files"] < 20, coverage
+    assert coverage["budget_hit"] is True
+    assert coverage["seconds"] <= 2.0, coverage
+    first_batch = list(loads)
+    assert len(first_batch) == coverage["with_files"]
+
+    # The second call pays only for what it had not read yet: the first batch is
+    # cached, so `loads` grows by another batch rather than repeating the first.
+    more = client.get("/api/threads/refresh").json()["coverage"]
+    assert more["with_files"] > coverage["with_files"], (coverage, more)
+    assert loads[: len(first_batch)] == first_batch
+
+
+def test_threads_reuse_the_file_cache_across_calls(client, monkeypatch, clean_session_cache):
+    from agent_handoff import model as M
+    from agent_handoff.server import app as A
+
+    A._threads_cache.clear()
+    A._files_cache.clear()
+    metas = [
+        M.SessionMeta(
+            cli="zcode", session_id="s1", title="t", cwd="D:/d",
+            updated_at="2026-09-01T00:00:00+00:00",
+        )
+    ]
+    loads: list[str] = []
+
+    class TinyParser:
+        cli = "zcode"
+
+        def list_sessions(self):
+            return metas
+
+        def load(self, sid):
+            loads.append(sid)
+            return None
+
+        def peek_status(self, sid):
+            return None
+
+        def peek_needs_reply(self, sid):
+            return None
+
+    monkeypatch.setattr(A, "all_parsers", lambda: [TinyParser()])
+    monkeypatch.setattr(A, "build_threads", lambda nodes, **kw: [])
+    client.get("/api/threads")
+    assert loads == ["s1"]
+    client.get("/api/threads/refresh")
+    assert loads == ["s1"], "a second pass must not re-read a cached session"
+
+
+def test_git_info_reads_head_instead_of_spawning_git(tmp_path):
+    """The branch is a line in `.git/HEAD`; the old code spawned two processes."""
+    from agent_handoff.server import app as A
+
+    repo = tmp_path / "plain"
+    (repo / ".git" / "refs" / "heads").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    assert A._git_info_from_files(str(repo)) == {"branch": "main"}
+
+    # A linked worktree: `.git` is a file, and `commondir` points at the host.
+    host = tmp_path / "host"
+    (host / ".git" / "worktrees" / "wt1").mkdir(parents=True)
+    (host / ".git" / "worktrees" / "wt2").mkdir(parents=True)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    gitfile = wt / ".git"
+    gitfile.write_text(
+        f"gitdir: {(host / '.git' / 'worktrees' / 'wt1').as_posix()}\n",
+        encoding="utf-8",
+    )
+    (host / ".git" / "worktrees" / "wt1" / "HEAD").write_text(
+        "ref: refs/heads/feature/x\n", encoding="utf-8"
+    )
+    (host / ".git" / "worktrees" / "wt1" / "commondir").write_text(
+        "../..\n", encoding="utf-8"
+    )
+    assert A._git_info_from_files(str(wt)) == {
+        "branch": "feature/x",
+        "worktree_count": 3,
+    }
+
+    # Detached HEAD answers exactly what `git branch --show-current` answers.
+    detached = tmp_path / "detached"
+    (detached / ".git").mkdir(parents=True)
+    (detached / ".git" / "HEAD").write_text(
+        "0123456789abcdef0123456789abcdef01234567\n", encoding="utf-8"
+    )
+    assert A._git_info_from_files(str(detached)) == {}
+
+    # Shapes the fast path declines, so `git` still gets asked.
+    assert A._git_info_from_files(str(tmp_path / "missing")) == {}
+    assert A._git_info_from_files("relative/path") == {}
+    packed = tmp_path / "packed"
+    (packed / ".git").mkdir(parents=True)
+    (packed / ".git" / "HEAD").write_text("ref: refs/tags/v1\n", encoding="utf-8")
+    assert A._git_info_from_files(str(packed)) is None
+
+    # And on this repository: the shape is understood (not declined), and if it
+    # names a branch that branch is a non-empty string.
+    here = A._git_info_from_files(str(Path(__file__).resolve().parent.parent))
+    assert here is not None
+    if "branch" in here:
+        assert here["branch"]
+
+
+def test_detail_marks_which_copy_of_a_forked_turn_is_live(client, monkeypatch):
+    """The page must say which of two similar turns replaced the other.
+
+    The parser knows this from the store's own record; the transcript is the
+    surface the user reads, so the two flags have to survive into its rows -
+    and stay absent on every turn a fork record never touched.
+    """
+    from agent_handoff import server
+    from agent_handoff.model import Message, RawSession, SessionMeta
+
+    raw = RawSession(
+        meta=SessionMeta(cli="workbuddy", session_id="sess_fork", title="t", cwd="D:/demo"),
+        messages=[
+            Message(role="user", text="v1", at="2026-08-31T00:00:00+00:00", superseded=True),
+            Message(role="assistant", text="a1", at="2026-08-31T00:00:01+00:00"),
+            Message(role="user", text="v2", at="2026-08-31T00:00:02+00:00", resent=True),
+        ],
+    )
+
+    class StubParser:
+        cli = "workbuddy"
+
+        def usage(self, session_id):
+            return {"models": [], "totals": {}}
+
+        def last_request_tokens(self, session_id):
+            return None
+
+    monkeypatch.setattr(server.app, "_raw_or_404", lambda cli, sid: raw)
+    monkeypatch.setattr(server.app, "_parser_or_404", lambda cli: StubParser())
+    rows = client.get("/api/sessions/workbuddy/sess_fork/detail").json()["messages"]
+    by_text = {r["text"]: r for r in rows}
+    assert by_text["v1"].get("superseded") is True
+    assert by_text["v2"].get("resent") is True
+    # Absence is the store saying nothing, so the keys must not be invented.
+    assert "resent" not in by_text["v1"]
+    assert "superseded" not in by_text["v2"]
+    assert "superseded" not in by_text["a1"] and "resent" not in by_text["a1"]
+
+
+def test_detail_carries_the_first_token_half_only_of_its_own_total(client, monkeypatch):
+    """A split clock rides the row whose total the store measured.
+
+    `dur_ms` can come from two places: the store's own figure, or arithmetic on
+    adjacent timestamps. Only the first has a half to report, so the second
+    must not get a `ttft_ms` that would read as a fraction of a number the
+    store never wrote.
+    """
+    from agent_handoff import server
+    from agent_handoff.model import Message, RawSession, SessionMeta
+
+    raw = RawSession(
+        meta=SessionMeta(cli="codex", session_id="sess_ttft", title="t", cwd="D:/demo"),
+        messages=[
+            Message(role="user", text="go", at="2026-08-31T00:00:00+00:00"),
+            Message(
+                role="assistant",
+                text="measured",
+                at="2026-08-31T00:00:05+00:00",
+                dur_ms=5000,
+                ttft_ms=900,
+            ),
+            Message(
+                role="assistant",
+                text="derived",
+                at="2026-08-31T00:00:11+00:00",
+                ttft_ms=900,
+            ),
+        ],
+    )
+
+    class StubParser:
+        cli = "codex"
+
+        def usage(self, session_id):
+            return {"models": [], "totals": {}}
+
+        def last_request_tokens(self, session_id):
+            return None
+
+    monkeypatch.setattr(server.app, "_raw_or_404", lambda cli, sid: raw)
+    monkeypatch.setattr(server.app, "_parser_or_404", lambda cli: StubParser())
+    rows = client.get("/api/sessions/codex/sess_ttft/detail").json()["messages"]
+    by_text = {r["text"]: r for r in rows}
+    assert (by_text["measured"].get("dur_ms"), by_text["measured"].get("ttft_ms")) == (
+        5000,
+        900,
+    )
+    assert "ttft_ms" not in by_text["derived"], (
+        "this row's total is timestamp arithmetic; a first-token figure "
+        "beside it claims a split the store never measured"
+    )

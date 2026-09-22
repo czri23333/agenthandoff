@@ -23,7 +23,7 @@ from pathlib import Path
 
 from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta
-from agent_handoff.parsers.base import Parser
+from agent_handoff.parsers.base import Parser, db_version, probe_memo
 
 
 def _appdata() -> Path:
@@ -43,6 +43,64 @@ def _text(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _row(content_json):
+    """The row's envelope and block list, or None when the row is unreadable.
+
+    `{"message": {role/model/usage/metrics/createdAt}, "blocks": […]}` — the
+    envelope can be missing or the JSON unparsable, and a row that cannot be read
+    renders nothing.
+    """
+    try:
+        payload = json.loads(content_json or "{}")
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    msg = payload.get("message")
+    return (msg if isinstance(msg, dict) else {}, payload.get("blocks") or [])
+
+
+def _row_role(msg: dict, role_column) -> str:
+    """Whose turn the row is: the envelope's role wins, the column is the fallback.
+
+    Anything that is not a user or assistant turn contributes nothing, which is
+    what `load()` does with a row whose role says otherwise. Measured on this
+    machine's store: all 224 rows agree between the two, so the precedence decides
+    nothing today — it is here so that the probe and the page read one role, not
+    two that happen to match.
+    """
+    role = str(msg.get("role") or role_column or "")
+    return role if role in ("user", "assistant") else ""
+
+
+def _block_turn(parser: Parser, row_role: str, block):
+    """One rendered message this block puts on the page, or None if it drops it.
+
+    `thinking` and `tool` blocks are assistant lines whatever the row's own role
+    says, and only `main_text` carries that role — so a user row whose last block
+    is a tool call ends on an assistant line, and "the last row" is not the same
+    question as "the last line". Measured on this machine's store the shape does
+    not occur (112 user rows, every one a lone `main_text` block; the other 112
+    rows are all `assistant` and 107 of them carry a tool block), so this is
+    `load()`'s rule kept in one place rather than a behaviour anyone sees today.
+
+    A tool's text is truncated to the 500 characters the page shows before it is
+    cleaned: cleaning a different string is judging a different question.
+    """
+    if not isinstance(block, dict) or not row_role:
+        return None
+    btype = block.get("type")
+    if btype not in ("thinking", "main_text", "tool"):
+        return None
+    praw = _text(block.get("content"))
+    if btype == "tool":
+        praw = praw[:500]
+    text = parser.clean_text(praw)
+    if not text or parser.is_noise(text):
+        return None
+    return (row_role if btype == "main_text" else "assistant"), btype, praw, text
+
+
 class CherryStudioParser(Parser):
     cli = "cherrystudio"
 
@@ -56,6 +114,52 @@ class CherryStudioParser(Parser):
 
     def available(self) -> bool:
         return self.db_path.exists()
+
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """The last line the page would show, asked of the store directly.
+
+        Round 58's `db_version`/`probe_memo` pair, because this is a scan rather
+        than an index seek — `session_messages` has no index leading with
+        `session_id` (checked against the live store's `sqlite_master`) — so the
+        answer is cached per store change, not per list rebuild.
+        """
+        return probe_memo(
+            str(self.db_path),
+            session_id,
+            db_version(self.db_path),
+            lambda: self._needs_reply(session_id),
+        )
+
+    def _needs_reply(self, session_id: str) -> bool | None:
+        # Uncapped and read lazily: a row can hold nothing that reaches the page
+        # (an empty tool result, a thinking block that cleans to nothing), so the
+        # walk goes back to the row that does — and a row cap that ran out would
+        # answer `None` about a session the page can answer (the largest session on
+        # this store holds 108 rows). The common case is one row, because the
+        # newest row usually decides it; the worst case is the parse `load()`
+        # already pays, and the answer is cached per store change.
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT role, content FROM session_messages WHERE session_id=?"
+                    " ORDER BY created_at DESC, rowid DESC",
+                    (session_id,),
+                )
+                for row in rows:
+                    packed = _row(row["content"])
+                    if packed is None:
+                        continue
+                    msg, blocks = packed
+                    role = _row_role(msg, row["role"])
+                    turns = [t for block in blocks if (t := _block_turn(self, role, block))]
+                    if turns:
+                        # The last thing the reader sees, not the row's own role: a
+                        # user row whose final block is a tool call ends on an
+                        # assistant line.
+                        return turns[-1][0] == "user"
+        except sqlite3.Error:
+            return None
+        return None
 
     def list_sessions(self) -> list[SessionMeta]:
         if not self.available():
@@ -207,8 +311,14 @@ class CherryStudioParser(Parser):
                     "SELECT name FROM agents WHERE id=?", (sess["agent_id"],)
                 ).fetchone()
                 rows = con.execute(
+                    # `rowid` makes the ordering of two rows sharing a `created_at`
+                    # explicit. Without it SQLite leaves ties unspecified, and the
+                    # probe (`ORDER BY created_at DESC, rowid DESC`) would be
+                    # reading a last row this render does not produce. Measured on
+                    # this store: 0 tied (session, instant) pairs in 224 rows, so
+                    # no current answer depends on it.
                     "SELECT role, content, created_at FROM session_messages "
-                    "WHERE session_id=? ORDER BY created_at",
+                    "WHERE session_id=? ORDER BY created_at, rowid",
                     (session_id,),
                 ).fetchall()
             except sqlite3.Error:
@@ -230,14 +340,12 @@ class CherryStudioParser(Parser):
         files: Counter[str] = Counter()
         tools: Counter[str] = Counter()
         for row in rows:
-            try:
-                payload = json.loads(row["content"] or "{}")
-            except ValueError:
+            packed = _row(row["content"])
+            if packed is None:
                 continue
-            msg = payload.get("message") if isinstance(payload, dict) else None
-            msg = msg if isinstance(msg, dict) else {}
-            role = str(msg.get("role") or row["role"] or "")
-            if role not in ("user", "assistant"):
+            msg, blocks = packed
+            role = _row_role(msg, row["role"])
+            if not role:
                 continue
             model = msg.get("model")
             model_name = model.get("name") if isinstance(model, dict) else None
@@ -253,45 +361,51 @@ class CherryStudioParser(Parser):
             mt = metrics.get("time_completion_millsec")
             mt = mt if isinstance(mt, int) and mt >= 0 else None
             at = msg.get("createdAt") or row["created_at"]
-            for block in payload.get("blocks") or []:
-                if not isinstance(block, dict):
-                    continue
-                btype = block.get("type")
-                if btype == "thinking":
-                    praw = _text(block.get("content"))
-                    text = self.clean_text(praw)
-                    if text and not self.is_noise(text):
-                        messages.append(
-                            self.msg(
-                                "assistant",
-                                f"[思考] {praw}",
-                                text=f"[思考] {text}",
-                                at=at,
-                                model=model_name or None,
-                                tokens_in=ti,
-                                tokens_out=to,
-                                dur_ms=mt,
-                            )
-                        )
-                elif btype == "main_text":
-                    praw = _text(block.get("content"))
-                    text = self.clean_text(praw)
-                    if text and not self.is_noise(text):
-                        messages.append(
-                            self.msg(
-                                role, praw, text=text, at=at, model=model_name or None,
-                                tokens_in=ti,
-                                tokens_out=to, dur_ms=mt,
-                            )
-                        )
-                elif btype == "tool":
+            for block in blocks:
+                # Counted whether or not the block renders: the store's tool call
+                # is a fact about the run, and an empty result does not un-happen.
+                if isinstance(block, dict) and block.get("type") == "tool":
                     tools["tool"] += 1
                     for p in self.extract_paths(block.get("metadata") or {}):
                         files[p] += 1
-                    praw = _text(block.get("content"))[:500]
-                    text = self.clean_text(praw)
-                    if text and not self.is_noise(text):
-                        messages.append(self.msg("assistant", f"[工具] {praw}",
-                                                 text=f"[工具] {text}", at=at,
-                                                 model=model_name or None))
+                turn = _block_turn(self, role, block)
+                if turn is None:
+                    continue
+                who, btype, praw, text = turn
+                if btype == "thinking":
+                    messages.append(
+                        self.msg(
+                            who,
+                            f"[思考] {praw}",
+                            text=f"[思考] {text}",
+                            at=at,
+                            model=model_name or None,
+                            tokens_in=ti,
+                            tokens_out=to,
+                            dur_ms=mt,
+                        )
+                    )
+                elif btype == "main_text":
+                    messages.append(
+                        self.msg(
+                            who,
+                            praw,
+                            text=text,
+                            at=at,
+                            model=model_name or None,
+                            tokens_in=ti,
+                            tokens_out=to,
+                            dur_ms=mt,
+                        )
+                    )
+                else:
+                    messages.append(
+                        self.msg(
+                            who,
+                            f"[工具] {praw}",
+                            text=f"[工具] {text}",
+                            at=at,
+                            model=model_name or None,
+                        )
+                    )
         return self.build_raw(meta, messages, [], files, tools)

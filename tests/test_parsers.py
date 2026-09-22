@@ -7,6 +7,7 @@ from pathlib import Path
 from agent_handoff.parsers.codex import CodexParser
 from agent_handoff.parsers.dsh import DshParser
 from agent_handoff.parsers.jsonl_family import (
+    _TOOLLOOP_TITLE,
     ClaudeCodeParser,
     CodebuddyParser,
     QodercnIdeParser,
@@ -134,8 +135,182 @@ def test_codebuddy_job_state(tmp_path):
         encoding="utf-8",
     )
     p = CodebuddyParser(tmp_path / ".codebuddy")
-    assert p.peek_status("aaa111") == "working"
+    # The job state is read...
+    assert p._store_status_word("aaa111") == "working"
+    # ...but "working" describes a live job, not an ending, so the end-state
+    # field refuses to borrow it: a badge the detail page would not claim is a
+    # contradiction waiting to be rendered (spec Round 39, scripts/probe_audit.py).
+    assert p.peek_status("aaa111") is None
+    assert p._proven_interruption("aaa111") is None
     assert p.peek_status("nope") is None
+    (jobs / "state.json").write_text(
+        json.dumps({"sessionId": "aaa111", "name": "Agent", "state": "failed"}),
+        encoding="utf-8",
+    )
+    p = CodebuddyParser(tmp_path / ".codebuddy")
+    assert p.peek_status("aaa111") == "error"
+    assert p._proven_interruption("aaa111").kind == "error"
+
+
+def test_an_unseen_row_shape_is_reported_not_swallowed(tmp_path):
+    """The store writing something new must not look like nothing happened.
+
+    Rows carrying no role fall out of the parse loop. For the bookkeeping types
+    the store actually writes (active-leaf, runtime-config, ...) that is by
+    design and stays quiet; for a shape nobody has seen it has to leave a
+    visible fact, and the bytes still have to be retrievable.
+    """
+    import json
+
+    root = tmp_path / ".codebuddy" / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "aaa111.jsonl").write_text(
+        "".join(
+            json.dumps(r) + "\n"
+            for r in [
+                {"type": "session_meta", "sessionId": "aaa111", "cwd": "D:/demo"},
+                {"type": "active-leaf", "sessionId": "aaa111", "leaf": 3},
+                {
+                    "type": "quantum_flux_report",
+                    "sessionId": "aaa111",
+                    "payload": {"volume": 42},
+                },
+                {
+                    "type": "message",
+                    "sessionId": "aaa111",
+                    "cwd": "D:/demo",
+                    "timestamp": 1756548000000,
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello there friend"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    p = CodebuddyParser(tmp_path / ".codebuddy")
+    raw = p.load("aaa111")
+    assert raw is not None
+    assert "unhandled_row:quantum_flux_report=1" in raw.meta.notes
+    assert not [n for n in raw.meta.notes if n.startswith("unhandled_row:active-leaf")]
+    assert [m.text for m in raw.messages] == ["hello there friend"]
+    # Retained and exportable: raw_archive hands out the file byte-faithfully,
+    # so an unread row is a row not yet interpreted, never a row that is gone.
+    archive = p.raw_archive("aaa111")
+    assert archive and "quantum_flux_report" in archive[0]["text"]
+
+
+def test_attachment_is_reported_by_its_own_kind_not_as_one_blob(tmp_path):
+    """`attachment` is 12 different things, so one label for it hides the point.
+
+    Nine of the kinds this machine writes are injected context (skills, hooks,
+    reminders) and name nothing; three name a file the session touched. Listing
+    them all as "unread attachment" would drown the three that matter and let a
+    brand-new kind slip past as noise.
+    """
+    import json
+
+    root = tmp_path / ".codebuddy" / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "aaa111.jsonl").write_text(
+        "".join(
+            json.dumps(r) + "\n"
+            for r in [
+                {"type": "session_meta", "sessionId": "aaa111", "cwd": "D:/demo"},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "skill_listing", "content": "- a skill"}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "file", "filename": "D:/demo/notes.md", "content": "x"}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "post_compact_restored_files",
+                    "files": json.dumps([{"filePath": "D:/demo/restored.rs"}])}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "plan_mode", "planFilePath": "D:/demo/plan.md"}},
+                {"type": "attachment", "sessionId": "aaa111", "attachment": {
+                    "type": "holographic_diff", "whatever": 1}},
+                {
+                    "type": "message",
+                    "sessionId": "aaa111",
+                    "cwd": "D:/demo",
+                    "timestamp": 1756548000000,
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello there friend"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    raw = CodebuddyParser(tmp_path / ".codebuddy").load("aaa111")
+    assert raw is not None
+    notes = raw.meta.notes
+    # injected context: known, silent
+    assert not [n for n in notes if n.startswith("unhandled_row:attachment/skill_listing")]
+    # file-bearing kinds: read, so their paths are in the record. The plan_*
+    # kinds were only found because attachments are reported per sub-type.
+    files = dict(raw.files_touched)
+    assert files["D:/demo/notes.md"] == 1
+    assert files["D:/demo/restored.rs"] == 1
+    assert files["D:/demo/plan.md"] == 1
+    # a kind nobody has seen: reported, by its own name
+    assert "unhandled_row:attachment/holographic_diff=1" in notes
+
+
+def test_the_shapes_a_full_store_sweep_inherited_are_each_classified(tmp_path):
+    """Round 48: the 131-session sample had never met four sub-types.
+
+    Three of them say nothing the product models (an empty mode marker, a hook
+    printing at the user, a skill file the harness loaded), so they join the
+    excused list. The fourth carries `planFilePath` and was simply missed while
+    its three siblings were read, so its plan must land in the touched files.
+    The unseen kind at the end is the point of the test: widening an excuse list
+    must not be able to quiet a shape nobody has actually seen.
+    """
+    import json
+
+    root = tmp_path / ".codebuddy" / "projects" / "p"
+    root.mkdir(parents=True)
+    (root / "bbb222.jsonl").write_text(
+        "".join(
+            json.dumps(r) + "\n"
+            for r in [
+                {"type": "session_meta", "sessionId": "bbb222", "cwd": "D:/demo"},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "plan_mode_reentry", "planFilePath": "D:/demo/reentry.md"}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "auto_mode_exit"}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "hook_system_message", "content": "a scanner said hi",
+                    "hookName": "PostToolUse:Write"}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "invoked_skills", "skills": [
+                        {"name": "quality-gate",
+                         "path": "D:/demo/.qoder/skills/quality-gate/SKILL.md",
+                         "content": "# quality-gate"}]}},
+                {"type": "attachment", "sessionId": "bbb222", "attachment": {
+                    "type": "temporal_orbit_note", "whatever": 1}},
+                {
+                    "type": "message",
+                    "sessionId": "bbb222",
+                    "cwd": "D:/demo",
+                    "timestamp": 1756548000000,
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hello there friend"}],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    raw = CodebuddyParser(tmp_path / ".codebuddy").load("bbb222")
+    assert raw is not None
+    notes = raw.meta.notes
+    # the missed sibling: read, like the plan_* kinds beside it
+    assert dict(raw.files_touched)["D:/demo/reentry.md"] == 1
+    # excused, each for what it is
+    for quiet in ("auto_mode_exit", "hook_system_message", "invoked_skills"):
+        assert not [n for n in notes if n.startswith(f"unhandled_row:attachment/{quiet}")]
+    # and the list still reports what it has never seen
+    assert "unhandled_row:attachment/temporal_orbit_note=1" in notes
+    # a skill file the harness loaded is not a file the session worked on
+    assert "D:/demo/.qoder/skills/quality-gate/SKILL.md" not in dict(raw.files_touched)
 
 
 def test_qoder_and_qwen_share_dialect(tmp_path):
@@ -241,6 +416,21 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     raw = p.load("bbb222")
     assert raw is not None  # hidden from the list, still loadable by id
     assert raw.messages == []  # and it is honestly empty: nothing to pretend
+
+    # The drop has a receipt (spec Round 54). Hiding 107 of a store's 2,638
+    # conversations was invisible, and from a row count "hidden" and "lost" are
+    # the same observable — so the parser keeps what it dropped and says why.
+    hidden = p.hidden_sessions()
+    assert [m.session_id for m in hidden] == ["bbb222"], hidden
+    assert hidden[0].hidden_reason == "tool-loop"
+    assert hidden[0].title == _TOOLLOOP_TITLE
+    # Re-listing replaces the receipt instead of accumulating a second copy of
+    # the same row, which is what would make a count of them lie.
+    p.list_sessions()
+    assert len(p.hidden_sessions()) == 1
+    # A parser that hides nothing says so, rather than being asked a question it
+    # cannot answer.
+    assert QodercnIdeParser(tmp_path / ".qoder-cn").hidden_sessions() == []
 
 
 def test_qoder_shared_store_splits_families(tmp_path):
@@ -606,3 +796,605 @@ def test_ide_telemetry_anchors_exact(tmp_path):
         "src/other.ts": 1,
     }
     assert p.telemetry_anchors("sid-missing", stats_dir=projects) == {}
+
+
+def test_one_open_does_not_reread_the_store_for_the_model_hint(tmp_path):
+    """The workspace-model hint must cost the session, not the workspace.
+
+    qoder writes no model on task-class sessions, so the hint searches for a
+    same-cwd, time-overlapping sibling. That search once began by re-listing the
+    whole store: measured on this machine at **6,501 of the 6,667 file reads in a
+    single `load()`** -- so opening a two-message session cost as much as the
+    largest workspace on disk (1,334 sessions live in one directory here).
+
+    Bounding it is only honest if the answer survives, so the test asserts both
+    halves: the hint is still given, a second open reads a bounded number of
+    files, and touching a sibling makes the cache let go.
+    """
+    import json
+    import os
+    import time
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    jf._ANCHOR_FACTS.clear()
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--w"
+    proj.mkdir(parents=True)
+
+    def write(sid: str, cwd: str, model: str | None, minute: int) -> Path:
+        cfg = {"type": "runtime-config", "sessionId": sid, "cwd": cwd, "timestamp": 1}
+        if model:
+            cfg["model"] = model
+        rows = [
+            cfg,
+            {
+                "type": "user",
+                "sessionId": sid,
+                "cwd": cwd,
+                "timestamp": f"2026-08-30T10:{minute:02d}:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": "ask"}]},
+            },
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "cwd": cwd,
+                "timestamp": f"2026-08-30T10:{minute:02d}:30Z",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+            },
+        ]
+        path = proj / f"{sid}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    # The sibling that carries the answer, written first so the search need not
+    # go far; then 12 decoys in other workspaces that must be ruled out.
+    write("sib-anchor", "C:/w", "gemini-x", 0)
+    decoys = [write(f"sib-{i:02d}", f"C:/other-{i}", "gpt-z", 1 + i) for i in range(12)]
+    write("ask-me", "C:/w", None, 2)
+
+    real = jf.read_jsonl
+    reads = {"n": 0}
+
+    def counted(path, *a, **kw):
+        reads["n"] += 1
+        return real(path, *a, **kw)
+
+    jf.read_jsonl = counted
+    try:
+        p = QodercnIdeParser(tmp_path / ".qoder-cn")
+        p.list_sessions()
+
+        reads["n"] = 0
+        first = p.load("ask-me")
+        first_reads = reads["n"]
+        hints = [n for n in first.meta.notes if n.startswith("workspace_model:")]
+        assert hints and "gemini-x" in hints[0], first.meta.notes
+
+        reads["n"] = 0
+        again = p.load("ask-me")
+        second_reads = reads["n"]
+        assert [n for n in again.meta.notes if n.startswith("workspace_model:")] == hints
+
+        # The store has 14 sessions; a bounded repeat must not scale with it.
+        assert second_reads <= 4, f"second open still read {second_reads} files"
+        assert second_reads < first_reads, "the hint cache never engaged"
+
+        os.utime(decoys[3], (time.time() + 2, time.time() + 2))
+        reads["n"] = 0
+        after = p.load("ask-me")
+        touched_reads = reads["n"]
+        assert [n for n in after.meta.notes if n.startswith("workspace_model:")] == hints
+        assert touched_reads > second_reads, "a changed sibling did not recompute"
+    finally:
+        jf.read_jsonl = real
+        jf._ANCHOR_FACTS.clear()
+
+
+def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path):
+    """A fragment is hidden only while its proof is on disk, and the proof costs
+    one stat per remembered text - never a re-read of the store.
+
+    qoder writes every user turn twice: once as an `add_user_message` fragment
+    file, once inside the task/uuid conversation. Listing both shows one
+    chat twice, so `_absorbed_fragment_ids` hides the fragment - and that scan
+    ran on every 20s rebuild, because its cache key was the newest mtime of
+    the whole store (which moves every second a session is live). The scan
+    reached 4.1s of an 11.3s poll and, on this machine's stores, ~170,000 JSON
+    rows parsed per poll (spec Round 50).
+
+    Caching the answers is only honest if the answer is the same one, so this
+    pins all four directions: the absorbed fragment goes, the unabsorbed one
+    stays, a repeat pass reads no transcript at all, and deleting the session
+    that proved the match brings the fragment back.
+    """
+    import json
+    import time
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--w"
+    proj.mkdir(parents=True)
+    for name in (
+        "_PEEK_CACHE",
+        "_ID_CACHE",
+        "_FRAG_HEAD_CACHE",
+        "_QODER_ABSORB_CACHE",
+        "_PROVEN_ABSORBED_TEXTS",
+        "_ABSORB_ABSENT_TEXTS",
+        "_NEEDS_REPLY_CACHE",
+    ):
+        getattr(jf, name).clear()
+
+    def meta(sid: str, cwd: str, minute: int) -> dict:
+        return {
+            "type": "session_meta",
+            "sessionId": sid,
+            "timestamp": f"2026-09-20T10:{minute:02d}:00Z",
+            "cwd": cwd,
+            "data": {"meta_type": "session_info", "content": {"session_type": "add_user_message"}},
+        }
+
+    def user(sid: str, cwd: str, minute: int, text: str) -> dict:
+        return {
+            "type": "user",
+            "sessionId": sid,
+            "timestamp": f"2026-09-20T10:{minute:02d}:00Z",
+            "cwd": cwd,
+            "message": {"role": "user", "content": text},
+        }
+
+    def write(name: str, rows: list[dict]) -> Path:
+        path = proj / f"{name}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    # 20 unrelated sessions: the scan the old code repeated used to read these.
+    for i in range(20):
+        write(
+            f"task-{i:02d}",
+            [
+                user(f"task-{i:02d}", f"C:/w{i}", 30 + i, f"unrelated question {i}"),
+                {
+                    "type": "assistant",
+                    "sessionId": f"task-{i:02d}",
+                    "timestamp": f"2026-09-20T10:{40 + (i % 10):02d}:00Z",
+                    "cwd": f"C:/w{i}",
+                    "message": {"role": "assistant", "content": "ok"},
+                },
+            ],
+        )
+    # frag-echo: the IDE also kept its text inside task-00, so it must go.
+    write("frag-echo", [meta("frag-echo", "C:/a", 5), user("frag-echo", "C:/a", 5, "hello")])
+    # frag-alone: no session carries this turn, so it must stay listed.
+    write("frag-alone", [meta("frag-alone", "C:/b", 6), user("frag-alone", "C:/b", 6, "only here")])
+    # The proving file goes last: its mtime is the store's newest, so deleting
+    # it below is something the cache key can actually notice.
+    time.sleep(0.05)
+    proof = write("task-00-proof", [user("task-00-proof", "C:/a", 7, "hello")])
+
+    real_read = jf.read_jsonl
+    reads = {"n": 0}
+
+    def counted(path, *a, **kw):
+        reads["n"] += 1
+        return real_read(path, *a, **kw)
+
+    jf.read_jsonl = counted
+    try:
+        p = QodercnIdeParser(tmp_path / ".qoder-cn")
+        first = {m.session_id for m in p.list_sessions()}
+        cold_reads = reads["n"]
+        assert "frag-echo" not in first, "the duplicated turn echo was not absorbed"
+        assert "frag-alone" in first, "absorption swallowed a fragment nothing carries"
+
+        reads["n"] = 0
+        again = QodercnIdeParser(tmp_path / ".qoder-cn")
+        second = {m.session_id for m in again.list_sessions()}
+        warm_reads = reads["n"]
+        assert second == first, f"a second pass changed the answer: {second ^ first}"
+        assert warm_reads == 0, f"a pass over an unchanged store read {warm_reads} files"
+        assert warm_reads < cold_reads
+
+        # The proof is no longer what it was: the session still exists, but the
+        # turn it carried is gone. A remembered match must be re-derived, not
+        # trusted - otherwise the fragment stays hidden although nothing lists
+        # the conversation, i.e. a chat silently leaves the cockpit.
+        time.sleep(0.02)
+        write("task-00-proof", [user("task-00-proof", "C:/a", 7, "a different turn entirely")])
+        fourth = {m.session_id for m in QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        assert "frag-echo" in fourth, (
+            "a fragment stayed absorbed after the session that proved it changed"
+        )
+
+        # And gone altogether: same demand from the other direction.
+        proof.unlink()
+        reads["n"] = 0
+        third = {
+            m.session_id for m in QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()
+        }
+        assert "frag-echo" in third, (
+            "the absorbed fragment stayed hidden after its proof was deleted"
+        )
+    finally:
+        jf.read_jsonl = real_read
+        for name in (
+            "_PEEK_CACHE",
+            "_ID_CACHE",
+            "_FRAG_HEAD_CACHE",
+            "_QODER_ABSORB_CACHE",
+            "_PROVEN_ABSORBED_TEXTS",
+            "_ABSORB_ABSENT_TEXTS",
+            "_NEEDS_REPLY_CACHE",
+        ):
+            getattr(jf, name).clear()
+
+
+def test_a_file_that_did_not_answer_once_does_not_have_to_answer_again(tmp_path):
+    """The absorb scan remembers what a file version did *not* contain.
+
+    Proving a fragment is redundant means finding its text inside a real
+    session, so a store full of fragments whose text lives nowhere costs a full
+    read of the newest files - and on a machine with a live session, that price
+    is re-paid by every 20 s rebuild, because the store signature the scan's own
+    cache keys on moves constantly. Measured on this machine's qoder store:
+    50,912 JSON rows parsed per rebuild to prove that 1 of 1 fragments is not
+    absorbed - an answer that cannot change while the files do not (spec Round 55).
+
+    The record is of what a scan did not find, so the two directions it could go
+    wrong in are both pinned here: a file that has not moved must not be re-read,
+    and a file that *has* moved must be re-read and believed again - including
+    when the new content is the proof the old content lacked, which is the case
+    where a stale negative would silently keep hiding a conversation... and the
+    case where it would wrongly surface a duplicate. Both answers are checked,
+    not just the read counts, because a scan that stops consulting a file also
+    stops being able to absorb through it.
+    """
+    import json
+    import time
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--w"
+    proj.mkdir(parents=True)
+    for name in (
+        "_PEEK_CACHE",
+        "_ID_CACHE",
+        "_FRAG_HEAD_CACHE",
+        "_QODER_ABSORB_CACHE",
+        "_PROVEN_ABSORBED_TEXTS",
+        "_ABSORB_ABSENT_TEXTS",
+        "_NEEDS_REPLY_CACHE",
+    ):
+        getattr(jf, name).clear()
+
+    def row(sid: str, minute: int, text: str, kind: str = "user") -> dict:
+        return {
+            "type": "session_meta" if kind == "meta" else kind,
+            "sessionId": sid,
+            "timestamp": f"2026-09-20T10:{minute:02d}:00Z",
+            "cwd": "C:/w",
+            **(
+                {"data": {"content": {"session_type": "add_user_message"}}}
+                if kind == "meta"
+                else {"message": {"role": "user", "content": text}}
+            ),
+        }
+
+    def write(name: str, rows: list[dict]) -> Path:
+        path = proj / f"{name}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    # A fragment nothing carries: the scan must read every real session to learn
+    # that, which is the cost the record exists to stop paying twice.
+    write(
+        "frag-lost",
+        [row("frag-lost", 1, "", "meta"), row("frag-lost", 1, "a turn nowhere else")],
+    )
+    # The session that is written while the dashboard polls: its version moves
+    # between passes, so the store signature moves with it.
+    live = write(
+        "task-live",
+        [row("task-live", 2, "first question"), row("task-live", 2, "answer", "assistant")],
+    )
+    for i in range(12):
+        write(f"task-{i:02d}", [row(f"task-{i:02d}", 10 + i, f"unrelated {i} and then some")])
+
+    real_read = jf.read_jsonl
+    reads = {"paths": []}
+
+    def counted(path, *a, **kw):
+        reads["paths"].append(Path(path).name)
+        return real_read(path, *a, **kw)
+
+    jf.read_jsonl = counted
+    try:
+        first = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        cold = sorted(set(reads["paths"]))
+        assert "frag-lost" in first, "a fragment nothing carries was swallowed anyway"
+        assert "task-00.jsonl" in cold, (
+            f"the pass that fills the record did not read the file the next pass "
+            f"is supposed to skip; it read only {cold}"
+        )
+
+        reads["paths"] = []
+        time.sleep(0.02)
+        with open(live, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row("task-live", 3, "an answer, then a follow-up")) + "\n")
+        second = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        warm = sorted(set(reads["paths"]))
+        assert second == first, f"a store that only grew changed the answer: {second ^ first}"
+        assert "task-00.jsonl" not in warm, (
+            f"an unchanged file was re-read for the same answer; the pass read {warm}"
+        )
+        assert "task-live.jsonl" in warm, "the file that moved was not re-read"
+
+        # The proof arrives in a file the scan had already ruled out. A negative
+        # that outlived the file version would leave this turn unabsorbed - one
+        # conversation shown twice - so the version must be believed, not the
+        # memory.
+        time.sleep(0.02)
+        with open(proj / "task-00.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row("task-00", 4, "a turn nowhere else")) + "\n")
+        reads["paths"] = []
+        third = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        assert "frag-lost" not in third, (
+            "the text arrived in a file the scan had ruled out, and the fragment "
+            f"still shows; that pass read {sorted(set(reads['paths']))}"
+        )
+
+        # And leaving again: the same demand from the other direction.
+        time.sleep(0.02)
+        (proj / "task-00.jsonl").write_text(
+            json.dumps(row("task-00", 4, "unrelated 0 and then some twice over")) + "\n",
+            encoding="utf-8",
+        )
+        fourth = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        assert "frag-lost" in fourth, "the fragment stayed hidden after its proof left"
+    finally:
+        jf.read_jsonl = real_read
+        for name in (
+            "_PEEK_CACHE",
+            "_ID_CACHE",
+            "_FRAG_HEAD_CACHE",
+            "_QODER_ABSORB_CACHE",
+            "_PROVEN_ABSORBED_TEXTS",
+            "_ABSORB_ABSENT_TEXTS",
+            "_NEEDS_REPLY_CACHE",
+        ):
+            getattr(jf, name).clear()
+
+
+def test_a_listing_pass_carries_the_versions_it_already_read(tmp_path):
+    """One directory walk answers the version questions of the whole pass.
+
+    A listing asks 4,261 files for their `(mtime, size)` four times over -- the
+    id peek, the meta peek, the canonical ranking, and the fragment scan's
+    newest-first order. That was 48,982 of the 114,728 `os.stat` calls in one
+    measured rebuild of this machine's stores (spec Round 51), for numbers
+    `os.scandir` had already returned in the entry that named the file.
+
+    The claim is about syscalls, not about a return value, so it is pinned as a
+    ratio against the same code with its facts thrown away: identical answers,
+    and the pass that carries its directory entries must ask the OS about the
+    store's own files far less often. A revert of the carrier makes the two
+    counts equal, which fails the ratio without touching an expected number.
+    """
+    import json
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--v"
+    proj.mkdir(parents=True)
+    names = []
+    for i in range(10):
+        sid = f"ses-{i:02d}"
+        rows = [
+            {
+                "type": "user",
+                "sessionId": sid,
+                "cwd": "C:/v",
+                "timestamp": f"2026-09-20T09:{i:02d}:00Z",
+                "message": {"role": "user", "content": f"question {i}"},
+            },
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "cwd": "C:/v",
+                "timestamp": f"2026-09-20T09:{i:02d}:30Z",
+                "message": {"role": "assistant", "content": "ok"},
+            },
+        ]
+        (proj / f"{sid}.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        names.append(sid)
+        # A companion file per session: ranking these is one of the four sites
+        # that used to stat each candidate again.
+        (proj / f"agent-{sid}.jsonl").write_text(
+            json.dumps({"type": "user", "sessionId": sid, "cwd": "C:/v"}) + "\n",
+            encoding="utf-8",
+        )
+        names.append(f"agent-{sid}")
+    # One fragment, so the absorb scan's own newest-first ordering runs too.
+    (proj / "frag-0.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "sessionId": "frag-0",
+                "cwd": "C:/v",
+                "timestamp": "2026-09-20T09:50:00Z",
+                "data": {
+                    "meta_type": "session_info",
+                    "content": {"session_type": "add_user_message"},
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "user",
+                "sessionId": "frag-0",
+                "cwd": "C:/v",
+                "timestamp": "2026-09-20T09:50:00Z",
+                "message": {"role": "user", "content": "a turn nothing else has"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    names.append("frag-0")
+
+    store = {str(proj / f"{n}.jsonl") for n in names}
+    asked = {"n": 0}
+    real_stat = Path.stat
+
+    def counted(self, *a, **kw):
+        if str(self) in store:
+            asked["n"] += 1
+        return real_stat(self, *a, **kw)
+
+    Path.stat = counted
+    try:
+        for name in ("_PEEK_CACHE", "_ID_CACHE", "_FRAG_HEAD_CACHE", "_QODER_ABSORB_CACHE"):
+            getattr(jf, name).clear()
+
+        def listing(with_facts: bool):
+            # Both passes start cold: a warm content cache makes the second pass
+            # cheaper for a reason that has nothing to do with the facts, and a
+            # comparison that runs that way can be passed by accident.
+            for name in (
+                "_PEEK_CACHE",
+                "_ID_CACHE",
+                "_FRAG_HEAD_CACHE",
+                "_QODER_ABSORB_CACHE",
+                "_PROVEN_ABSORBED_TEXTS",
+            ):
+                getattr(jf, name).clear()
+            asked["n"] = 0
+            p = QodercnIdeParser(tmp_path / ".qoder-cn")
+            if not with_facts:
+                base = p._iter_jsonl
+
+                def blind(b=base, self=p):
+                    got = b()
+                    self._dirfacts = {}  # throw the entries away: stat per question
+                    return got
+
+                p._iter_jsonl = blind
+            metas = p.list_sessions()
+            rows = sorted(
+                (m.session_id, m.title, m.updated_at, m.source_path) for m in metas
+            )
+            return asked["n"], rows
+
+        carried, rows_carried = listing(True)
+        blind, rows_blind = listing(False)
+        assert rows_carried == rows_blind, "carrying the directory entries changed the listing"
+        assert rows_carried, "nothing was listed, so the comparison above is vacuous"
+        assert carried * 2 < blind, (
+            f"the pass with facts asked the OS {carried} times and the one without "
+            f"{blind}: the walk's versions are not being carried"
+        )
+    finally:
+        Path.stat = real_stat
+        for name in ("_PEEK_CACHE", "_ID_CACHE", "_FRAG_HEAD_CACHE", "_QODER_ABSORB_CACHE"):
+            getattr(jf, name).clear()
+
+
+def test_one_rebuild_walks_a_store_once_not_once_per_session(tmp_path):
+    """A discovery pass is the boundary a file-list cache can key on.
+
+    The list endpoint rebuilds by listing a store and then peeking every session
+    in it, and Codex answered "where are the transcripts" from the OS every time
+    -- 207 recursive walks of its store per rebuild, which measured as much as
+    the parsing the rollout memo was there to skip (spec Round 52, counted again
+    in Round 55: the memo's key is the very thing it caches).
+
+    Three claims, because a cache with a boundary can fail on either side of it:
+    inside a pass the store is walked once; outside one nothing is remembered,
+    so a caller that never opens a window keeps the old per-question answer;
+    and a *new* pass re-derives, which is what lets a session created while the
+    cockpit was idle appear on the next poll rather than never.
+    """
+    import json
+
+    from agent_handoff.parsers.base import discovery_pass
+
+    root = tmp_path / "codex" / "sessions"
+    day = root / "2026" / "09" / "20"
+    day.mkdir(parents=True)
+
+    def session(i: int) -> str:
+        sid = f"ses-{i:02d}"
+        rows = [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "session_id": sid,
+                    "id": sid,
+                    "timestamp": f"2026-09-20T09:{i:02d}:00Z",
+                    "cwd": "C:/w",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": f"ask {i}"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "ok"}],
+                },
+            },
+        ]
+        (day / f"rollout-2026-09-20T09-{i:02d}-00-{sid}.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        return sid
+
+    for i in range(6):
+        session(i)
+    p = CodexParser(root)
+    ids = sorted(m.session_id for m in p.list_sessions())
+    assert len(ids) == 6, f"the fixture does not list six sessions: {ids}"
+
+    walks: list[int] = []
+    real_walk = p._walk_files
+    p._walk_files = lambda: (walks.append(1), real_walk())[1]  # count, then walk
+
+    def peek_all() -> None:
+        for sid in ids:
+            p.peek_status(sid)
+            p.peek_needs_reply(sid)
+
+    with discovery_pass():
+        walks.clear()
+        peek_all()
+        inside = len(walks)
+    walks.clear()
+    peek_all()
+    outside = len(walks)
+
+    assert inside == 1, f"a pass of {len(ids)} sessions walked the store {inside} times"
+    assert outside == len(ids) * 2, (
+        f"outside a pass the answer went stale: {outside} walks for "
+        f"{len(ids) * 2} peeks -- a caller that opens no window must not inherit one"
+    )
+
+    # A session created while the cockpit sat idle must appear on the next pass,
+    # not be hidden behind the list the previous one built.
+    ids.append(session(7))
+    with discovery_pass():
+        walks.clear()
+        peek_all()
+        rewalked = len(walks)
+    fresh = sorted(m.session_id for m in p.list_sessions())
+    assert rewalked == 1, f"a second pass did not re-derive the file list ({rewalked} walks)"
+    assert "ses-07" in fresh, f"the new session never reached the store's file list: {fresh}"

@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_handoff.locations import home
-from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
+from agent_handoff.model import Interruption, Message, RawSession, SessionMeta, TodoItem, ts_to_iso
 from agent_handoff.parsers.base import Parser, as_text_blocks, file_entry, read_jsonl
 
 
@@ -56,6 +56,73 @@ def _tail_rows(path: Path, max_bytes: int = 65536) -> list[dict]:
         if isinstance(obj, dict):
             rows.append(obj)
     return rows
+
+
+def _tail_lines(path: Path, max_bytes: int) -> list[bytes]:
+    """The last whole lines of a file, as bytes.
+
+    Bytes rather than parsed records because a tail is read to *find* one row: a
+    qoder transcript's non-dialogue records (attachments, history snapshots) run
+    to tens of kilobytes each, so decoding a window costs more than reading it.
+    The caller tests each line for a role token and parses only the candidates.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as handle:
+            start = max(0, size - max_bytes)
+            handle.seek(start)
+            payload = handle.read()
+    except OSError:
+        return []
+    lines = payload.splitlines()
+    if start and lines:
+        lines = lines[1:]  # the window began mid-line
+    return lines
+
+
+def _walk_jsonl(root: Path, facts: dict | None = None) -> list[Path]:
+    """Every `.jsonl` under `root`, without asking the OS about each one.
+
+    `Path.rglob` works out dir-vs-file by stat'ing, and the caller's `is_file()`
+    stat'ed again: over the store the qoder family shares that was 4,263
+    `os.stat` calls and 0.254 s for 4,262 files, paid once per listing and by
+    two listings per rebuild (the IDE's own and `qoderwake`'s view of the same
+    directory). `os.scandir` carries the type in the same directory read that
+    produced the name, which is 0.106 s and no stat. Symlinks are followed and
+    an unreadable directory is passed over, both as `rglob` does: one locked
+    project directory must not empty the whole list.
+
+    `facts`, when given, collects `str(path) -> (mtime, size)` from the same
+    directory entries. That is the point of the hand-rolled walk: the listing
+    then asks 4,261 files for their version four times over (the id peek, the
+    meta peek, the canonical ranking and the fragment scan's newest-first
+    order), and a stat that the directory read already answered costs nothing.
+    """
+    out: list[Path] = []
+    stack = [root]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=True):
+                    stack.append(Path(entry.path))
+                elif entry.name.lower().endswith(".jsonl") and entry.is_file(follow_symlinks=True):
+                    path = Path(entry.path)
+                    if facts is not None:
+                        try:
+                            est = entry.stat()
+                        except OSError:
+                            est = None
+                        if est is not None:
+                            facts[str(path)] = (est.st_mtime, est.st_size)
+                    out.append(path)
+            except OSError:
+                continue
+    return out
 
 
 def _mtime_iso(stamp: float) -> str | None:
@@ -110,6 +177,50 @@ def _summary_title(text: str) -> str:
 # by id for debugging).
 _TOOLLOOP_TITLE = "工具循环会话（无用户消息）"
 
+# (path, mtime, size) -> the eight fields a peek derives, or () for "no rows".
+# A roll is append-only, so a version key is enough: the head, the tail scan and
+# the derived title cannot change without the size or the mtime changing too.
+# This is what makes the 20s cache rebuild cheap instead of re-reading 800 lines
+# per file: measured, the jsonl family alone spent 3.9s of an 11s build.
+_PEEK_CACHE: dict[tuple[str, float, int], tuple] = {}
+
+# (path, mtime, size) -> the session id that file's own records report. Same
+# version key and the same argument as _PEEK_CACHE, and it is the difference
+# between four qoder-family stores *sharing* one 4,261-file store and each of
+# them re-reading the head of all 4,261 files on every 20s rebuild: measured, the
+# uncached id peek cost 2.7s of an 11.3s poll and 8,995 of its ~9,000 opens.
+_ID_CACHE: dict[tuple[str, float, int], str] = {}
+
+# (path, mtime, size) -> "this roll opens with a session_meta/add_user_message
+# row", i.e. it is one turn of a fragmented chat rather than a conversation.
+# Same version key again; without it every store that shares the qoder store
+# re-reads the head of all 2,302 canonical files per poll to ask a question the
+# first store already answered.
+_FRAG_HEAD_CACHE: dict[tuple[str, float, int], bool] = {}
+
+# store -> {fragment text: the (path, mtime, size) that was carrying it}. A text
+# is only skipped by a later scan while that exact version is still on disk: the
+# proof is checked with one stat per remembered text, never by re-reading them.
+_PROVEN_ABSORBED_TEXTS: dict[str, dict] = {}
+
+# store -> {path: ((mtime, size), the fragment texts this version of the file was
+# read for and does not contain)}. `proven` above remembers what a scan *found*;
+# this remembers what it did not, which is the half that a live store pays for:
+# a turn the store genuinely does not carry is proven absent only by reading up
+# to the scan's byte budget, and while another session is being written that
+# budget is re-spent on every 20 s rebuild - 50,000 JSON rows of it on this
+# machine's qoder store, for a dozen fragments whose answer never changes
+# (spec Round 55).
+_ABSORB_ABSENT_TEXTS: dict[str, dict] = {}
+
+# store -> {session id: (the versions of the files the answer was read from and
+# the date the listing carried, the answer)}. The Needs-input probe reads a window
+# of every listed row on every poll -- 144 MB a rebuild on this machine's stores --
+# and a row's answer can only change when one of those versions does, which is the
+# same rule `_PEEK_CACHE` and `_ABSORB_ABSENT_TEXTS` are built on. The listing date
+# is part of the key because the probe declines when it outranks the turn it found.
+_NEEDS_REPLY_CACHE: dict[str, dict] = {}
+
 # ~/.qoder-cn (and ~/.qoder) is SHARED by the whole qoder family: the IDE's own
 # chats live under <project>/transcript/ or in plain <project> dirs, while
 # qoderwake team-groups/workers and qoderwork workspaces each create top-level
@@ -117,11 +228,25 @@ _TOOLLOOP_TITLE = "工具循环会话（无用户消息）"
 # the wake/work transcripts belong to their own CLI entries.
 _FAMILY_MARKERS = ("qoderwake", "qoderwork")
 
+#: `_family_of_path` runs once per listed session per rebuild and resolved the
+#: store root on every one of those calls: 4,640 resolutions of eight distinct
+#: roots, each a round of `stat` calls, in the measured 70,386-stat rebuild.
+_RESOLVED_ROOTS: dict[str, Path | None] = {}
+
 
 def _family_of_path(root: Path, path: str) -> str | None:
     """Which qoder family a transcript belongs to, from the store dir name."""
+    rkey = str(root)
+    if rkey not in _RESOLVED_ROOTS:
+        try:
+            _RESOLVED_ROOTS[rkey] = Path(root).resolve()
+        except OSError:
+            _RESOLVED_ROOTS[rkey] = None
+    resolved = _RESOLVED_ROOTS[rkey]
+    if resolved is None:
+        return None
     try:
-        rel = Path(path).resolve().relative_to(Path(root).resolve())
+        rel = Path(path).resolve().relative_to(resolved)
     except (ValueError, OSError):
         return None
     for part in rel.parts:
@@ -137,6 +262,70 @@ def _family_of_path(root: Path, path: str) -> str | None:
 _QODER_ABSORB_CACHE: dict = {}
 _ABSORB_SCAN_CAP_BYTES = 60_000_000
 
+#: The workspace-model anchor answers one question about one session by reading
+#: every sibling in the store, so opening the same session twice paid that scan
+#: twice -- measured 2026-09-20 on this machine's qoder-ide store: **6,650 files
+#: and 78,781 rows parsed for a single `load()`**, on a session whose own file is
+#: 0.1 MiB.
+#:
+#: The facts are therefore cached **per sibling group**, keyed by the newest mtime
+#: inside that group, not per store: a store-wide stamp is useless here because
+#: the store is being written while the cockpit reads it (the session the reader
+#: is watching grows every second), and measuring that showed a store-wide cache
+#: hit nothing on 3 of 4 sessions. Fine-grained, the repeat cost is the number of
+#: files that actually changed -- usually one -- and each cached entry is what the
+#: scan's own loop would have produced, so no answer is computed differently.
+#: Same mechanism and reasoning as `_QODER_ABSORB_CACHE` above.
+_ANCHOR_FACTS: dict = {}
+
+#: The ai-stats file telemetry, indexed once per stats-tree change rather than
+#: re-read for every detail page. Keyed by the store directory; the value is the
+#: (path, size, mtime) signature the index was built from and the map itself.
+_TELE_INDEX: dict[str, tuple] = {}
+
+
+def _tele_line(line: str, index: dict[str, Counter[str]]) -> None:
+    """Fold one telemetry row into the index.
+
+    A row credits its ``filePath`` to every session named in its ``lineDetails``,
+    **once each**: asked about one session at a time, the per-session scan this
+    replaces matched the first detail belonging to that session and stopped, so a
+    row listing the same session twice counts once. Collapsing that to "the first
+    session in the list" would quietly stop counting the others.
+    """
+    try:
+        row = json.loads(line)
+    except ValueError:
+        return
+    fp = row.get("filePath")
+    if not isinstance(fp, str) or not fp.strip():
+        return
+    sids = {
+        str(ld["sessionId"])
+        for ld in row.get("lineDetails") or []
+        if isinstance(ld, dict) and ld.get("sessionId")
+    }
+    for sid in sids:
+        index.setdefault(sid, Counter())[fp] += 1
+
+
+def _newest_mtime(paths) -> float:
+    """The newest mtime among `paths`, or -1 if none can be stat'ed.
+
+    A file that vanished cannot be stat'ed, and the scan that consults it skips
+    it too -- but the stamp must not silently survive a deletion, so a failure
+    reports the sentinel that no successful walk can produce.
+    """
+    newest = -1.0
+    for group in paths:
+        for p in group:
+            try:
+                m = p.stat().st_mtime
+            except OSError:
+                return -2.0
+            newest = max(newest, m)
+    return newest
+
 
 def _parse_iso_local(iso):
     """Parse an ISO timestamp (qoder mixes +00:00 strings); None on failure."""
@@ -146,6 +335,126 @@ def _parse_iso_local(iso):
         return datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _row_shape(row: dict) -> str:
+    """A reportable name for a row the parser did not read.
+
+    Refined by the store's own sub-type where it has one, because `attachment`
+    on its own would say nothing useful: 9 of the 12 attachment kinds this
+    machine's stores write are injected context (task_reminder 3136 rows,
+    skill_listing 1460, agent_listing_delta 1286, ...) and 3 name files.
+    Reporting them together is how a real one gets ignored.
+    """
+    base = str(row.get("type") or "<no-type>")
+    if base != "attachment":
+        return base
+    att = row.get("attachment")
+    if isinstance(att, dict) and att.get("type"):
+        return f"attachment/{att.get('type')}"
+    return "attachment/<no-subtype>"
+
+
+#: Row types that legitimately carry no turn - bookkeeping and side-channel
+#: records the parser reads or ignores on purpose. Anything reaching the
+#: no-role fall-through outside this list becomes a visible `unhandled_row:`
+#: fact, because "the store started writing a shape nobody has seen" must not be
+#: indistinguishable from "nothing happened".
+#:
+#: The list is the set the live store actually produced, over 131 sampled
+#: family sessions (spec Round 41), with the count of sessions in which each
+#: appeared: runtime-config 54, last-prompt 49, workspace-directories 47,
+#: active-leaf 46, attachment 43, worktree-state 35, ai-title 24, session_meta
+#: 18, progress 14, system 8, session-meta 7, resend-fork-notice 7, custom-title
+#: 4. Two of those are deliberately NOT here - `attachment` and
+#: `resend-fork-notice` - because both look like they carry something a session
+#: depended on, and `_load_paths` reads them for exactly that reason: the
+#: attachment kinds that name files become touched paths, and a fork record
+#: marks the two turns it is about. Anything of theirs that cannot be placed
+#: says so.
+ROLELESS_ROW_TYPES: frozenset[str] = frozenset({
+    "session_meta",
+    "session-meta",
+    "runtime-config",
+    "last-prompt",
+    "workspace-directories",
+    "active-leaf",
+    "worktree-state",
+    "ai-title",
+    "custom-title",
+    "progress",
+    "system",
+    "summary",
+    "isCompactSummary",
+    # Injected context, named by the store's own sub-type: rows saying which
+    # skills/agents exist, hook output, queue and goal reminders. Counted on
+    # 2026-09-19 as task_reminder 3136, skill_listing 1460, agent_listing_delta
+    # 1286, hook_output 190, queued_command 87, hook_non_blocking_error 55,
+    # critical_system_reminder 37, goal_state 18, relevant_memories 11 rows.
+    # The three attachment kinds that name files are NOT here - `_load_paths`
+    # reads those, and an attachment sub-type nobody has seen still gets
+    # reported.
+    "attachment/task_reminder",
+    "attachment/skill_listing",
+    "attachment/agent_listing_delta",
+    "attachment/hook_output",
+    "attachment/queued_command",
+    "attachment/hook_non_blocking_error",
+    "attachment/critical_system_reminder",
+    "attachment/goal_state",
+    "attachment/relevant_memories",
+    "attachment/hook_error_during_execution",
+    # Found by asking the whole store instead of a sample (spec Round 48): the
+    # 131-session sample behind the list above had never met these three.
+    # Counted 2026-09-20 over every jsonl this store holds - 4,214 files,
+    # 328,530 rows - as invoked_skills 2, hook_system_message 2, auto_mode_exit 1
+    # rows. Two are excused for what they are, not for being rare:
+    # `auto_mode_exit` is an empty `{"type": ...}` marker, and
+    # `hook_system_message` is a hook printing at the user, i.e. the same
+    # side-channel family as `hook_output` above. `invoked_skills` is the one
+    # carrying real content (skill names plus their SKILL.md text): it is
+    # excused because a skill file the harness loaded is not a file the session
+    # worked on, so it must not join the touched-paths list - the fact that no
+    # surface shows "which skills ran" is recorded in docs/limitations.md
+    # instead of being quietly dropped here.
+    "attachment/invoked_skills",
+    "attachment/hook_system_message",
+    "attachment/auto_mode_exit",
+})
+
+#: Attachment sub-types whose payload names files the product models as touched.
+#: The three `plan_*` kinds were found by reporting attachments per sub-type:
+#: as one `attachment` blob they were invisible, and all three carry
+#: `planFilePath`.
+#:
+#: `plan_mode_reentry` is the fourth, and it was missed: the full sweep met it on
+#: 2026-09-20 and it was falling through as unread while its siblings were read.
+#: Its payload is `{"type": "plan_mode_reentry", "planFilePath": ...}` - the same
+#: key `_attachment_files` already lifts - so excluding it under-reported the
+#: files a planning session touched.
+FILE_BEARING_ATTACHMENTS = frozenset({
+    "file",
+    "edited_text_file",
+    "post_compact_restored_files",
+    "plan_file_reference",
+    "plan_mode",
+    "plan_mode_exit",
+    "plan_mode_reentry",
+})
+
+#: A store's own status word -> the end state it proves. Only the two stores
+#: that keep such a column/file reach for this, and only terminal words are
+#: listed: `working` and `idle` describe liveness, `archived` describes
+#: bookkeeping, and none of them says how the turn ended. Mapping a non-terminal
+#: word is the mistake this table exists to keep out - a recorded fact is worth
+#: reporting, an unrelated one is not allowed to become "clean".
+STORE_END_STATES = {
+    "completed": "clean",
+    "done": "clean",
+    "finished": "clean",
+    "error": "error",
+    "failed": "error",
+}
 
 
 class JsonlSessionParser(Parser):
@@ -158,6 +467,54 @@ class JsonlSessionParser(Parser):
         self.root = root or (home() / self.projects_dirname / "projects")
         # sid -> every file that reports it, filled by list_sessions().
         self._index: dict[str, list[Path]] = {}
+        # str(path) -> (mtime, size) from the last walk of this store. Replaced
+        # wholesale by every base `_iter_jsonl()` call, so it never outlives the
+        # pass that filled it; a parser whose `_iter_jsonl` is overridden simply
+        # has none, and every reader below falls back to a stat.
+        self._dirfacts: dict[str, tuple[float, int]] = {}
+        # sid -> the file this listing read that row's own dialogue from. Only
+        # the listings that walk the store themselves (`_CodebuddyHybridParser`)
+        # fill it, because a store that lists through `list_sessions` already has
+        # `_index`. Deliberately separate from `_index`: that map is what `load()`
+        # merges, so adding a row's sub-agent transcripts to it here would change
+        # a transcript to answer a column.
+        self._listed_files: dict[str, list[Path]] = {}
+        # sid -> the timestamp the listing reported for that row. The tail probe
+        # compares it against the newest turn its window could see: when the
+        # listing knows about something newer, a turn exists that the window did
+        # not reach, and the probe's answer is about the wrong end of the file.
+        self._listing_stamp: dict[str, str | None] = {}
+        # The rows the last `list_sessions()` did not list, with the reason on
+        # each one. See `_split_toolloops`.
+        self._hidden: list[SessionMeta] = []
+
+    def _split_toolloops(self, metas: list[SessionMeta]) -> list[SessionMeta]:
+        """Keep the conversations; park the tool loops on ``self._hidden``.
+
+        The rule is unchanged from the one this file has always applied — a row
+        whose title is the tool-loop sentinel is not a conversation, exactly as
+        the product's own UI does not list them. What is new is the receipt:
+        dropping 107 rows from a store of 2,638 was invisible, and "invisible"
+        and "lost" look the same from the outside (spec Round 54).
+
+        Call it *after* any family filtering: four entries read two shared
+        stores, and a stash made before the split would carry the same rows for
+        each of them.
+        """
+        keep: list[SessionMeta] = []
+        hidden: list[SessionMeta] = []
+        for m in metas:
+            if m.title == _TOOLLOOP_TITLE:
+                m.hidden_reason = "tool-loop"
+                hidden.append(m)
+            else:
+                keep.append(m)
+        self._hidden = hidden
+        return keep
+
+    def hidden_sessions(self) -> list[SessionMeta]:
+        """What the last ``list_sessions()`` of this parser did not list."""
+        return list(self._hidden)
 
     def available(self) -> bool:
         return self.root.is_dir()
@@ -167,7 +524,30 @@ class JsonlSessionParser(Parser):
     def _iter_jsonl(self) -> list[Path]:
         if not self.available():
             return []
-        return sorted(p for p in self.root.rglob("*.jsonl") if p.is_file())
+        facts: dict[str, tuple[float, int]] = {}
+        found = sorted(_walk_jsonl(self.root, facts))
+        self._dirfacts = facts
+        return found
+
+    def _version(self, path: Path) -> tuple[float, int] | None:
+        """(mtime, size) for a transcript, from the directory read that named it.
+
+        A listing pass asks 4,261 files for their version four times over -- the
+        id peek, the meta peek, the canonical ranking and the fragment scan's
+        newest-first order -- which was 40,000 of the 114,728 `os.stat` calls in
+        one measured rebuild. `os.scandir` had both numbers in the entry it
+        already returned, so the walk carries them. None means no answer: a file
+        the walk did not see that a stat cannot describe either, which a caller
+        must not mistake for version (0, 0).
+        """
+        hit = self._dirfacts.get(str(path))
+        if hit is not None:
+            return hit
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime, st.st_size)
 
     def _group_files(self, paths: list[Path], sid: str) -> list[Path]:
         """Rank a session's files: canonical transcript first, companions after."""
@@ -180,11 +560,8 @@ class JsonlSessionParser(Parser):
                 score = 2
             elif path.name.startswith("agent-"):
                 score = 1  # sub-agent transcript, part of the session but not its head
-            try:
-                size = path.stat().st_size
-            except OSError:
-                size = 0
-            return (score, size)
+            ver = self._version(path)
+            return (score, ver[1] if ver else 0)
 
         return sorted(paths, key=rank, reverse=True)
 
@@ -202,23 +579,39 @@ class JsonlSessionParser(Parser):
             if sid:
                 groups.setdefault(sid, []).append(path)
         self._index = groups
+        self._listing_stamp = {}
 
         metas: list[SessionMeta] = []
         for sid, paths in groups.items():
             meta = self._peek(self._group_files(paths, sid)[0])
             if meta is not None:
                 meta.session_id = sid
+                self._listing_stamp[sid] = meta.updated_at
                 metas.append(meta)
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         return metas
 
     def _peek_id(self, path: Path) -> str:
         """Session id as the store reports it, falling back to the file stem."""
+        ver = self._version(path)
+        key = (str(path), ver[0], ver[1]) if ver else None
+        if key is not None:
+            hit = _ID_CACHE.get(key)
+            if hit is not None:
+                return hit
+        sid = ""
         for row in read_jsonl(path, limit=10):
-            sid = row.get("sessionId") or row.get("session_id")
-            if sid:
-                return str(sid)
-        return path.stem
+            value = row.get("sessionId") or row.get("session_id")
+            if value:
+                sid = str(value)
+                break
+        if not sid:
+            sid = path.stem
+        if key is not None:
+            if len(_ID_CACHE) > 8192:  # a long-lived process, a growing store
+                _ID_CACHE.clear()
+            _ID_CACHE[key] = sid
+        return sid
 
     def _origin(self) -> str | None:
         """Store directory (e.g. .qoderwork vs .qoderworkcn) = account scope."""
@@ -232,8 +625,27 @@ class JsonlSessionParser(Parser):
         under hundreds of tool-hint/meta rows (measured: a 13 MB compacted roll
         keeps its summary at line 487).
         """
+        ver = self._version(path)
+        key = (str(path), ver[0], ver[1]) if ver else (str(path), 0.0, 0)
+        hit = _PEEK_CACHE.get(key)
+        if hit is not None:
+            if not hit:
+                return None  # the file was empty when it was read
+            return SessionMeta(
+                cli=self.cli,
+                session_id=hit[0],
+                title=hit[1],
+                cwd=hit[2],
+                started_at=hit[3],
+                updated_at=hit[4],
+                source_path=str(path),
+                origin=self._origin(),
+            )
         rows = read_jsonl(path, limit=800)
         if not rows:
+            if len(_PEEK_CACHE) > 8192:  # a long-lived process, a growing store
+                _PEEK_CACHE.clear()
+            _PEEK_CACHE[key] = ()
             return None
         cwd = ""
         session_id = path.stem
@@ -283,7 +695,7 @@ class JsonlSessionParser(Parser):
             # a spawned browser/automation sub-agent). Say so honestly instead of
             # leaking a bare short id that looks like a parsing failure.
             title = _TOOLLOOP_TITLE
-        return SessionMeta(
+        meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,
             title=title,
@@ -293,6 +705,10 @@ class JsonlSessionParser(Parser):
             source_path=str(path),
             origin=self._origin(),
         )
+        if len(_PEEK_CACHE) > 8192:
+            _PEEK_CACHE.clear()
+        _PEEK_CACHE[key] = (session_id, title, cwd, started, updated)
+        return meta
 
     def load(self, session_id: str) -> RawSession | None:
         paths = self._resolve_group(session_id)
@@ -325,24 +741,129 @@ class JsonlSessionParser(Parser):
         return self._raw_entries(self._resolve_group(session_id))
 
     def peek_needs_reply(self, session_id: str) -> bool | None:
-        """Tail-scan the canonical transcript: is the last real turn a user one?
+        """Tail-scan the session's transcripts: is the last real turn a user one?
 
-        Runs for every row of the session list, so it must stay cheap: it only
-        reads the cached ``_index`` (populated by list_sessions) and the last
-        16 KB of the canonical file. It deliberately avoids ``_resolve_group``
-        because that can fall back to a full-store rglob scan, which — run once
-        per listed session — stalls the whole listing.
+        Runs for every row of the session list, so it stays cheap by
+        construction: the canonical transcript plus at most ``_PROBE_FILES``
+        companions, one bounded window each, and no ``_resolve_group`` -- that can
+        fall back to a full-store rglob scan, which run once per listed session
+        stalls the whole listing.
+
+        Four ways that first version left rows unanswered or wrong on real stores,
+        each measured before being fixed (spec Round 56):
+
+        * **The window was too small to contain a turn.** Sixteen kilobytes of a
+          qoder transcript is one to three records, because its non-dialogue rows
+          -- attachments, history snapshots -- run to tens of kilobytes each. The
+          newest turn sat just above that: this machine's ``qoder-ide`` store
+          answered 1,350 of its 2,287 rows and answers 2,279 now. The window is
+          64 KB, and a line is tested for a role token before it is parsed, so the
+          larger read does not drag a larger decode with it.
+        * **A store whose listing walks the files itself filled no ``_index``**,
+          which was the only place the probe looked: 172 rows (156 ``workbuddy``,
+          16 ``codebuddy``) declined without reading a byte, while the listing had
+          opened the file they live in seconds earlier. That listing now records it.
+        * **An entry that delegates its transcripts** -- the wake entries read the
+          shared qoder store through another parser, which holds both the index
+          and the merge -- asked itself instead. It asks the owner now, which is
+          where ``qoderwake-cn`` went from answering none of its 11 rows to 9.
+        * **A split session can be read from the wrong file**, once the probe looks
+          beyond one transcript: a session's companions are usually sub-agent
+          transcripts, and a sub-agent file ends on the task it was handed, not on
+          the conversation's last word. Reading the companions before the
+          canonical transcript answers 9 of this machine's 172 split rows as a false
+          "needs input" (measured against their own detail page), so the order is
+          fixed below and pinned by a test.
+
+        Two things keep the wider read affordable and honest: the answer is
+        memoised against the version of every file it was read from (a warm rebuild
+        reads 0.1 MB instead of 144), and a row declines when the listing dates it
+        after the turn found -- the file's end is then not its newest content, and
+        "not waiting" would be the one answer worth losing to avoid. What stays
+        unanswered stays "unknown", which the cockpit renders as its own state;
+        ``docs/limitations.md`` carries the row counts and the price of the rest.
         """
-        paths = self._index.get(session_id)
+        paths = self._index.get(session_id) or self._listed_files.get(session_id)
         if not paths:
             return None
-        head = self._group_files(paths, session_id)[0]
-        rows = _tail_rows(head, max_bytes=16384)
-        for r in reversed(rows):
-            role, text, _raw, _tools = self._row_content(r)
-            if role in ("user", "assistant") and text and not self.is_noise(text):
-                return role == "user"
-        return None
+        # The canonical transcript first, for the reason measured in the docstring
+        # above; companions only as a fallback, newest version first, because a
+        # conversation continued across files keeps its last words in the newest
+        # continuation.
+        ranked = self._group_files(list(paths), session_id)
+        head, rest = ranked[0], ranked[1:]
+        rest.sort(key=lambda p: self._version(p) or (-1.0, 0), reverse=True)
+        consulted = [head, *rest[: self._PROBE_FILES]]
+        listed = self._listing_stamp.get(session_id)
+        # One answer per file version, not per poll: this runs for every row of the
+        # list every 30 s, and 64 KB across 2,491 rows is 144 MB of reading a
+        # rebuild. The key is the version of each file the answer is read from plus
+        # the date the listing reported, because that date is part of what the
+        # answer means (see the guard below).
+        key = (
+            tuple((str(path), self._version(path)) for path in consulted),
+            listed,
+            # The window and the file cap are inputs to the answer, not just
+            # settings: a parser that tunes either must re-derive, not inherit.
+            (self._PROBE_BYTES, self._PROBE_FILES),
+        )
+        memo = _NEEDS_REPLY_CACHE.setdefault(str(self.root), {})
+        hit = memo.get(session_id)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        answer: bool | None = None
+        seen_stamp: str | None = None
+        for path in consulted:
+            for raw in reversed(_tail_lines(path, self._PROBE_BYTES)):
+                # A byte test before a parse: the records that fill a qoder tail
+                # are 30-100 KB blobs with no dialogue in them, and decoding one
+                # to learn it is not a turn costs more than the read. Nothing is
+                # missed by the test -- a line with no role token in it cannot be
+                # a turn this parser would accept either -- and a miss answers
+                # "unknown", never "answered".
+                if b'"user"' not in raw and b'"assistant"' not in raw:
+                    continue
+                try:
+                    row = json.loads(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                role, text, _raw, _tools = self._row_content(row)
+                if role in ("user", "assistant") and text and not self.is_noise(text):
+                    answer = role == "user"
+                    seen_stamp = _iso(row.get("timestamp"))
+                    break
+            if answer is not None:
+                break
+        if answer is None:
+            verdict = None
+        elif answer is False and listed and seen_stamp and listed > seen_stamp:
+            # The listing dated this row from the session's own records, so a date
+            # newer than the turn just found means the file's end is not its newest
+            # content and the answer is about the wrong part of the conversation.
+            # That is applied to the "not waiting" answer only, and the asymmetry is
+            # deliberate: an "unknown" beside a conversation that is waiting costs a
+            # highlight, while "answered" beside one that is waiting hides the work
+            # the column exists to surface. Measured on this machine's stores it
+            # silences 8 rows, 7 of them answers the window had right, and is the
+            # reason the column has no known disagreement with a detail page.
+            verdict = None
+        else:
+            verdict = answer
+        if len(memo) > 8192:  # a long-lived process, a growing store
+            memo.clear()
+        memo[session_id] = (key, verdict)
+        return verdict
+
+    #: How far above the end of a transcript a row is answered from, and how many
+    #: of the session's files that read covers. Both are cost decisions stated as
+    #: bytes per listed row: 64 KB is where this machine's qoder stores keep their
+    #: newest turn -- at 16 KB the family answered 1,383 of its 2,491 rows, at
+    #: 64 KB it answers 2,477 -- and the reads stay bounded per file, memoised by
+    #: version so a poll does not re-read what has not changed.
+    _PROBE_BYTES = 65_536
+    _PROBE_FILES = 3
 
     def _resolve_group(self, session_id: str) -> list[Path]:
         """All files that make up one session; cheap and storage-layout agnostic."""
@@ -605,6 +1126,16 @@ class JsonlSessionParser(Parser):
         # Row-level provider signals that never surface as turns: compacted
         # summaries, errors, and the agent surface (cli vs IDE).
         row_errors: list[str] = []
+        unhandled: Counter[str] = Counter()
+        # In-file forks: `editedUserItemId` of every fork record seen, the turn
+        # each row id belongs to, and whether a re-send claim is still waiting
+        # for the turn the store wrote directly after its record.
+        fork_targets: list[str] = []
+        turn_by_row_id: dict[str, Message] = {}
+        pending_resent = False
+        # Forks the transcript can only show one end of — counted so the gap is
+        # a fact on the session instead of a silent absence.
+        fork_target_missing = 0
         compacted_summaries = 0
         agent_surfaces: set[str] = set()
         # Session-level pre-scan: does ANY row carry real text? A session of
@@ -750,8 +1281,40 @@ class JsonlSessionParser(Parser):
                         files[fp] += 1
                     continue
 
+                if rtype == "resend-fork-notice":
+                    # The store's own record of an in-file fork: the user edited
+                    # a turn they had already sent and sent the new text again.
+                    # The row carries no turn of its own - only the id of the
+                    # turn that was edited - so both ends are settled once the
+                    # turns exist: the named turn below, the re-sent one at the
+                    # next turn this loop appends.
+                    eid = row.get("editedUserItemId")
+                    fork_targets.append(eid if isinstance(eid, str) else "")
+                    pending_resent = True
+                    continue
+
+                if rtype == "attachment" and isinstance(row.get("attachment"), dict):
+                    # Several attachment kinds name a file the session opened or
+                    # edited. The product models that as a touched path, so they
+                    # are read here instead of being reported unread; injected
+                    # context kinds (skills, hooks, reminders) carry no turn and
+                    # fall through to the shape report, where their sub-type is
+                    # what decides whether that is expected.
+                    att = row["attachment"]
+                    if str(att.get("type") or "") in FILE_BEARING_ATTACHMENTS:
+                        for fp in self._attachment_files(att):
+                            files[fp] += 1
+                        continue
+
                 role, text, raw_text, tool_blocks = self._row_content(row)
                 if not role:
+                    # Nothing matched this row and it carries no turn, so it
+                    # ends up unread here. For bookkeeping rows that is correct;
+                    # for a shape the parser has never seen it is invisible from
+                    # outside the process, which is how a store shipping a new
+                    # record type reads as "nothing happened". Count them all
+                    # first; ROLELESS_ROW_TYPES is what the live store showed.
+                    unhandled[_row_shape(row)] += 1
                     continue
                 for tb in tool_blocks:
                     name, tool_input = self._tool_name_input(tb)
@@ -797,6 +1360,12 @@ class JsonlSessionParser(Parser):
                             )
                         )
                 if text and not self.is_noise(text):
+                    # A re-send claim reaches only the turn written directly
+                    # after the fork record. Any turn takes it or clears it, so
+                    # a filtered or duplicated row cannot leave the flag live
+                    # for an unrelated turn further down the file.
+                    _resent_here = pending_resent
+                    pending_resent = False
                     key = (role, text)
                     if key in seen_ids:
                         continue  # the same turn mirrored into a companion file
@@ -857,6 +1426,16 @@ class JsonlSessionParser(Parser):
                             subagent=sub_label,
                         )
                     )
+                    if role == "user":
+                        _turn = messages[-1]
+                        _rid = row.get("id")
+                        if isinstance(_rid, str) and _rid:
+                            # Fork records name turns by this id; keep the
+                            # first copy, since a companion file mirroring the
+                            # same row must not split the link across objects.
+                            turn_by_row_id.setdefault(_rid, _turn)
+                        if _resent_here:
+                            _turn.resent = True
 
         if len({m.at for m in messages if m.at}) > 1 and all(m.at for m in messages):
             messages.sort(key=lambda m: m.at or "")  # merge companions chronologically
@@ -904,12 +1483,34 @@ class JsonlSessionParser(Parser):
                     if m.role == "assistant" and not m.model:
                         m.model = top
 
+        # The other end of every fork: the turn the store named is the
+        # abandoned copy. It is a separate flag from `resent` because both hold
+        # of the same turn in most real sessions — editing the newest message
+        # again is how the product is used. A name matching no kept user turn
+        # is reported rather than dropped: the link is real, its target is not
+        # in this file.
+        for _tid in fork_targets:
+            _t = turn_by_row_id.get(_tid) if _tid else None
+            if _t is None:
+                fork_target_missing += 1
+                continue
+            _t.superseded = True
+
         notes: list[str] = [f"tool_failed:{f}" for f in tool_failures[:20]]
         if agent_surfaces:
             notes.append(f"surface:{'/'.join(sorted(agent_surfaces))}")
         if compacted_summaries:
             notes.append(f"compacted_turns:{compacted_summaries}")
         notes.extend(f"row_error:{e}" for e in row_errors[:5])
+        # Biggest signal first, same cap as row_error: a session that meets a
+        # thousand unread shapes should say so without burying the row payload.
+        _fresh = [(k, n) for k, n in unhandled.items() if k not in ROLELESS_ROW_TYPES]
+        for _kind, _n in sorted(_fresh, key=lambda kv: (-kv[1], kv[0]))[:5]:
+            notes.append(f"unhandled_row:{_kind}={_n}")
+        if len(_fresh) > 5:
+            notes.append(f"unhandled_row_kinds:{len(_fresh)}")
+        if fork_target_missing:
+            notes.append(f"fork_target_missing:{fork_target_missing}")
         meta = SessionMeta(
             cli=self.cli,
             session_id=session_id,
@@ -921,7 +1522,19 @@ class JsonlSessionParser(Parser):
             origin=self._origin(),
             notes=notes,
         )
-        return self.build_raw(meta, messages, todos, files, tools)
+        return self.build_raw(
+            meta, messages, todos, files, tools, self._proven_interruption(session_id)
+        )
+
+    def _proven_interruption(self, session_id: str) -> Interruption | None:
+        """An ending this store recorded, as evidence. None when it recorded none.
+
+        `Interruption.kind` no longer defaults to "clean" (spec Round 39), so a
+        store that does keep a terminal status would otherwise be reported as
+        unknown - trading one wrong answer for another. Each class that reads
+        such a column or file overrides this.
+        """
+        return None
 
     @staticmethod
     def _collect_row_signals(row: dict, surfaces: set[str], errors: list[str]) -> None:
@@ -984,6 +1597,36 @@ class JsonlSessionParser(Parser):
         snap = row.get("snapshot") or {}
         backups = snap.get("trackedFileBackups") or {}
         return [str(k) for k in backups if isinstance(k, str) and k.strip()]
+
+    @staticmethod
+    def _attachment_files(att: dict) -> list[str]:
+        """Paths a file-bearing attachment names outright.
+
+        `file` and `edited_text_file` carry `filename`, the `plan_*` kinds carry
+        `planFilePath`, and `post_compact_restored_files` carries a list with
+        `filePath` per entry. The store spells the path out, so nothing is
+        guessed here - a value the product would have to infer is a value it
+        should not report.
+        """
+        out: list[str] = []
+        for key in ("filename", "planFilePath"):
+            direct = att.get(key)
+            if isinstance(direct, str) and direct.strip():
+                out.append(direct.strip())
+        entries = att.get("files")
+        if isinstance(entries, str):
+            # Some rolls serialise the list as JSON text instead of an array.
+            try:
+                entries = json.loads(entries)
+            except (ValueError, TypeError):
+                entries = []
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and isinstance(entry.get("filePath"), str):
+                    fp = entry["filePath"].strip()
+                    if fp:
+                        out.append(fp)
+        return out
 
     def usage(self, session_id: str) -> dict | None:
         """Per-model token accounting aggregated from the turns themselves.
@@ -1059,6 +1702,8 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             return []
         metas: list[SessionMeta] = []
         seen: set[str] = set()
+        self._listed_files = {}
+        self._listing_stamp = {}
 
         # Layout 2: session dirs with subagents/ children.
         for subagents_dir in sorted(self.root.rglob("subagents")):
@@ -1075,6 +1720,13 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             # side work), so let it lead the metadata scan.
             flat = session_dir.parent / (sid + ".jsonl")
             scan_files = [flat] + agent_files if flat.is_file() else agent_files
+            if scan_files:
+                # The tail probe needs to know which file carries this row's
+                # dialogue, and `_index` is not the place to say it: that map
+                # feeds `load()`, and handing it `[flat] + agent_files` would add
+                # the sub-agent transcripts to a transcript that today does not
+                # carry them. So a listing of this shape keeps its own record.
+                self._listed_files[sid] = [scan_files[0]]
             meta = self._cb_peek_dir(sid, agent_files, scan_files)
             if meta:
                 metas.append(meta)
@@ -1094,11 +1746,14 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             meta = self._peek(path)
             if meta is not None:
                 meta.session_id = sid
+                self._listed_files[sid] = [path]
                 metas.append(meta)
 
         # Agents (codebuddy background jobs) carry the official session name in
         # jobs/<shortid>/state.json; the sessionId field links the job to the
         # conversation (it may differ from the job's own short id).
+        for m in metas:
+            self._listing_stamp[m.session_id] = m.updated_at
         titles = self._job_titles()
         for m in metas:
             jt = titles.get(m.session_id)
@@ -1107,9 +1762,9 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         # Pure tool loops (edit-and-resend orphans: zero real user messages)
         # are not conversations — the product UI never lists them, so neither
-        # do we. Still loadable by id for debugging.
-        metas = [m for m in metas if m.title != _TOOLLOOP_TITLE]
-        return metas
+        # do we. Still loadable by id for debugging, and kept on the shelf so
+        # a surface can say how many it did not show (`hidden_sessions`).
+        return self._split_toolloops(metas)
 
     def _job_dirs(self) -> list:
         """Candidate jobs/ dirs: own store plus the codebuddy shared one.
@@ -1173,16 +1828,41 @@ class _CodebuddyHybridParser(JsonlSessionParser):
                     out[sid] = st
         return out
 
-    def peek_status(self, session_id: str) -> str | None:
-        """codebuddy-family job state (working/idle/…) or None.
-
-        One glob over small state.json files — cheap enough for list views,
-        same cost class as _job_titles which list_sessions already pays.
-        """
+    def _store_status_word(self, session_id: str) -> str | None:
+        """The word this store keeps for the session, in its own vocabulary."""
         try:
             return self._job_states().get(session_id)
         except OSError:
             return None
+
+    def peek_status(self, session_id: str) -> str | None:
+        """The store's status word, translated into the product's end-state words.
+
+        Only an ending is reported: a job that is `working` or `idle`, or a row
+        that is merely `archived`, has not said how the turn ended, so those
+        report nothing rather than a borrowed word. That keeps the badge on the
+        row and the label on the detail page the same string, which is what lets
+        `scripts/probe_audit.py` compare the two at all.
+        """
+        word = self._store_status_word(session_id)
+        if word is None:
+            return None
+        return STORE_END_STATES.get(str(word))
+
+    def _proven_interruption(self, session_id: str) -> Interruption | None:
+        """The recorded ending, as evidence.
+
+        Both subclasses that keep a status column or file reach here through
+        `_store_status_word`, so the row badge and the handoff answer from one
+        record. Without it, `Interruption` no longer defaulting to "clean"
+        (spec Round 39) would have hidden an ending these two stores really do
+        store.
+        """
+        kind = self.peek_status(session_id)
+        if kind is None:
+            return None
+        word = self._store_status_word(session_id)
+        return Interruption(kind=kind, detail=f"{self.cli} recorded status={word}")
 
     def _cb_peek_dir(
         self, sid: str, agent_files: list[Path], scan_files: list[Path] | None = None
@@ -1603,10 +2283,12 @@ class WorkbuddyParser(_CodebuddyHybridParser):
                 out[str(sid)] = kind
         return out
 
-    def peek_status(self, session_id: str) -> str | None:
+    def _store_status_word(self, session_id: str) -> str | None:
         """workbuddy.db sessions.status (completed/archived/error/…).
 
-        Same cost class as the title lookup; deleted rows report None.
+        Same cost class as the title lookup; deleted rows report None. The
+        shared `peek_status` translates the word, so the list only ever shows a
+        recorded ending and the detail page treats the same column as evidence.
         """
         try:
             import sqlite3
@@ -1880,12 +2562,28 @@ class QodercnIdeParser(JsonlSessionParser):
         meta = super()._peek(path)
         if meta is not None:
             # Detect qoder per-turn fragments from the early session_meta row.
+            # The parent peek just built this same version key from the walk's
+            # directory entry; asking the OS again here was 2,434 stats a rebuild.
+            ver = self._version(path)
+            fkey = (str(path), ver[0], ver[1]) if ver else None
+            if fkey is not None:
+                known = _FRAG_HEAD_CACHE.get(fkey)
+                if known is not None:
+                    if known:
+                        self._frag_ids.add(meta.session_id)
+                    return meta
+            frag = False
             for r in read_jsonl(path, limit=6):
                 if r.get("type") == "session_meta":
-                    st = (r.get("data") or {}).get("content", {}).get("session_type")
-                    if st == "add_user_message":
-                        self._frag_ids.add(meta.session_id)
+                    st2 = (r.get("data") or {}).get("content", {}).get("session_type")
+                    frag = st2 == "add_user_message"
                     break
+            if fkey is not None:
+                if len(_FRAG_HEAD_CACHE) > 8192:
+                    _FRAG_HEAD_CACHE.clear()
+                _FRAG_HEAD_CACHE[fkey] = frag
+            if frag:
+                self._frag_ids.add(meta.session_id)
         return meta
 
     def _list_all(self) -> list[SessionMeta]:
@@ -1941,10 +2639,10 @@ class QodercnIdeParser(JsonlSessionParser):
         flush()
 
         out = reals + merged
-        # A transcript with zero real user messages is an internal tool loop
-        # (browser/automation sub-agent run), not a conversation — the product
-        # UI never lists them, so neither do we. Still loadable by id.
-        out = [m for m in out if m.title != _TOOLLOOP_TITLE]
+        # Tool loops are *not* filtered out here: this pipeline serves the whole
+        # shared store, and four entries read two stores. Each family's
+        # `list_sessions` splits them after its own family filter, so a row is
+        # reported hidden by exactly one entry (see `_split_toolloops`).
         # Quest-task transcripts live under <project>/transcript/ and surface
         # in the product's task panel, not its chat list. Tag them so the
         # cockpit can group/filter like the product does.
@@ -1973,7 +2671,10 @@ class QodercnIdeParser(JsonlSessionParser):
         """The IDE's own chats only: wake/work families leave the shared store
         for their own CLI entries (still deep-linkable by id via load())."""
         out = [m for m in self._list_all() if _family_of_path(self.root, m.source_path) is None]
-        return out
+        metas = self._split_toolloops(out)
+        for m in metas:
+            self._listing_stamp[m.session_id] = m.updated_at
+        return metas
 
     def _within_gap(self, a: SessionMeta, b: SessionMeta) -> bool:
         ta = _parse_iso_local(a.started_at or a.updated_at)
@@ -2009,15 +2710,38 @@ class QodercnIdeParser(JsonlSessionParser):
         the same message inside the task/uuid conversation. Listing both shows one
         conversation twice; the fragment is the redundant copy, so it is absorbed.
         Result is cached per store (invalidated by newest file mtime) and the scan
-        is byte-capped so a large store cannot stall a dashboard load.
+        is byte-capped so a large store cannot stall a dashboard load. Each text
+        the scan proves is remembered together with the version of the file that
+        proved it, so the next scan only answers for fragments whose proof is
+        missing: a proof that lapsed - the session that carried it was rewritten
+        or deleted - is re-derived rather than trusted. What the scan also
+        remembers, per file version, is the list of texts it did *not* find, so a
+        store that is being appended to does not re-read the files whose answer
+        cannot have changed; the byte budget is still spent on them, which keeps
+        the set of files a scan consults - and so what it can absorb - exactly
+        what it was before.
         """
         frag_metas = [m for m in metas if m.session_id in self._frag_ids]
         if not frag_metas:
             return set()
+        files: list[Path] = []
         try:
-            sig = max(p.stat().st_mtime for p in self._iter_jsonl())
+            # The caller listed this store moments ago; re-globbing it here to
+            # ask "what is the newest file" cost a second full walk per store per
+            # poll for a number the listing already held.
+            files = sorted({p for group in self._index.values() for p in group})
+            if not files:
+                files = self._iter_jsonl()
         except (OSError, ValueError):
-            sig = None
+            files = []
+        versions = {}
+        for p in files:
+            ver = self._version(p)
+            if ver is not None:
+                versions[p] = ver
+        # None when the store said nothing: an empty store, or one whose files
+        # all vanished mid-walk. Same as the old `max()` raising ValueError.
+        sig = max((v[0] for v in versions.values()), default=None)
         cache_key = str(self.root)
         cached = _QODER_ABSORB_CACHE.get(cache_key)
         if cached is not None and cached[0] == sig:
@@ -2028,30 +2752,65 @@ class QodercnIdeParser(JsonlSessionParser):
             txt = self._fragment_user_text(m.session_id)
             if txt:
                 frag_texts[m.session_id] = txt
-        wanted = set(frag_texts.values())
-        absorbed: set[str] = set()
+        proven = _PROVEN_ABSORBED_TEXTS.setdefault(cache_key, {})
+        absent = _ABSORB_ABSENT_TEXTS.setdefault(cache_key, {})
+        live: dict[str, tuple] = {}
+        for txt, proof in proven.items():
+            try:
+                stp = Path(proof[0]).stat()
+            except OSError:
+                continue
+            if (stp.st_mtime, stp.st_size) == proof[1:]:
+                live[txt] = proof
+        wanted = {t for t in frag_texts.values() if t not in live}
         if wanted:
             real_paths = sorted(
-                (p for p in self._iter_jsonl() if p.stem not in self._frag_ids),
-                key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
+                (p for p in files if p.stem not in self._frag_ids),
+                key=lambda p: versions.get(p, (-1.0, 0))[0],
                 reverse=True,
             )
             scanned = 0
             for path in real_paths:
                 if not wanted or scanned > _ABSORB_SCAN_CAP_BYTES:
                     break
-                with contextlib.suppress(OSError):
-                    scanned += path.stat().st_size
+                version = versions.get(path)
+                if version is None:  # unreadable now: it cannot prove anything
+                    continue
+                scanned += version[1]
+                seen = absent.get(str(path))
+                if seen is not None and seen[0] == version:
+                    # Read once, answered forever (until this file's version
+                    # moves): these texts are not in it. Skipping the re-read is
+                    # the whole point of the record - the byte budget above is
+                    # still spent, so the set of files this scan consults - and
+                    # therefore what it can prove - is the same as when every
+                    # file was read every time.
+                    wanted.difference_update(seen[1])
+                    continue
                 for row in read_jsonl(path):
                     if row.get("type") != "user":
                         continue
                     role, text, _raw, _tools = self._row_content(row)
                     if role == "user" and text and text.strip() in wanted:
                         wanted.discard(text.strip())
+                        proven[text.strip()] = (str(path), *version)
+                        # The proof is this file's version, which the scan just
+                        # read off `versions`: it counts for this answer, not only
+                        # for the next poll.
+                        live[text.strip()] = proven[text.strip()]
                         if not wanted:
                             break
-            found = set(frag_texts.values()) - wanted
-            absorbed = {sid for sid, txt in frag_texts.items() if txt in found}
+                if wanted:
+                    # Every text still standing was looked for in this file and
+                    # not found: it is absent from *this version* of it. A scan
+                    # that proved its last text mid-file records nothing, since
+                    # it only read a prefix.
+                    absent[str(path)] = (version, frozenset(wanted))
+                if len(absent) > 4096:  # a long-lived process, a growing store
+                    absent.clear()
+            if len(proven) > 4096:  # a long-lived process, a growing store
+                proven.clear()
+        absorbed = {sid for sid, txt in frag_texts.items() if txt in live}
         if sig is not None:
             _QODER_ABSORB_CACHE[cache_key] = (sig, absorbed)
         return absorbed
@@ -2142,6 +2901,50 @@ class QodercnIdeParser(JsonlSessionParser):
                 out.extend(p for p in touched if isinstance(p, str) and p.strip())
         return out
 
+    def _anchor_facts(self, paths, *, cap: bool):
+        """(model, casefolded cwds, earliest ts, latest ts, ts count) for one group.
+
+        This IS the anchor's inner loop, so a cached entry and a freshly computed
+        one cannot diverge -- the cache stores what the scan would have seen, not a
+        re-derivation of it. Only the extremes and a count are kept (that is all the
+        anchor asks), because holding 4,000 timestamp strings per session would make
+        the cache cost more than the scan it saves.
+
+        `cap` is part of the key: the sibling walk stops at the first 4,000
+        timestamps once it has a model, while the session asking the question is
+        read in full. Those are different scans and must not share an entry.
+        """
+        key = (tuple(sorted(str(p) for p in paths)), cap)
+        stamp = _newest_mtime([paths])
+        hit = _ANCHOR_FACTS.get(key)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        model: str | None = None
+        cwds: set[str] = set()
+        first = last = ""
+        count = 0
+        for path in paths:
+            for row in read_jsonl(path):
+                if row.get("type") == "runtime-config" and isinstance(row.get("model"), str):
+                    model = row["model"]
+                ts = _iso(row.get("timestamp"))
+                if ts:
+                    count += 1
+                    if not first or ts < first:
+                        first = ts
+                    if not last or ts > last:
+                        last = ts
+                c = row.get("cwd")
+                if isinstance(c, str) and c:
+                    cwds.add(c.casefold())
+                if cap and model and count > 4000:
+                    break
+            if cap and model and first:
+                break
+        facts = (model, cwds, first, last, count)
+        _ANCHOR_FACTS[key] = (stamp, facts)
+        return facts
+
     def _workspace_model_anchor(self, session_id: str, cwd: str) -> str | None:
         """Same-workspace, time-overlapping sibling's runtime-config model.
 
@@ -2150,66 +2953,50 @@ class QodercnIdeParser(JsonlSessionParser):
         served under its runtime-config model. INFERENCE, not measurement:
         recorded as a note (never Message.model), so the cockpit can show
         it as a hint while the honest-absence rule stays intact.
+
+        The per-group facts come from `_anchor_facts`, which caches them: without
+        that, one `load()` re-read every sibling in the store (6,650 files and
+        78,781 rows measured on this machine's qoder-ide store, for a session
+        whose own file is 0.1 MiB).
         """
         try:
             me_paths = self._resolve_group(session_id)
         except (OSError, ValueError):
             return None
-        me_times: list[str] = []
-        me_cwds: set[str] = set()
-        for path in me_paths:
-            for row in read_jsonl(path):
-                ts = _iso(row.get("timestamp"))
-                if ts:
-                    me_times.append(ts)
-                c = row.get("cwd")
-                if isinstance(c, str) and c:
-                    me_cwds.add(c.casefold())
-        if not me_times:
+        _m, me_cwds, me_start, me_end, me_n = self._anchor_facts(me_paths, cap=False)
+        if not me_n:
             return None
-        me_start, me_end = min(me_times), max(me_times)
-        try:
-            metas = super().list_sessions()
-        except (OSError, ValueError):
-            return None
+        # Candidates come from the index the store listing already built; asking
+        # for a fresh listing here made one session open re-scan the whole store
+        # -- 6,501 of the 6,667 `read_jsonl` calls in one measured `load()` came
+        # from `list_sessions`, not from anything about that session. Walking the
+        # index instead was checked against the listing order on every session in
+        # this store that asks the question: **0 of 893 answers differed**
+        # (spec Round 49), and the loop below already ignored any id missing
+        # from the index, so no candidate is newly in or out of scope.
+        index = getattr(self, "_index", None) or {}
+        if not index:
+            self.list_sessions()
+            index = getattr(self, "_index", None) or {}
         # Compare by the cwd recorded INSIDE the rows (project dir names
         # differ in case/separators across the family's layouts); the meta
         # cwd may be a project dir instead of the workdir.
-        # Cheap cross-check first: only siblings in the same cwd whose files
-        # we already indexed are candidates; skip a full re-scan otherwise.
-        index = getattr(self, "_index", None) or {}
-        for m in metas:
-            if m.session_id == session_id:
-                continue
-            if m.session_id not in index:
+        for sid in index:
+            if sid == session_id:
                 continue
             try:
-                sib_paths = self._resolve_group(m.session_id)
+                sib_paths = self._resolve_group(sid)
             except (OSError, ValueError):
                 continue
-            sib_model: str | None = None
-            sib_times: list[str] = []
-            sib_cwds: set[str] = set()
-            for path in sib_paths:
-                for row in read_jsonl(path):
-                    if row.get("type") == "runtime-config" and isinstance(row.get("model"), str):
-                        sib_model = row["model"]
-                    ts = _iso(row.get("timestamp"))
-                    if ts:
-                        sib_times.append(ts)
-                    c = row.get("cwd")
-                    if isinstance(c, str) and c:
-                        sib_cwds.add(c.casefold())
-                    if sib_model and len(sib_times) > 4000:
-                        break
-                if sib_model and sib_times:
-                    break
-            if not sib_model or not sib_times:
+            sib_model, sib_cwds, sib_first, sib_last, _c = self._anchor_facts(
+                sib_paths, cap=True
+            )
+            if not sib_model or not sib_first:
                 continue
             if not (me_cwds & sib_cwds):
                 continue
-            if max(min(sib_times), me_start) <= min(max(sib_times), me_end):
-                return f"{sib_model}（同工作区同时段会话 {m.session_id[:8]}…，推断仅供参考）"
+            if max(sib_first, me_start) <= min(sib_last, me_end):
+                return f"{sib_model}（同工作区同时段会话 {sid[:8]}…，推断仅供参考）"
         return None
 
     def _model_selector(self, session_id: str) -> str | None:
@@ -2252,33 +3039,54 @@ class QodercnIdeParser(JsonlSessionParser):
 
         ``~/.qoder-cli/ai-stats/projects/*/*.jsonl`` rows carry ``filePath``
         plus ``lineDetails[].sessionId`` — the same id space as this parser's
-        sessions. Only the international ``qoder-ide`` variant keeps this
-        store; the CN twin has none (returns empty there).
+        sessions. Only the international ``qoder-ide`` variant keeps this store;
+        the CN twin has none (returns empty there).
+
+        The whole tree is indexed once and the session looked up in it. Asking
+        per session used to re-read everything: measured on this machine, **3,332
+        files and 73.9 MB for one detail page** — 53% of that page's wall time and
+        99.7% of its reads — and 171 GB for a pass over all 2,305 sessions the
+        store lists. The index is keyed on a stat-only signature of the tree, so a
+        write to the stats store re-reads and an unchanged one reads nothing, and
+        files are streamed line by line: a ``read_text`` of an unbounded file is
+        what reached ``MemoryError`` here once (2026-09-22, on a 全量 probe audit).
         """
+        return Counter(self._telemetry_index(stats_dir).get(session_id) or {})
+
+    def _telemetry_index(self, stats_dir: Path | None) -> dict[str, Counter[str]]:
+        """``sessionId -> filePath counts`` for every row the stats tree holds."""
         from agent_handoff.locations import home
 
-        out: Counter[str] = Counter()
         base = stats_dir or home() / ".qoder-cli" / "ai-stats" / "projects"
         if not base.is_dir():
-            return out
-        for path in base.rglob("*.jsonl"):
+            return {}
+        key = str(base)
+        stamp: list[tuple[str, int, int]] = []
+        try:
+            for p in sorted(base.rglob("*.jsonl")):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                stamp.append((str(p), st.st_size, st.st_mtime_ns))
+        except OSError:
+            return {}
+        signature = tuple(stamp)
+        hit = _TELE_INDEX.get(key)
+        if hit is not None and hit[0] == signature:
+            return hit[1]
+        index: dict[str, Counter[str]] = {}
+        for path, _size, _mtime in stamp:
             try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                with Path(path).open(encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        _tele_line(line, index)
             except OSError:
                 continue
-            for line in lines:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                fp = row.get("filePath")
-                if not isinstance(fp, str) or not fp.strip():
-                    continue
-                for ld in row.get("lineDetails") or []:
-                    if isinstance(ld, dict) and ld.get("sessionId") == session_id:
-                        out[fp] += 1
-                        break
-        return out
+        if len(_TELE_INDEX) > 8:
+            _TELE_INDEX.clear()
+        _TELE_INDEX[key] = (signature, index)
+        return index
 
     def _wake_titles(self) -> dict[str, str]:
         """qs_* session titles from the QoderWake board projection (read-only)."""

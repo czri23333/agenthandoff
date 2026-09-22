@@ -13,6 +13,7 @@ const dict = {
     inbox: "交接箱",
     doctor: "体检",
     memory: "记忆",
+    navRail: "主导航",
     memoryDesc: "各 agent 的常驻指令与记忆文件 —— 交代过什么，而非做过什么",
     memoryProjectFiles: "含项目内 AGENTS/CLAUDE.md",
     memoryEmpty: "（扫描到的存储中无此类信息）",
@@ -38,6 +39,9 @@ const dict = {
     kind_craft: "手工",
     kind_design: "设计",
     kind_coding: "编程",
+  kind_subagent: "子代理",
+  kind_subagent_child: "子代理",
+  kind_agent_created_thread: "智能体创建",
     parentOf: "子任务 · 父会话",
     subSessions: "子会话",
     expandSubs: "展开子会话",
@@ -52,8 +56,13 @@ const dict = {
     unreadable: "个存储不可读",
     refresh: "刷新",
     updating: "更新中…",
-    updatedAgo: "{n} 秒前已更新",
-    autoRefresh: "每 30 秒自动更新",
+    ageSec: "{n} 秒前",
+    ageMin: "{n} 分钟前",
+    ageHr: "{n} 小时前",
+    ageDay: "{n} 天前",
+    pausedAgo: "自动更新已暂停 · {age}",
+    refreshWhy:
+      "每 {n} 秒自动更新；输入框或列表行持有焦点时暂停，此时这个数字是屏幕上这份列表的年龄",
     loading: "加载中…",
     needsReply: "等你回复",
     needsReplyHint: "会话以未回复的用户消息结束（等你接话/接手）",
@@ -109,6 +118,13 @@ const dict = {
     thinking: "思考过程",
     toolCall: "工具调用",
     subagentCall: "子代理",
+    forkResent: "改后重发",
+    forkResentTip: "你改写了更早的一条消息，并用这条替换它。",
+    forkSuperseded: "已被改写",
+    forkSupersededTip: "你之后改写了这条并重新发送；这一条是被弃用的旧版本。",
+    firstToken: "首字",
+    streaming: "输出",
+    agentMessage: "多代理消息",
     openSubagent: "打开子会话",
     rawArchiveTitle: "下载本会话的原始存储（逐字、byte-faithful：工具调用/系统行/厂商未解析字段都在）",
     resumeInCli: "在 CLI 中恢复",
@@ -121,6 +137,10 @@ const dict = {
     sessionInfo: "会话与 agent",
     interrupted: "会话曾中断",
     pendingDirective: "未执行的指令",
+    engineDetail: "引擎原文",
+    threadsCoverage:
+      "文件重叠信号覆盖 {with_files}/{sessions} 个会话（本次 {seconds}s，已达时间预算）",
+    threadsLoadMore: "继续加载",
     usage: "用量与速度",
     budget: "上下文预算",
     timeline: "时间分布",
@@ -152,6 +172,12 @@ const dict = {
     expand: "展开全文",
     collapse: "收起",
     compactionNote: "上下文压缩",
+  historyStart: "记录从半途开始",
+  gitSession: "会话运行时的分支与提交（存储记录）",
+  sourcePath: "存储文件",
+  sourcePathHint: "这个会话在磁盘上的原始记录文件（只读打开）",
+  gitLive: "工作目录当前的 git 分支（实时探测）",
+  storeFacts: "存储事实",
     compactionHint: "长会话被多次压缩，边界之前的消息仅存模型摘要",
     threadsDesc: "实为同一件事的多个会话 —— 谱系 + 文件重叠 + 标题词，限时间窗内",
     minOverlap: "最小重叠",
@@ -176,6 +202,19 @@ const dict = {
     roll: "个归档",
     sessionsN: "个会话",
     showMore: "展开剩余",
+    hintSelect: "选择行",
+    hintOpen: "打开",
+    hintSearch: "搜索",
+    hintViews: "切换页面",
+    hintTheme: "切换主题",
+    refreshPaused: "自动更新已暂停",
+    refreshPausedWhy:
+      "输入框或列表行持有焦点时暂停轮询，免得你正在看的那一行被重排；点「刷新」立即更新",
+    hiddenChip: "无用户消息",
+    hiddenHint:
+      "这些转录没有一条属于自己的用户消息（工具循环 / 自动化子代理运行），产品自己的界面也不列它们。"
+      + "数字按当前筛选计算；打开后它们进入列表，但每组每次仍只渲染 50 行，所以行数不一定多出这些。"
+      + "每条本来就仍可按 id 直接打开。",
     groupBy: "分组方式",
     groupDomain: "按项目",
     groupActivity: "按活跃",
@@ -192,6 +231,7 @@ const dict = {
     searchModeTitle: "标题",
     searchModeFull: "全文",
     searchHint: "按 / 聚焦搜索，Esc 清空；全文模式含消息正文与文件路径",
+    clear: "清空",
     searchTooShort: "至少 2 个字符",
     indexing: "索引中 {done}/{total}",
     indexReady: "索引就绪 · {n} 个会话",
@@ -214,7 +254,10 @@ const dict = {
     themeAuto: "跟随系统",
     themeDark: "夜间",
     themeLight: "日间",
+    seedBaseline: "默认配色（M3 baseline）",
+    seedRejected: "这个种子会产生不可读的配色，已保留原配色：",
     themeToggleHint: "切换主题（T）· 配色已按 WCAG AA 校验",
+    displaySettings: "显示设置（主题 / 语言）",
     /* interruption states -------------------------------------------------- */
     it_clean: "正常结束",
     it_user_pending: "有未执行的指令",
@@ -228,7 +271,7 @@ const dict = {
     it_context_exceeded: "上下文超限",
     it_length_truncated: "回复被截断",
     it_error: "模型错误",
-    it_unknown: "异常结束",
+    it_unknown: "结束状态未记录",
   },
   en: {
     sessions: "Sessions",
@@ -236,6 +279,7 @@ const dict = {
     inbox: "Inbox",
     doctor: "Doctor",
     memory: "Memory",
+    navRail: "Primary navigation",
     memoryDesc: "standing instructions & memory files across CLIs — what was agreed, not what was done",
     memoryProjectFiles: "include project AGENTS/CLAUDE.md",
     memoryEmpty: "(nothing of this kind was found in the scanned stores)",
@@ -261,6 +305,9 @@ const dict = {
     kind_craft: "craft",
     kind_design: "design",
     kind_coding: "coding",
+  kind_subagent: "sub-agent",
+  kind_subagent_child: "sub-agent",
+  kind_agent_created_thread: "agent-created",
     parentOf: "child session · parent",
     subSessions: "sub-sessions",
     expandSubs: "expand sub-sessions",
@@ -275,8 +322,13 @@ const dict = {
     unreadable: "store(s) unreadable",
     refresh: "refresh",
     updating: "updating…",
-    updatedAgo: "updated {n}s ago",
-    autoRefresh: "auto-refreshes every 30s",
+    ageSec: "{n}s ago",
+    ageMin: "{n}m ago",
+    ageHr: "{n}h ago",
+    ageDay: "{n}d ago",
+    pausedAgo: "auto-refresh paused · {age}",
+    refreshWhy:
+      "auto-refreshes every {n}s and holds while an input or a row has focus; the number is then the age of the list on screen",
     loading: "loading…",
     needsReply: "Needs reply",
     needsReplyHint: "Session ends on an un-answered user message (waiting on you)",
@@ -332,6 +384,13 @@ const dict = {
   thinking: "thinking",
   toolCall: "tool call",
   subagentCall: "sub-agent",
+  forkResent: "re-sent after edit",
+  forkResentTip: "You edited an earlier turn and sent this in its place.",
+  forkSuperseded: "edited away",
+  forkSupersededTip: "You later edited this turn and re-sent it; this copy is the abandoned version.",
+  firstToken: "first token",
+  streaming: "streaming",
+  agentMessage: "agent-to-agent",
   openSubagent: "open child session",
   rawArchiveTitle: "The session's ORIGINAL storage, byte-faithful: tool calls, system rows and vendor fields no parser reads",
     resumeInCli: "resume in cli",
@@ -344,6 +403,10 @@ const dict = {
     sessionInfo: "session & agent",
     interrupted: "Interrupted session",
     pendingDirective: "directive never executed",
+    engineDetail: "from the engine",
+    threadsCoverage:
+      "the file-overlap signal covered {with_files}/{sessions} sessions ({seconds}s this pass, budget reached)",
+    threadsLoadMore: "load more",
     usage: "usage & speed",
     budget: "context budget",
     timeline: "when it happened",
@@ -375,6 +438,12 @@ const dict = {
     expand: "expand full text",
     collapse: "collapse",
     compactionNote: "context compaction",
+  historyStart: "transcript starts mid-history",
+  gitSession: "the branch and commit the session ran on (from the store)",
+  sourcePath: "store file",
+  sourcePathHint: "the raw record this session was read from, opened read-only",
+  gitLive: "the working directory's current git branch (live probe)",
+  storeFacts: "store facts",
     compactionHint: "long sessions are compacted repeatedly; before each boundary only a model summary survives",
     threadsDesc: "sessions that are actually one job — lineage + file overlap + title tokens, within a time window",
     minOverlap: "min overlap",
@@ -399,6 +468,20 @@ const dict = {
     roll: "roll(s)",
     sessionsN: "session file(s)",
     showMore: "show remaining",
+    hintSelect: "select row",
+    hintOpen: "open",
+    hintSearch: "search",
+    hintViews: "switch page",
+    hintTheme: "theme",
+    refreshPaused: "auto-refresh paused",
+    refreshPausedWhy:
+      "Polling holds while an input or a row has focus, so the row you are reading cannot move out from under you; Refresh reloads now",
+    hiddenChip: "no user turn",
+    hiddenHint:
+      "These transcripts carry no user message of their own (tool loops / automation sub-agent runs), "
+      + "and the product's own UI does not list them either. The number follows the filters you have on. "
+      + "Revealing puts them into the list, but a group still renders 50 rows at a time, so the row count "
+      + "need not grow by all of them. Each was always loadable by id.",
     groupBy: "grouping",
     groupDomain: "project",
     groupActivity: "activity",
@@ -415,6 +498,7 @@ const dict = {
     searchModeTitle: "titles",
     searchModeFull: "full text",
     searchHint: "/ focuses search, Esc clears; full text covers message bodies and file paths",
+    clear: "Clear",
     searchTooShort: "at least 2 characters",
     indexing: "indexing {done}/{total}",
     indexReady: "index ready · {n} sessions",
@@ -437,7 +521,10 @@ const dict = {
     themeAuto: "system",
     themeDark: "dark",
     themeLight: "light",
+    seedBaseline: "default palette (M3 baseline)",
+    seedRejected: "that seed would not be readable, so the palette is unchanged:",
     themeToggleHint: "cycle theme (T) · every pair is WCAG-AA verified",
+    displaySettings: "display settings (theme / language)",
     /* interruption states -------------------------------------------------- */
     it_clean: "clean end",
     it_user_pending: "un-executed directive",
@@ -451,12 +538,24 @@ const dict = {
     it_context_exceeded: "context exceeded",
     it_length_truncated: "reply truncated",
     it_error: "model error",
-    it_unknown: "abrupt end",
+    it_unknown: "end not recorded",
   },
 } as const;
 
 export type Lang = "zh" | "en";
 export type TKey = keyof (typeof dict)["zh"];
+
+/**
+ * Whether a key exists in the dictionary at all.
+ *
+ * `t()` falls back to the key itself, which is the right default for a missing
+ * translation but the wrong one for a vocabulary the *store* owns: a task kind
+ * nobody translated would render as "kind_subagent_child" in the list. Callers
+ * that map data onto keys check first and show the store's own word otherwise.
+ */
+export function hasKey(key: string): key is TKey {
+  return key in dict.zh;
+}
 
 export const LangContext = createContext<Lang>("zh");
 

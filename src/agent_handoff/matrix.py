@@ -44,22 +44,77 @@ STORE_KINDS: dict[str, str] = {
     "claude": "JSONL dir",
     "codebuddy": "JSONL dir",
     "codebuddy-cn": "JSONL dir",
+    "workbuddy": "JSONL dir + SQLite title index",
     "qoderwork": "JSONL dir",
     "qoderwork-cn": "JSONL dir",
     "qodercn-ide": "JSONL dir",
+    "qoder-ide": "Electron leveldb",
     "qwenwork": "JSONL dir",
     "dsh": "zstd JSONL dir",
     "kimi": "state.json + wire.jsonl",
     "codex": "JSONL rollouts",
+    "opencode": "SQLite (read-only URI)",
+    "qoderwake": "SQLite daemon store + shared JSONL",
+    "qoderwake-cn": "SQLite daemon store + shared JSONL",
+    "qoderwork-app": "SQLite (read-only URI)",
+    "qoderwork-cn-app": "SQLite (read-only URI)",
+    "qwenwork-app": "SQLite (read-only URI)",
+    "cherrystudio": "SQLite (read-only URI)",
 }
 
 # Parsers whose format handling is knowingly incomplete upstream of us.
 EXPERIMENTAL: set[str] = {"kimi"}
 
 ROADMAP: dict[str, str] = {
-    "qoder-ide": "Electron leveldb — no session files on disk",
-    "opencode": "storage layout undocumented",
     "trae": "IDE SQLite; read-only only, never written",
+}
+
+# Why a reader that *has* a parser is still unproven, and what would prove it.
+# An `unverified` row with no reason is the failure mode this table exists to
+# prevent: "no fixture" is a fact about the machine that built the fixtures, not
+# about the reader, and the difference matters to whoever picks the work up.
+# Every reason ends with the command that would close it, and
+# `tests/test_reader_lockstep.py` enforces that, so a new reader cannot land
+# unproven *and* unexplained.
+UNPROVEN: dict[str, str] = {
+    "claude": (
+        "no Claude Code store on the machine that built the fixtures "
+        "(`~/.claude/projects`); run `python scripts/sanitize_fixtures.py "
+        "--cli claude` where one exists"
+    ),
+    "codebuddy-cn": (
+        "no CN CodeBuddy store here (`~/.codebuddy` is the international one); "
+        "the parser is pinned to CodeBuddy's shape by "
+        "`tests/test_edition_parity.py`, and `python scripts/sanitize_fixtures.py "
+        "--cli codebuddy-cn` closes it on a machine with the CN store"
+    ),
+    "qoder-ide": (
+        "the store is here and reads (`~/.qoder/projects`, 2,259 sessions listed "
+        "and all 2,259 load -- full-store sweep, 2026-09-20, 0 failures; 25 of 25 "
+        "sampled ones also carry dialogue), but no fixture was ever taken "
+        "from it, so CI cannot re-run it: run `python "
+        "scripts/sanitize_fixtures.py --cli qoder-ide`"
+    ),
+    "opencode": (
+        "the store is here (`~/.local/share/opencode/opencode.db`, 222 sessions "
+        "listed) and its layout turned out to be readable SQLite, not the "
+        "undocumented form this row used to claim; no fixture exists, so run "
+        "`python scripts/sanitize_fixtures.py --cli opencode`"
+    ),
+    "qoderwake": (
+        "the shared `~/.qoder/projects` store reads fine and holds 4,213 "
+        "transcripts (measured 2026-09-20; this row used to say it held none), "
+        "but they are listed as qoder-ide's 2,259 sessions and 1,939 sub-agent "
+        "traces, and the daemon half this reader needs "
+        "(`~/.qoderwake/data/store`) is absent here; run `python "
+        "scripts/sanitize_fixtures.py --cli qoderwake` where that daemon has run"
+    ),
+    "qwenwork-app": (
+        "the store exists (`AppData/Roaming/QwenWorkCN/data/agents.db`) and is "
+        "readable, but holds 0 message rows, so there is nothing to sample and "
+        "the honest result is shape-only at best; re-run `python "
+        "scripts/sanitize_fixtures.py --cli qwenwork-app` after it has been used"
+    ),
 }
 
 MATRIX_VERSION = "1"
@@ -154,6 +209,8 @@ def build_rows() -> list[Row]:
         if evidence.sampled:
             row.notes.append("record-sampled")
         row.status = derive_status(row)
+        if row.status == "unverified" and parser.cli in UNPROVEN:
+            row.notes.append(UNPROVEN[parser.cli])
         rows.append(row)
     for cli in ROADMAP:
         if cli not in registered:

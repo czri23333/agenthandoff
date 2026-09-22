@@ -12,6 +12,10 @@ too or the same install on another machine lands in a different place.
 Each line is ``{"timestamp", "type", "payload"}`` and the dialogue has to be
 *reconstructed* from an event stream — this was the shape of the earlier bugs:
 
+  * one session spans several files: ``rollout-<ts>-<id>.jsonl`` for the first
+    run and ``rollout-<ts>-<id>_<continuation>.jsonl`` for each resume. Reading
+    only the first showed turn one and silently dropped the rest, so every
+    accessor here folds the thread's own files back together;
   * identity: ``payload.id`` is this thread, ``payload.session_id`` is the ROOT
     session (equal to the parent's id for sub-agents). Reading them in the wrong
     priority registered every sub-agent under its parent's id, and ``load()``
@@ -37,10 +41,51 @@ import os
 import re
 from collections import Counter
 from pathlib import Path
+from typing import NamedTuple
+from urllib.parse import unquote, urlparse
 
 from agent_handoff.locations import home
-from agent_handoff.model import Message, RawSession, SessionMeta, ts_to_iso
-from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
+from agent_handoff.model import (
+    CompactionEvent,
+    HistoryStart,
+    Message,
+    RawSession,
+    SessionMeta,
+    ts_to_iso,
+)
+from agent_handoff.parsers.base import Parser, as_text_blocks, current_pass, read_jsonl
+
+# A rollout filename carries the thread's UUID first; a continuation file
+# appends a second one: ``rollout-<ts>-<thread-id>_<continuation>.jsonl``.
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# (path, mtime, size) -> header payload. A rollout's ``session_meta`` is written
+# once and never rewritten, so this is a fact about the file, not a snapshot.
+_HEADER_CACHE: dict[tuple[str, float, int], dict | None] = {}
+
+
+class _Rollout(NamedTuple):
+    """One rollout file: its path, its session header, and how old it is."""
+
+    path: Path
+    header: dict
+    started_at: str | None
+    mtime: float
+
+
+def _filename_session_id(path: Path) -> str:
+    """The thread id a rollout filename carries.
+
+    Continuation files are ``rollout-<ts>-<thread-id>_<continuation>.jsonl``:
+    the thread's own UUID is the *first* one in the stem (the rule the store's
+    own stats tool uses), so prefer it. Older names with no UUID at all fall
+    back to the last dash-separated token, minus any continuation suffix.
+    """
+    found = _UUID.findall(path.stem)
+    if found:
+        return found[0]
+    tail = path.stem.split("-")[-1]
+    return tail.split("_")[0] or tail
+
 
 # Text that opens an injected turn rather than something the human typed.
 _INJECTED_PREFIXES = (
@@ -49,6 +94,13 @@ _INJECTED_PREFIXES = (
     "<INSTRUCTIONS>",
     "<system-reminder",
 )
+
+# Rows this parser synthesizes to stand in for a product timeline element
+# rather than for speech: a folded thinking block, a tool card, a sub-agent
+# block. They are turns in the transcript but they are not the answer to a
+# request, so per-request billing never settles onto one - the answer row keeps
+# the numbers the store recorded for the request that produced it.
+_HINT_PREFIXES = ("[思考]", "[工具", "[子代理]", "[多代理")
 
 
 def codex_root() -> Path:
@@ -76,6 +128,11 @@ class CodexParser(Parser):
         self.root = Path(root) if root else codex_root()
         self._titles: dict[str, str] | None = None
         self._usage_cache: dict[str, dict] = {}
+        # (the file list, the rollouts derived from it) -- see `_rollouts`.
+        self._rollout_cache: tuple[list[Path], list[_Rollout]] | None = None
+        # (the pass token that filled it, the walk's answer) -- see `_files`.
+        self._files_pass: int = 0
+        self._files_list: list[Path] = []
 
     def available(self) -> bool:
         return self.root.is_dir()
@@ -108,6 +165,24 @@ class CodexParser(Parser):
         return dict(self._usage_for(session_id).get("last_tokens") or {})
 
     def _files(self) -> list[Path]:
+        """Every rollout file the store holds, walked once per discovery pass.
+
+        `_rollouts` memoises against this list, so the list cannot memoise
+        against itself: asking the OS *is* the walk. Each of the store's 103
+        sessions made a rebuild walk it again -- 207 recursive walks, which
+        measured as much as the parsing the memo was there to skip (spec
+        Round 52, counted again in Round 55). The boundary this cache needs
+        therefore cannot be derived from its own answer; `base.discovery_pass()`
+        is the one the server opens around a rebuild.
+        """
+        tok = current_pass()
+        if tok and tok == self._files_pass:
+            return self._files_list
+        out = self._walk_files()
+        self._files_pass, self._files_list = tok, out
+        return out
+
+    def _walk_files(self) -> list[Path]:
         if not self.available():
             return []
         out = list(self.root.rglob("rollout-*.jsonl"))
@@ -135,13 +210,21 @@ class CodexParser(Parser):
 
     @staticmethod
     def _meta_from_header(path: Path, payload: dict, updated: str | None) -> SessionMeta:
-        thread_id = str(payload.get("id") or path.stem.split("-")[-1])
+        thread_id = str(payload.get("id") or _filename_session_id(path))
         root_session = str(payload.get("session_id") or thread_id)
         src = payload.get("source") if isinstance(payload.get("source"), dict) else {}
         spawn = {}
         if isinstance(src.get("subagent"), dict):
             spawn = src["subagent"].get("thread_spawn") or {}
-        parent = payload.get("parent_thread_id") or spawn.get("parent_thread_id") or root_session
+        # A sub-agent names its spawner; a *forked* thread names the thread it was
+        # cut from, which is the only link it has. They are the same value on this
+        # store (21 of 21), so this is a fallback rather than a change.
+        parent = (
+            payload.get("parent_thread_id")
+            or spawn.get("parent_thread_id")
+            or payload.get("forked_from_id")
+            or root_session
+        )
         if parent == thread_id:
             parent = None
         notes: list[str] = []
@@ -151,9 +234,22 @@ class CodexParser(Parser):
             notes.append(f"agent:{spawn['agent_nickname']}")
         if root_session != thread_id:
             notes.append(f"root_session:{root_session}")
+        # What the product itself calls this thread. "user" is an ordinary
+        # conversation and says nothing; the other two are what the app groups
+        # child runs by, and SessionMeta.task_type is the field for that.
+        thread_source = str(payload.get("thread_source") or "").strip()
+        # The revision the session ran on, as the store recorded it at the time.
+        header_git = payload.get("git") if isinstance(payload.get("git"), dict) else {}
+        git_branch = str(header_git.get("branch") or "").strip() or None
+        git_commit = str(header_git.get("commit_hash") or "").strip() or None
         return SessionMeta(
             cli="codex",
             session_id=thread_id,
+            git_branch=git_branch,
+            git_commit=git_commit,
+            task_type=(
+                thread_source if thread_source in ("subagent", "agent_created_thread") else None
+            ),
             title="",  # filled by the caller (index lookup beats the filename)
             cwd=str(payload.get("cwd") or ""),
             started_at=ts_to_iso(payload.get("timestamp")),
@@ -165,17 +261,91 @@ class CodexParser(Parser):
             notes=notes,
         )
 
-    def _file_meta(self, path: Path) -> SessionMeta | None:
-        for row in read_jsonl(path, limit=8):
+    @staticmethod
+    def _header_payload(path: Path, limit: int = 8) -> dict | None:
+        """The file's ``session_meta`` payload, or None when it has no header.
+
+        Cached by (path, mtime, size), because a header cannot change once written:
+        the store appends turns, never rewrites the first record. That matters:
+        ``peek_status`` asks every session for its own files, and without this the
+        list endpoint re-read the header of every rollout once per session -
+        measured 11,440 header reads and 8.1s of a 16.2s build.
+        """
+        try:
+            stat = path.stat()
+            key = (str(path), stat.st_mtime, stat.st_size)
+        except OSError:
+            key = (str(path), 0.0, 0)
+        if key in _HEADER_CACHE:
+            return _HEADER_CACHE[key]
+        payload: dict | None = None
+        for row in read_jsonl(path, limit=limit):
             if row.get("type") == "session_meta":
-                try:
-                    updated = ts_to_iso(int(path.stat().st_mtime * 1000))
-                except OSError:
-                    updated = None
-                meta = self._meta_from_header(path, row.get("payload") or {}, updated)
-                meta.title = self._title_for(meta, path)
-                return meta
-        return None
+                found = row.get("payload")
+                payload = found if isinstance(found, dict) else {}
+                break
+        if len(_HEADER_CACHE) > 4096:  # a long-lived process, a growing store
+            _HEADER_CACHE.clear()
+        _HEADER_CACHE[key] = payload
+        return payload
+
+    def _thread_of(self, path: Path, header: dict) -> str:
+        """This file's *thread* id: the header's ``id`` first, filename second.
+
+        ``payload.session_id`` is the ROOT session - a sub-agent shares its
+        parent's root while being a different thread - so it never groups
+        files. Only ``id`` (this thread) or the filename names a session.
+        """
+        ident = str(header.get("id") or "").strip()
+        return ident or _filename_session_id(path)
+
+    def _rollouts(self) -> list[_Rollout]:
+        """Every readable rollout file with its header, in a stable order.
+
+        Memoised against the file list it was built from, because `_session_files`
+        filters this list **once per session** and the list endpoint asks per
+        session: one rebuild derived the same 110-entry list 207 times over, which
+        measured **45,540 of the 65,746 `os.stat` calls** in a steady build of all
+        twenty stores. Keying on the file list rather than on the instance keeps
+        the answer honest -- a rollout that appears, disappears or is renamed
+        changes the key and re-derives. A file merely *appended to* leaves the key
+        and can only change this list's own mtime, which the header cache already
+        versions; and the list this feeds is served from a 20 s cache regardless,
+        so nothing here can go staler than the endpoint already is.
+        """
+        files = self._files()
+        cached = self._rollout_cache
+        if cached is not None and cached[0] == files:
+            return cached[1]
+        out: list[_Rollout] = []
+        for path in files:
+            header = self._header_payload(path)
+            if header is None:
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            out.append(_Rollout(path, header, ts_to_iso(header.get("timestamp")), mtime))
+        self._rollout_cache = (files, out)
+        return out
+
+    @staticmethod
+    def _oldest_first(rollouts: list[_Rollout]) -> list[_Rollout]:
+        """Oldest file first: header time, then mtime, then filename."""
+        return sorted(rollouts, key=lambda r: (r.started_at or "", r.mtime, r.path.name))
+
+    def _session_files(self, session_id: str) -> list[_Rollout]:
+        """Every rollout file of one thread, oldest first.
+
+        One Codex session can span several rollout files. Treating each file as
+        a session made ``load()`` read turn one of eight and silently drop the
+        rest, so every accessor folds them by thread identity - never by the
+        root session id, which sub-agents share with their parent.
+        """
+        return self._oldest_first(
+            [r for r in self._rollouts() if self._thread_of(r.path, r.header) == session_id]
+        )
 
     def _title_for(self, meta: SessionMeta, path: Path) -> str:
         titles = self._index_titles()
@@ -191,59 +361,80 @@ class CodexParser(Parser):
 
     # -- public API -----------------------------------------------------------
     def list_sessions(self) -> list[SessionMeta]:
+        """One row per thread, even when the thread spans several files.
+
+        ``started_at``/``source_path`` come from the oldest file (where the
+        thread began) and ``updated_at`` from the newest file's mtime, so a
+        resumed session stays one row, stamped with its last activity.
+        """
+        by_thread: dict[str, list[_Rollout]] = {}
+        for rollout in self._rollouts():
+            thread = self._thread_of(rollout.path, rollout.header)
+            by_thread.setdefault(thread, []).append(rollout)
         metas: list[SessionMeta] = []
-        seen: set[str] = set()
-        for path in self._files():
-            meta = self._file_meta(path)
-            if meta is None or meta.session_id in seen:
-                continue
-            seen.add(meta.session_id)
+        for rollouts in by_thread.values():
+            ordered = self._oldest_first(rollouts)
+            oldest = ordered[0]
+            updated = ts_to_iso(int(max(r.mtime for r in ordered) * 1000))
+            meta = self._meta_from_header(oldest.path, oldest.header, updated)
+            if meta.started_at is None:
+                meta.started_at = next((r.started_at for r in ordered if r.started_at), None)
+            meta.title = self._title_for(meta, oldest.path)
             metas.append(meta)
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         return metas
 
     def raw_archive(self, session_id: str) -> list[dict] | None:
-        """The rollout event stream itself, verbatim — every event the
-        product appended (agent_message, function_call, token_count, ...)."""
+        """The thread's rollout event streams, verbatim - one entry per file,
+        oldest first. Every event the product appended (agent_message,
+        function_call, token_count, ...) rides along unchanged."""
         from agent_handoff.parsers.base import file_entry
 
-        for path in self._files():
-            rows = read_jsonl(path)
-            header = next((r for r in rows if r.get("type") == "session_meta"), None)
-            if header is None:
-                continue
-            meta = self._meta_from_header(path, header.get("payload") or {}, None)
-            if meta.session_id != session_id:
-                continue
+        entries: list[dict] = []
+        for rollout in self._session_files(session_id):
             try:
-                raw = path.read_bytes()
+                raw = rollout.path.read_bytes()
             except OSError:
-                return None
+                continue
             try:
-                rel = str(path.resolve().relative_to(self.root.resolve()))
+                rel = str(rollout.path.resolve().relative_to(self.root.resolve()))
             except (ValueError, OSError):
-                rel = str(path)
-            return [file_entry(path, raw, rel)]
-        return None
+                rel = str(rollout.path)
+            entries.append(file_entry(rollout.path, raw, rel))
+        return entries or None
 
     def load(self, session_id: str) -> RawSession | None:
-        for path in self._files():
-            rows = read_jsonl(path)
-            if not rows:
-                continue
-            header = next((r for r in rows if r.get("type") == "session_meta"), None)
-            if header is None:
-                continue
-            try:
-                updated = ts_to_iso(int(path.stat().st_mtime * 1000))
-            except OSError:
-                updated = None
-            meta = self._meta_from_header(path, header.get("payload") or {}, updated)
-            if meta.session_id != session_id:
-                continue
-            meta.title = self._title_for(meta, path)
-            return self._build(meta, rows)
-        return None
+        """The whole thread: every rollout file whose header id is this session.
+
+        Rows from all of its files are concatenated in record-timestamp order
+        (equal timestamps keep per-file order, files oldest first) and built
+        exactly once, so ``rollout-...-<id>.jsonl`` plus each
+        ``rollout-...-<id>_<continuation>.jsonl`` read back as one session.
+        """
+        rollouts = self._session_files(session_id)
+        if not rollouts:
+            return None
+        oldest = rollouts[0]
+        updated = ts_to_iso(int(max(r.mtime for r in rollouts) * 1000))
+        meta = self._meta_from_header(oldest.path, oldest.header, updated)
+        if meta.started_at is None:
+            meta.started_at = next((r.started_at for r in rollouts if r.started_at), None)
+        meta.title = self._title_for(meta, oldest.path)
+        return self._build(meta, self._merged_rows(rollouts))
+
+    @staticmethod
+    def _merged_rows(rollouts: list[_Rollout]) -> list[dict]:
+        """Rows of every file in timestamp order; ties keep per-file order.
+
+        ``sorted`` is stable, so collecting rows file by file (oldest first)
+        and sorting on the record timestamp leaves a file's own order intact
+        wherever two records share a timestamp. Rows with no timestamp sort
+        first as a group, in that same file order.
+        """
+        rows: list[dict] = []
+        for rollout in rollouts:
+            rows.extend(read_jsonl(rollout.path))
+        return sorted(rows, key=lambda row: ts_to_iso(row.get("timestamp")) or "")
 
     def _build(self, meta: SessionMeta, rows: list[dict]) -> RawSession:
         messages: list[Message] = []
@@ -261,6 +452,40 @@ class CodexParser(Parser):
         rate_limits: dict | None = None
         world_agents: str | None = None
         turn_policy: dict[str, str] = {}
+        # ``task_complete`` and ``turn_aborted`` are the two ways a turn ends, so
+        # the newest of them is the end state - which this reader used to infer
+        # from the order of the messages instead of reading.
+        aborts: list[dict] = []
+        last_turn_end = ""
+        # A task_complete can carry the store's own error (a dict whose
+        # ``message`` may itself be a bare string, or a bare string). Keep the
+        # newest completion and count the failed ones; _end_state reads the
+        # newest end event, and the count becomes a `failed_turns:` note.
+        last_completion: dict | None = None
+        failed_completions = 0
+        # task_started names the collaboration posture. `default` is the
+        # ordinary mode and is not noted; anything else is a fact worth keeping.
+        collaboration_mode: str | None = None
+        # turn_id -> the latest assistant answer, so a completion's duration_ms
+        # can be attributed to the turn it measured without guessing.
+        last_assistant: dict[str, Message] = {}
+        # The product's own compaction dividers, in order. Each one measures the
+        # window it closed (the last request before it) against the window that
+        # replaced it (the first request after it).
+        compactions: list[CompactionEvent] = []
+        awaiting_post: CompactionEvent | None = None
+        # ``token_usage_record`` is the same accounting as ``token_count`` in a
+        # newer spelling; a session carries one or the other (measured
+        # 2026-09-12: 19 files carry token_count alone, 0 carry the record
+        # alone), so this stays a fallback and can never double the call count.
+        recorded_last: dict[str, int] = {}
+        recorded_total: dict[str, int] = {}
+        recorded_calls = 0
+        header_facts: list[str] = []
+        history_start: HistoryStart | None = None
+        goal: str | None = None
+        settings: dict[str, str] = {}
+        subagents_seen: set[tuple[str, str]] = set()
 
         for row in rows:
             rtype = row.get("type")
@@ -274,7 +499,7 @@ class CodexParser(Parser):
                 at: str | None,
                 raw: str | None = None,
                 model: str | None = None,
-            ) -> None:
+            ) -> Message | None:
                 """Append, dropping the duplicate an event stream always has.
 
                 Codex writes an assistant turn twice — once as ``response_item``
@@ -286,31 +511,153 @@ class CodexParser(Parser):
                 usage after the request it measures.
                 """
                 if not text:
-                    return
+                    return None
                 last = messages[-1] if messages else None
-                same = bool(last) and last.role == "assistant" and last.text.strip() == text.strip()
+                # The stream writes an assistant turn twice (response_item +
+                # event_msg); a tool card repeated twice is a tool the run
+                # really called twice, so only plain turns collapse.
+                same = (
+                    bool(last)
+                    and last.role == "assistant"
+                    and last.text.strip() == text.strip()
+                    and not text.startswith(_HINT_PREFIXES)
+                )
                 if role == "assistant" and same:
-                    return
+                    return last
                 msg = self.msg(role, raw if raw is not None else text, text=text, at=at)
                 if role == "assistant":
                     if model:
                         msg.model = model
-                    pending = pending_tokens.get("pending")
-                    if pending:
-                        msg.tokens_in = pending.get("in")
-                        msg.tokens_out = pending.get("out")
-                        pending_tokens.pop("pending", None)
+                    if not text.startswith(_HINT_PREFIXES):
+                        pending = pending_tokens.get("pending")
+                        if pending:
+                            msg.tokens_in = pending.get("in")
+                            msg.tokens_out = pending.get("out")
+                            msg.tokens_reasoning = pending.get("reasoning")
+                            pending_tokens.pop("pending", None)
                 messages.append(msg)
+                return msg
+
+            if rtype == "session_meta":
+                # Facts about the *session* that no later row repeats: where the
+                # working tree stood when it ran, and whether this file is the
+                # whole conversation. 26 sessions on this store start mid-history
+                # (their earlier turns live in the thread they forked from).
+                git = payload.get("git") if isinstance(payload.get("git"), dict) else {}
+                branch = str(git.get("branch") or "").strip()
+                commit = str(git.get("commit_hash") or "").strip()
+                if branch or commit:
+                    where = f"{branch or 'detached'}@{commit[:7]}" if commit else branch
+                    header_facts.append(f"git:{where}")
+                ordinal = payload.get("subagent_history_start_ordinal")
+                if isinstance(ordinal, int) and ordinal > 0:
+                    origin = str(meta.parent_session_id or "").strip()
+                    header_facts.append(
+                        f"history_start:{ordinal}" + (f" of {origin}" if origin else "")
+                    )
+                    history_start = HistoryStart(
+                        ordinal=ordinal,
+                        parent_session_id=origin,
+                        # The row's timestamp is the usual source; the header
+                        # payload carries its own for the builds that omit it,
+                        # and the marker has to sort before the first turn.
+                        at=when or ts_to_iso(payload.get("timestamp")),
+                    )
+                continue
 
             if rtype == "event_msg":
                 if ptype == "task_started":
                     window = payload.get("model_context_window")
                     context_window = window if isinstance(window, int) else None
+                    collab = payload.get("collaboration_mode_kind")
+                    if collab and collab != "default":
+                        collaboration_mode = str(collab)[:80]
                 elif ptype == "task_complete":
+                    completion = payload if isinstance(payload, dict) else {}
+                    last_completion = completion
                     saw_completion = True
+                    last_turn_end = "complete"
+                    if self._completion_error(completion) is not None:
+                        failed_completions += 1
+                    # The store's own wall clock, attributed by turn_id to the
+                    # latest assistant answer. No match means drop it; never
+                    # guess which row owned the request.
+                    duration = completion.get("duration_ms")
+                    turn_id = str(completion.get("turn_id") or "").strip()
+                    ttft = completion.get("time_to_first_token_ms")
+                    answer = last_assistant.get(turn_id)
+                    if answer is not None:
+                        if isinstance(duration, int) and answer.dur_ms is None:
+                            answer.dur_ms = duration
+                        # Same turn, same attribution rule: the store splits the
+                        # wall clock it just reported into "waited" and
+                        # "streamed". A row that names no answer here gives up
+                        # both halves together rather than crediting a neighbour.
+                        if isinstance(ttft, int) and answer.ttft_ms is None:
+                            answer.ttft_ms = ttft
+                elif ptype == "turn_aborted":
+                    # The product's own record that the user stopped a turn.
+                    aborts.append(payload if isinstance(payload, dict) else {})
+                    last_turn_end = "aborted"
+                elif ptype == "thread_goal_updated":
+                    # The goal banner the app shows above the transcript.
+                    state = payload.get("goal") if isinstance(payload.get("goal"), dict) else {}
+                    objective = " ".join(str(state.get("objective") or "").split())
+                    status = str(state.get("status") or "").strip()
+                    if objective or status:
+                        goal = f"{status or 'unknown'}:{objective[:400]}"
+                elif ptype == "thread_settings_applied":
+                    # What the thread was configured to run as: the model chip
+                    # the app shows, and the provider and tier behind it.
+                    applied_settings = payload.get("thread_settings")
+                    applied_settings = (
+                        applied_settings if isinstance(applied_settings, dict) else {}
+                    )
+                    candidate = applied_settings.get("model")
+                    if isinstance(candidate, str) and candidate and not model:
+                        model = candidate
+                    for key, note in (
+                        ("model_provider_id", "provider"),
+                        ("service_tier", "service_tier"),
+                    ):
+                        val = applied_settings.get(key)
+                        if isinstance(val, str) and val.strip():
+                            settings[note] = val.strip()[:80]
+                elif ptype == "item_completed":
+                    # The card the product finished drawing. Most item kinds
+                    # repeat a record already read above; these three say
+                    # something no other row does.
+                    item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
+                    itype = str(item.get("type") or "")
+                    if itype == "FileChange":
+                        # What the turn actually wrote, each change with its
+                        # unified diff. The tool-argument pass above is a
+                        # best-effort read of prose; this is the record.
+                        changes = item.get("changes")
+                        for changed in changes if isinstance(changes, dict) else ():
+                            files[str(changed)] += 1
+                    elif itype == "ImageView":
+                        viewed = _file_url_to_path(str(item.get("path") or ""))
+                        if viewed:
+                            files[viewed] += 1
+                    elif itype == "SubAgentActivity":
+                        # The sub-agent lane the app nests under this thread.
+                        child = str(item.get("agent_thread_id") or "").strip()
+                        lane = str(item.get("agent_path") or "").strip()
+                        kind = str(item.get("kind") or "activity").strip()
+                        key = (kind, child or lane)
+                        if (child or lane) and key not in subagents_seen:
+                            subagents_seen.add(key)
+                            line = " ".join(part for part in (kind, lane) if part)
+                            push(
+                                "assistant",
+                                f"[子代理] {line}" + (f" → {child}" if child else ""),
+                                when,
+                                model=model,
+                            )
                 elif ptype == "agent_message":
-                    body = payload.get("message") or payload.get("text")
-                    push("assistant", self._flatten(body), when, model=model)
+                    text = self._agent_message_text(payload)
+                    push("assistant", self._agent_message_line(payload, text), when, model=model)
                 elif ptype == "token_count":
                     info = payload.get("info") or {}
                     # Two different quantities live in one record.
@@ -321,30 +668,46 @@ class CodexParser(Parser):
                     # sum - the right number for a usage table and the wrong one
                     # for either, which is what this branch used to do.
                     recent = info.get("last_token_usage")
+                    if awaiting_post is not None:
+                        # The window that replaced a compacted one: the first
+                        # request after the divider, measured rather than
+                        # modelled.
+                        after = recent.get("input_tokens") if isinstance(recent, dict) else None
+                        if isinstance(after, int):
+                            awaiting_post.post_tokens = after
+                            awaiting_post = None
                     if isinstance(recent, dict):
                         last_tokens.update({k: v for k, v in recent.items() if isinstance(v, int)})
                         bill = {
                             "in": recent.get("input_tokens"),
                             "out": recent.get("output_tokens"),
                         }
+                        reasoning = recent.get("reasoning_output_tokens")
+                        reasoning = reasoning if isinstance(reasoning, int) else None
                         if isinstance(bill["in"], int) or isinstance(bill["out"], int):
-                            # Settle onto the latest assistant turn that still
-                            # has no billing; otherwise the next one takes it.
+                            # Settle onto the latest answer turn that still has
+                            # no billing; otherwise the next one takes it. A
+                            # thinking block or a tool card is skipped: the
+                            # request paid for the answer, and the store's own
+                            # reasoning count belongs beside it.
                             settled = False
                             bill_in = bill["in"] if isinstance(bill["in"], int) else None
                             bill_out = bill["out"] if isinstance(bill["out"], int) else None
                             for m in reversed(messages):
                                 if m.role != "assistant":
                                     continue
+                                if (m.text or "").startswith(_HINT_PREFIXES):
+                                    continue
                                 if m.tokens_in is None and m.tokens_out is None:
                                     m.tokens_in = bill_in
                                     m.tokens_out = bill_out
+                                    m.tokens_reasoning = reasoning
                                     if model and not m.model:
                                         m.model = model
                                     settled = True
                                 break
                             if not settled:
-                                pending_tokens["pending"] = bill
+                                pending_tokens["pending"] = {**bill, "reasoning": reasoning}
                     cumulative = info.get("total_token_usage")
                     if isinstance(cumulative, dict):
                         total_tokens.update(
@@ -358,6 +721,39 @@ class CodexParser(Parser):
                     kept = {k: v for k, v in info.items() if v is not None and k != "type"}
                     if kept:
                         rate_limits = kept
+                continue
+
+            if rtype == "compacted":
+                # The divider the app draws in the timeline. window_number is
+                # the only reason the store states, and the two token counts are
+                # the requests that bracket the divider.
+                window = payload.get("window_number")
+                event = CompactionEvent(
+                    at=when,
+                    reason=f"window {window}" if isinstance(window, int) else "compacted",
+                    pre_tokens=last_tokens.get("input_tokens"),
+                    # Where the divider belongs: everything above it came before.
+                    after_messages=len(messages),
+                    auto=True,
+                )
+                compactions.append(event)
+                awaiting_post = event
+                continue
+
+            if rtype == "token_usage_record":
+                # The newer spelling of token_count, and the only usage some
+                # builds write. Kept aside so the two can never be added up.
+                per_call = payload.get("usage")
+                if isinstance(per_call, dict):
+                    recorded_last.update(
+                        {k: v for k, v in per_call.items() if isinstance(v, int)}
+                    )
+                thread_total = payload.get("thread_token_usage")
+                if isinstance(thread_total, dict):
+                    recorded_total.update(
+                        {k: v for k, v in thread_total.items() if isinstance(v, int)}
+                    )
+                recorded_calls += 1
                 continue
 
             if rtype == "world_state":
@@ -376,10 +772,21 @@ class CodexParser(Parser):
                     model = candidate
                 # The permissions this turn ran fenced with (what the app shows
                 # for the turn: sandbox/approval/collaboration posture).
-                for key in ("sandbox_policy", "approval_policy", "collaboration_mode"):
+                for key in ("sandbox_policy", "approval_policy"):
                     val = payload.get(key)
                     if val and key not in turn_policy:
-                        turn_policy[key] = str(val)[:120]
+                        # A dict here is a nested policy ({"type":
+                        # "workspace-write", "writable_roots": [...]}). str() put a
+                        # Python repr in the cockpit's facts list
+                        # ({'type': 'danger-full-access'}); the same bytes as JSON are
+                        # the same fact in a notation the reader does not have to
+                        # translate.
+                        if isinstance(val, (dict, list)):
+                            turn_policy[key] = json.dumps(
+                                val, ensure_ascii=False, separators=(",", ":")
+                            )[:120]
+                        else:
+                            turn_policy[key] = str(val)[:120]
                 continue
 
             if rtype != "response_item":
@@ -389,6 +796,12 @@ class CodexParser(Parser):
                 role = payload.get("role")
                 if role not in ("user", "assistant"):
                     continue  # developer/system rows are harness injections
+                passthrough = payload.get("internal_chat_message_metadata_passthrough")
+                turn_id = (
+                    str(passthrough.get("turn_id") or "").strip()
+                    if isinstance(passthrough, dict)
+                    else ""
+                )
                 text, tool_blocks = as_text_blocks(payload.get("content"))
                 raw = text
                 text = self.clean_text(text)
@@ -397,20 +810,48 @@ class CodexParser(Parser):
                         files[instruction] += 1
                     continue
                 if text and not self.is_noise(text):
-                    push(str(role), text, when, raw, model=model)
+                    msg = push(str(role), text, when, raw, model=model)
+                    if msg is not None:
+                        phase = payload.get("phase")
+                        if isinstance(phase, str) and phase:
+                            msg.phase = phase
+                        if role == "assistant" and turn_id:
+                            last_assistant[turn_id] = msg
                 for tb in tool_blocks:
                     name = str(tb.get("name") or "tool")
                     tools[name] += 1
                     ti = tb.get("input") if isinstance(tb.get("input"), dict) else {}
                     for path in _clean_paths(self.extract_paths(ti)):
                         files[path] += 1
+            elif ptype == "reasoning":
+                # The model's own thinking. The store keeps it verbatim in
+                # content[*].text when the provider exposes it and as
+                # encrypted_content when it does not (measured 2026-09-12: 4456
+                # of 4494 rows carry text), and the product timeline folds it
+                # under the turn - the [思考] row the jsonl-family parsers
+                # already emit for the same thing.
+                thought = self._reasoning_text(payload)
+                if thought:
+                    cleaned = self.clean_text(thought)
+                    if cleaned:
+                        push(
+                            "assistant",
+                            f"[思考] {cleaned}",
+                            when,
+                            f"[思考] {thought}",
+                            model=model,
+                        )
             elif ptype == "agent_message":
-                body = payload.get("text") or payload.get("message")
-                push("assistant", self._flatten(body), when, model=model)
+                text = self._agent_message_text(payload)
+                push("assistant", self._agent_message_line(payload, text), when, model=model)
             elif ptype in ("function_call", "custom_tool_call"):
                 name = str(payload.get("name") or "tool")
                 tools[name] += 1
                 args = payload.get("arguments")
+                # custom_tool_call carries the same idea as a bare string
+                # (input): a patch, a script, a command line.
+                given = args if isinstance(args, str) else str(payload.get("input") or "")
+                hint_from: object = args if args is not None else payload.get("input")
                 if isinstance(args, str):
                     # Exit code / wall time live on the paired output row; the
                     # arguments arrive as a JSON string, not a dict.
@@ -425,13 +866,28 @@ class CodexParser(Parser):
                 if isinstance(args, dict):
                     for path in _clean_paths(self.extract_paths(args)):
                         files[path] += 1
-            elif ptype == "function_call_output":
+                    body = json.dumps(args, ensure_ascii=False, indent=1)
+                else:
+                    body = given
+                push(
+                    "assistant",
+                    self._tool_text(name, hint_from, body),
+                    when,
+                    json.dumps(payload, ensure_ascii=False)[:2000],
+                    model=model,
+                )
+            elif ptype in ("function_call_output", "custom_tool_call_output"):
                 # "Exit code: 0\nWall time: 0.2 seconds\nOutput:\n…" — the
                 # product's own execution record. Non-zero exits and slow
                 # walls are failure signal, so keep them as notes.
                 out = str(payload.get("output") or "")
-                head = out[:200]
-                code = re.search(r"Exit code:\s*(-?\d+)", head)
+                # The store spells a finished command two ways and the newer
+                # build uses the second: "Exit code: 0" (custom tool calls) and
+                # "Process exited with code 1" (exec_command). Reading only the
+                # first made 271 failed commands in one session look like no
+                # failure at all.
+                head = out[:400]
+                code = re.search(r"(?:Exit code:|Process exited with code)\s*(-?\d+)", head)
                 wall = re.search(r"Wall time:\s*([\d.]+)\s*seconds", head)
                 if code and code.group(1) != "0":
                     tools[f"exit:{code.group(1)}"] += 1
@@ -441,17 +897,72 @@ class CodexParser(Parser):
                             tools["slow_call>=60s"] += 1
                     except ValueError:
                         pass
+            elif ptype == "tool_search_call":
+                # The agent asking the harness for a tool: a call like any
+                # other, so it counts and it shows. The paired output row
+                # carries no exit code and no wall clock, so it is not a card.
+                tools["tool_search"] += 1
+                args = payload.get("arguments")
+                args = args if isinstance(args, dict) else {}
+                push(
+                    "assistant",
+                    self._tool_text("tool_search", args, json.dumps(args, ensure_ascii=False)),
+                    when,
+                    json.dumps(payload, ensure_ascii=False)[:2000],
+                    model=model,
+                )
+            elif ptype == "web_search_call":
+                action = payload.get("action")
+                action = action if isinstance(action, dict) else {}
+                tools["web_search"] += 1
+                push(
+                    "assistant",
+                    self._tool_text("web_search", action, json.dumps(action, ensure_ascii=False)),
+                    when,
+                    json.dumps(payload, ensure_ascii=False)[:2000],
+                    model=model,
+                )
 
         if model and not meta.model:
             meta.model = model
+        if not last_tokens and not total_tokens and recorded_calls:
+            # No token_count at all: the newer spelling is the only usage this
+            # session recorded, and it is read here so the two can never sum.
+            last_tokens.update(recorded_last)
+            total_tokens.update(recorded_total)
+            requests += recorded_calls
+        # A thread with several pages can repeat a header fact; each one is a
+        # single fact about the session.
+        seen_facts = set(meta.notes)
+        meta.notes = [
+            *meta.notes,
+            *(f for f in header_facts if not (f in seen_facts or seen_facts.add(f))),
+        ]
+        if goal:
+            meta.notes = [*meta.notes, f"goal:{goal}"]
+        for key, val in settings.items():
+            meta.notes = [*meta.notes, f"{key}:{val}"]
         if context_window:
             meta.notes = [*meta.notes, f"context_window:{context_window}"]
         for key, val in turn_policy.items():
             meta.notes = [*meta.notes, f"{key}:{val}"]
+        if failed_completions:
+            meta.notes = [*meta.notes, f"failed_turns:{failed_completions}"]
+        if collaboration_mode:
+            meta.notes = [*meta.notes, f"collaboration_mode:{collaboration_mode}"]
         if rate_limits:
             claims = ", ".join(f"{k}={v}" for k, v in rate_limits.items())
             meta.notes = [*meta.notes, f"rate_limits:{claims}"]
-        interruption = self._end_state(meta, messages, saw_completion, context_window, last_tokens)
+        interruption = self._end_state(
+            meta,
+            messages,
+            saw_completion,
+            context_window,
+            last_tokens,
+            aborts,
+            last_turn_end,
+            last_completion,
+        )
         self._usage_cache[meta.session_id] = {
             "last_tokens": last_tokens,
             "total_tokens": total_tokens,
@@ -460,6 +971,8 @@ class CodexParser(Parser):
             "model": meta.model,
         }
         raw = self.build_raw(meta, messages, [], files, tools, interruption)
+        raw.compactions = compactions
+        raw.history_start = history_start
         if world_agents:
             # Collaboration snapshot the product keeps (AGENTS.md excerpt).
             # A head fits notes; the full text stays in raw_archive verbatim.
@@ -489,10 +1002,171 @@ class CodexParser(Parser):
             return "\n".join(p for p in parts if p).strip()
         return ""
 
-    def _end_state(self, meta, messages, saw_completion, window, tokens):
-        """Codex records no explicit error; infer only from hard evidence."""
+    @staticmethod
+    def _agent_message_text(payload: dict) -> str:
+        """The readable body of an ``agent_message``, ``content`` blocks first.
+
+        Real rows carry ``content`` as a list of ``input_text`` blocks (the
+        encrypted half of a pair also carries ``encrypted_content``, which
+        ``as_text_blocks`` intentionally skips). Older rows kept the same text
+        under ``text``/``message``, so those remain the fallback spelling.
+        """
+        content = payload.get("content")
+        if content is not None:
+            text, _ = as_text_blocks(content)
+            return text.strip()
+        return CodexParser._flatten(payload.get("text") or payload.get("message"))
+
+    @staticmethod
+    def _agent_message_line(payload: dict, text: str) -> str:
+        """Prefix the multi-agent sender/recipient hint, then the verbatim body.
+
+        The body itself is never rewritten; the hint is a synthesized turn line
+        like the existing [思考]/[工具] markers. Same author and recipient mean
+        the message is a self-reminder, so no routing line is added.
+        """
+        author = str(payload.get("author") or "").strip()
+        recipient = str(payload.get("recipient") or "").strip()
+        if not author or not recipient or author == recipient:
+            return text
+        head = f"[多代理 {author} → {recipient}]"
+        return f"{head}\n{text}" if text else head
+
+    @staticmethod
+    def _reasoning_text(payload: dict) -> str:
+        """The readable thinking text, or "" when the store kept only ciphertext.
+
+        Blocks arrive as content[{type: reasoning_text}] and, in the older
+        spelling, as summary[{type: summary_text}]. An empty text beside an
+        encrypted_content is the store saying "this request's thinking is not
+        ours to read", which is not the same as having something to show.
+        """
+        for key in ("content", "summary"):
+            parts: list[str] = []
+            for block in payload.get(key) or []:
+                if not isinstance(block, dict):
+                    continue
+                if str(block.get("type") or "") not in ("reasoning_text", "text", "summary_text"):
+                    continue
+                text = str(block.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+            if parts:
+                return "\n".join(parts)
+        return ""
+
+    @staticmethod
+    def _tool_hint(args) -> str:
+        """The one argument a human would name the call by, on one line."""
+        if isinstance(args, str):
+            head = args.strip().splitlines()[0] if args.strip() else ""
+            return " ".join(head.split())[:80]
+        if isinstance(args, dict):
+            for key in ("command", "cmd", "file_path", "path", "query", "pattern", "url"):
+                val = args.get(key)
+                if isinstance(val, str) and val.strip():
+                    return " ".join(val.split())[:80]
+            queries = args.get("queries")
+            if isinstance(queries, list) and queries and isinstance(queries[0], str):
+                return " ".join(queries[0].split())[:80]
+        return ""
+
+    def _tool_text(self, name: str, hint_from, body: str) -> str:
+        """A tool card: the head names the call, the body is what it was given.
+
+        The shape web/src/views/SessionDetail.tsx already folds into a card
+        (head = the first line, expanded body = the rest), and the same one the
+        jsonl-family parsers emit for their tool rows.
+        """
+        hint = self._tool_hint(hint_from)
+        head = f"[工具 {name} · {hint}]" if hint else f"[工具 {name}]"
+        body = body.strip()
+        if not body:
+            return head
+        return f"{head}\n{body[:600]}"
+
+    @staticmethod
+    def _completion_error(payload: dict):
+        """The non-empty error a task_complete can carry, or None.
+
+        Codex writes the error as either a bare string or a dict whose
+        ``message`` is itself a bare string (and may sit beside a
+        ``codex_error_info``). Both are the store's own record, not an
+        inference.
+        """
+        err = payload.get("error")
+        if isinstance(err, str):
+            return err.strip() or None
+        if isinstance(err, dict) and err:
+            return err
+        return None
+
+    @staticmethod
+    def _completion_error_detail(err) -> str:
+        """The store's error text, flattened and truncated, plus any extra info."""
+        if isinstance(err, dict):
+            message = err.get("message")
+            info = err.get("codex_error_info")
+        else:
+            message = err
+            info = None
+        text = " ".join(str(message or "").split())
+        if not text and isinstance(err, dict):
+            parts = [str(v) for v in err.values() if v]
+            text = " ".join(" ".join(str(part).split()) for part in parts)
+        detail = text[:400]
+        flat_info = " ".join(str(info).split()) if info else ""
+        if flat_info:
+            suffix = f"codex_error_info: {flat_info[:200]}"
+            detail = f"{detail} ({suffix})" if detail else suffix
+        return detail or "task_complete recorded an error"
+
+    def _end_state(
+        self,
+        meta,
+        messages,
+        saw_completion,
+        window,
+        tokens,
+        aborts,
+        last_kind,
+        last_completion=None,
+    ):
+        """Explicit records beat inference; a user abort is the highest record."""
         from agent_handoff.model import Interruption
 
+        if aborts and last_kind == "aborted":
+            # The store said so: the newest turn ended with turn_aborted, which
+            # is the user stopping it. Reading the message order instead called
+            # this "an unanswered user message".
+            last = aborts[-1]
+            secs = last.get("duration_ms")
+            ran = f" after {round(secs / 1000)}s" if isinstance(secs, int) and secs > 0 else ""
+            how = (
+                f"{len(aborts)} turns were interrupted"
+                if len(aborts) > 1
+                else "the turn was interrupted"
+            )
+            return Interruption(
+                kind="cancelled",
+                detail=f"{how}{ran} (store reason: {last.get('reason') or 'unknown'})",
+            )
+        if last_kind == "complete" and isinstance(last_completion, dict):
+            err = self._completion_error(last_completion)
+            if err is not None:
+                # The explicit store error wins over the 95% window heuristic,
+                # but a dangling user instruction is still worth carrying into
+                # the handoff: set the same 400-char field user_pending uses.
+                pending = (
+                    messages[-1].text[:400]
+                    if messages and messages[-1].role == "user"
+                    else ""
+                )
+                return Interruption(
+                    kind="error",
+                    detail=self._completion_error_detail(err),
+                    pending_user_text=pending,
+                )
         used = tokens.get("total_tokens") or tokens.get("input_tokens")
         if window and used and used >= int(window * 0.95):
             return Interruption(
@@ -536,17 +1210,174 @@ class CodexParser(Parser):
         totals = {"calls": calls, "tokens_in": total_in, "tokens_out": total_out}
         return {"models": rows, "totals": totals}
 
-    def peek_status(self, session_id: str) -> str | None:
-        """Cheap end-state: scan one file's event types, no full rebuild."""
-        for path in self._files():
-            if session_id not in path.name and session_id != path.stem.split("-")[-1]:
+    # First window for the tail read. Most sessions end at the last row they
+    # wrote, so one read of this settles them; a session that kept writing after
+    # its newest end event widens past it (see _latest_end_event).
+    _TAIL_BYTES = 65536
+
+    def _tail_rows(self, path: Path, window: int) -> tuple[list[dict], bool]:
+        """Rows in the last ``window`` bytes, and whether that covered the file.
+
+        The first line of a window is usually a partial row cut at the boundary;
+        it fails ``json.loads`` and is skipped, so a row found here is never
+        older than one the same scan passed over.
+        """
+        try:
+            with path.open("rb") as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                start = max(0, size - window)
+                handle.seek(start)
+                data = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            return [], True
+        rows: list[dict] = []
+        for line in data.splitlines():
+            if not line.strip():
                 continue
-            rows = read_jsonl(path, limit=400)
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        return rows, start == 0
+
+    def _end_event_in_tail(self, path: Path, window: int) -> tuple[str | None, bool]:
+        """The newest end event in the last ``window`` bytes, and whether the
+        whole file was covered.
+        """
+        rows, covered = self._tail_rows(path, window)
+        latest: str | None = None
+        for row in rows:
+            if row.get("type") != "event_msg":
+                continue
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            ptype = str(payload.get("type") or "")
+            if ptype == "task_complete":
+                latest = "error" if self._completion_error(payload) is not None else "clean"
+            elif ptype == "turn_aborted":
+                latest = "cancelled"
+        return latest, covered
+
+    def _latest_end_event(self, path: Path) -> str | None:
+        """The newest end event in one rollout's tail, or None when absent.
+
+        The store appends end events at the end of the file, so reading the
+        first 400 rows can never see a failure that happened late in a long
+        turn. The tail is read instead, and its window quadrupled until it holds
+        an end event - a session that kept writing after its last one leaves the
+        tail empty of them. Two sessions in this store end their newest event
+        ~540 KB before EOF, and one 64 KB read reported them ``clean`` off a
+        completion far above it.
+        """
+        window = self._TAIL_BYTES
+        while True:
+            kind, covered = self._end_event_in_tail(path, window)
+            if kind is not None or covered:
+                return kind
+            window *= 4
+
+    def peek_status(self, session_id: str) -> str | None:
+        """Cheap end-state: the newest file's tail decides, then any completion.
+
+        A resumed session is clean when *any* of its files recorded
+        ``task_complete`` - the newest file often holds only the follow-up.
+        But a failed turn ends in the *newest* file's tail, so the old first-
+        400-row probe reported it as clean. The tail is read until it answers
+        (one read for the sessions that end at EOF); older files only answer
+        the ``clean`` fallback for a resumed session.
+        """
+        rollouts = self._session_files(session_id)
+        if not rollouts:
+            return None
+        newest = self._latest_end_event(rollouts[-1].path)
+        if newest in ("error", "cancelled", "clean"):
+            return newest
+        for rollout in rollouts:
+            rows = read_jsonl(rollout.path, limit=400)
             types = {str((r.get("payload") or {}).get("type")) for r in rows if r.get("type")}
             if "task_complete" in types:
                 return "clean"
-            return None
         return None
+
+    def _newest_message_role(self, path: Path, window: int) -> tuple[str | None, bool]:
+        """Role of the newest real message row in the window, and coverage.
+
+        Applies the filters the full parse applies - developer/system rows,
+        injected context and noise are not a turn - so the probe cannot
+        disagree with the detail page about what the last thing said was. An
+        `agent_message` row counts as an assistant one because `_build` pushes it
+        as one: a parent dispatching a sub-agent has spoken, which is exactly the
+        case 12 sessions here turn on.
+        """
+        rows, covered = self._tail_rows(path, window)
+        for row in reversed(rows):
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            ptype = payload.get("type")
+            rtype = row.get("type")
+            if rtype == "event_msg" and ptype == "agent_message":
+                return "assistant", covered
+            if rtype != "response_item":
+                continue
+            if ptype == "agent_message":
+                return "assistant", covered
+            if ptype != "message":
+                continue
+            role = payload.get("role")
+            if role not in ("user", "assistant"):
+                continue  # developer/system rows are harness injections
+            text, _tools = as_text_blocks(payload.get("content"))
+            text = self.clean_text(text)
+            if not text or text.startswith(_INJECTED_PREFIXES) or self.is_noise(text):
+                continue
+            return str(role), covered
+        return None, covered
+
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """Does the session end on a user message that nothing answered?
+
+        The store records the roles, but this parser implemented no probe, so
+        the cockpit's "Needs input" column reported unknown for every Codex
+        session while the signal sat in the rollout. Files are walked newest
+        first with the same widening as `_latest_end_event`: a resumed session's
+        newest file can hold only the tail of a tool run, and a long run leaves
+        the last message far above EOF, so a probe that read one file once would
+        answer "unknown" for exactly the sessions worth asking about.
+        """
+        for rollout in reversed(self._session_files(session_id)):
+            window = self._TAIL_BYTES
+            while True:
+                role, covered = self._newest_message_role(rollout.path, window)
+                if role is not None:
+                    return role == "user"
+                if covered:
+                    break
+                window *= 4
+        return None
+
+
+def _file_url_to_path(value: str) -> str:
+    """A store file URL as a path: ``file:///C:/x/y.png`` -> ``C:/x/y.png``.
+
+    The product stores the URL it displays; the cockpit ranks paths, so the
+    scheme and the slash in front of a drive letter come off. Anything that is
+    not a file URL is returned untouched.
+    """
+    value = value.strip()
+    if not value.lower().startswith("file://"):
+        return value
+    parsed = urlparse(value)
+    path = unquote(parsed.path or "")
+    if parsed.netloc and parsed.netloc.lower() not in ("", "localhost"):
+        return f"//{parsed.netloc}{path}"
+    if len(path) > 2 and path[0] == "/" and path[2] == ":":
+        return path[1:]
+    return path
 
 
 def _clean_paths(paths: list[str]) -> list[str]:

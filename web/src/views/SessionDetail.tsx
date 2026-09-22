@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Segmented, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Segmented, Table, Tooltip, Typography } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import {
   api,
@@ -8,7 +8,15 @@ import {
   type SessionDetail as Detail,
   type TranscriptMessage,
 } from "../api";
-import { Bullets, CliBadge, CopyButton, InterruptionBanner, SectionCard, StatusTag } from "../components";
+import {
+  Bullets,
+  CliBadge,
+  CopyButton,
+  InterruptionBanner,
+  SectionCard,
+  StatusChip,
+  StatusTag,
+} from "../components";
 import { Markdown } from "../Markdown";
 import { BudgetGauge, TokenBars, TurnTimeline, type ChartLabels } from "../charts";
 import { formatNum, useT } from "../i18n";
@@ -46,6 +54,10 @@ function guessLinkedCli(_id: string, fromCli: string): string {
   return fromCli;
 }
 
+function fmtMs(v: number): string {
+  return v < 1000 ? `${v}ms` : `${(v / 1000).toFixed(1)}s`;
+}
+
 /**
  * Official-grade transcript row (WorkBuddy asar ground truth):
  * - user: right-aligned bubble (M3E large radius, sender corner cut)
@@ -53,6 +65,8 @@ function guessLinkedCli(_id: string, fromCli: string): string {
  * - thinking ([思考] prefix): folded by default, tertiary 13px header
  * - tool call ([工具 name] line): card with header + args
  * - sub-agent call ([子代理 mark] line): nested block linked to the child
+ * - multi-agent message ([多代理 author → recipient] line): the parent/child
+ *   traffic of one thread, shown with its addressing
  * - timestamp: hover-only time tip, never standing text
  */
 function TranscriptRow({
@@ -73,6 +87,13 @@ function TranscriptRow({
     thinking: string;
     toolCall: string;
     subagentCall: string;
+    forkResent: string;
+    forkResentTip: string;
+    forkSuperseded: string;
+    forkSupersededTip: string;
+    firstToken: string;
+    streaming: string;
+    agentMessage: string;
     openSubagent: string;
   };
   expert?: { name?: string | null; avatar?: string | null };
@@ -87,19 +108,31 @@ function TranscriptRow({
   const isThinking = text.startsWith("[思考]");
   const isTool = !isThinking && text.startsWith("[工具");
   const isSubagent = !isThinking && !isTool && text.startsWith("[子代理");
-  const long = !isThinking && !isTool && !isSubagent && text.length > 500;
+  const isAgent = !isThinking && !isTool && !isSubagent && text.startsWith("[多代理");
+  const long = !isThinking && !isTool && !isSubagent && !isAgent && text.length > 500;
   const who = m.role === "user" ? labels.user : labels.assistant;
   const shown = showRaw && m.raw_text ? m.raw_text : text;
   // Elapsed-time cost proxy (store clocks): "3.2s" when the store kept no
   // token billing for this turn. Verifiable, never estimated.
-  const durTip =
-    typeof m.dur_ms === "number"
-      ? m.dur_ms < 1000
-        ? `${m.dur_ms}ms`
-        : `${(m.dur_ms / 1000).toFixed(1)}s`
-      : "";
+  // Render rule #7: the official message area carries **no billing**. The
+  // measured duration is still available — it rides the row's hover tip and the
+  // model chip's title, which is where the asar-derived rule puts usage
+  // ("usage = header waterlevel hover") — but it is no longer a chip standing
+  // in the transcript. It used to be: `⏱ 1.2s` sat beside every assistant
+  // message that had no token rows, which is the deviation this closes.
+  const durMs = typeof m.dur_ms === "number" ? m.dur_ms : null;
+  const ttftMs = typeof m.ttft_ms === "number" ? m.ttft_ms : null;
+  const durTip = durMs !== null ? fmtMs(durMs) : "";
   const timeTip = m.at ? new Date(m.at).toLocaleString() : "";
-  const timeTipFull = durTip ? `${timeTip} · +${durTip}` : timeTip;
+  // Where the store split its own total, the tip says which half was waiting
+  // for the first token and which was spent answering — the difference between
+  // a turn that was slow to start and one that was slow to finish.
+  const splitTip =
+    durMs !== null && ttftMs !== null
+      ? ` · ${labels.firstToken} ${fmtMs(ttftMs)} / ${labels.streaming} ` +
+        fmtMs(Math.max(0, durMs - ttftMs))
+      : "";
+  const timeTipFull = durTip ? `${timeTip} · +${durTip}${splitTip}` : timeTip;
 
   // Cost chip priority: model+tokens > model+credits > model+≈estimate >
   // model > tokens > credits > measured duration. Turns without vendor
@@ -135,14 +168,6 @@ function TranscriptRow({
       {!hasTokens && !hasCredits && hasEst ? (
         <span className="ah-faint">≈{m.tokens_estimated}</span>
       ) : null}
-      {!hasTokens && !hasCredits && !hasEst && durTip ? <span className="ah-faint">⏱ {durTip}</span> : null}
-    </span>
-  ) : durTip ? (
-    <span
-      className="ah-inset mr-1.5 inline-flex items-center gap-1 px-1.5 py-px font-mono text-[11px]"
-      title={`no model/token billing in store · measured +${durTip}`}
-    >
-      <span className="ah-faint">⏱ {durTip}</span>
     </span>
   ) : null;
 
@@ -159,6 +184,28 @@ function TranscriptRow({
     </button>
   ) : null;
 
+  // The two ends of a fork the store recorded inside this transcript. Listed
+  // rather than branched: 63 of the 77 records on this machine's stores name a
+  // turn that is itself a re-send, so two chips on one row is the ordinary
+  // case, not an edge one.
+  const forkChips = [
+    m.resent ? { glyph: "↩", text: labels.forkResent, tip: labels.forkResentTip } : null,
+    m.superseded
+      ? { glyph: "⊘", text: labels.forkSuperseded, tip: labels.forkSupersededTip }
+      : null,
+  ]
+    .filter((c): c is { glyph: string; text: string; tip: string } => c !== null)
+    .map((c) => (
+      <span
+        key={c.text}
+        className="ah-faint font-mono text-[11px]"
+        title={c.tip}
+        dir="auto"
+      >
+        {c.glyph} {c.text}
+      </span>
+    ));
+
   // — user: right-aligned bubble —
   if (m.role === "user") {
     return (
@@ -169,6 +216,7 @@ function TranscriptRow({
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="ah-time-tip font-mono" title={timeTipFull}>{durTip || timeTip}</span>
+            {forkChips}
             {rawToggle}
           </div>
         </div>
@@ -204,9 +252,6 @@ function TranscriptRow({
                 {hasCredits ? <span className="ah-accent">⛽ {m.credits}</span> : null}
                 {!hasTokens && !hasCredits && hasEst ? (
                   <span className="ah-faint">≈{m.tokens_estimated}</span>
-                ) : null}
-                {!hasTokens && !hasCredits && !hasEst && durTip ? (
-                  <span className="ah-faint">⏱ {durTip}</span>
                 ) : null}
               </span>
             ) : null}
@@ -311,6 +356,37 @@ function TranscriptRow({
     );
   }
 
+  // — multi-agent message: the parent/child traffic of one thread —
+  if (isAgent) {
+    // "[多代理 /root/nav_rail → /root]" on its own line, the message under it.
+    const nl = text.indexOf("\n");
+    const head = (nl >= 0 ? text.slice(0, nl) : text)
+      .replace(/^\[多代理\s?/, "")
+      .replace(/\]$/, "");
+    const body = nl >= 0 ? text.slice(nl + 1) : "";
+    return (
+      <div className="ah-assistant-row">
+        <div className="ah-assistant-body">
+          <div className="ah-subagent">
+            <div className="ah-toolcall-head">
+              <span>
+                ⇄ {labels.agentMessage} · {head || who}
+              </span>
+              <span className="ah-time-tip ml-auto font-mono" title={timeTipFull}>
+                {durTip || timeTip}
+              </span>
+            </div>
+            {body ? (
+              <div className="ah-toolcall-body" dir="auto">
+                <span className="whitespace-pre-wrap break-words">{body}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // — assistant: avatar row + transparent body —
   return (
     <div className="ah-assistant-row">
@@ -318,7 +394,7 @@ function TranscriptRow({
         <div className="mb-1 flex items-center gap-1.5">
           <span className="ah-label flex select-none items-center" style={{ textTransform: "none" }}>
             {expert?.avatar ? (
-              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 rounded-full align-[-2px]" loading="lazy" />
+              <img src={expert.avatar} alt="" className="mr-1 inline h-4 w-4 ah-round align-[-2px]" loading="lazy" />
             ) : (
               <span className="mr-1">🤖</span>
             )}
@@ -481,11 +557,22 @@ export default function SessionDetail({
 
   const b = data.bundle;
   const meta = b.meta;
+  // The store's own one-line facts (`rate_limits:`, `goal:`, `context_window:`,
+  // `world_state:`) ride in meta.notes and were fetched but never shown; only
+  // `linked_cli_sessions:` had a renderer of its own.
+  const storeFacts = (meta.notes ?? []).filter(
+    (n) => !n.startsWith("linked_cli_sessions:"),
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* agent identity bar — the thing that used to be 1.1:1 contrast */}
-      <div className="ah-bar flex flex-wrap items-center gap-3 px-5 py-2.5">
+      {/* agent identity bar — the thing that used to be 1.1:1 contrast.
+          DockedToolbarTokens: a 64dp `surface-container` strip, corner-none,
+          16dp leading and trailing. It was a `.ah-bar` (a 1px rule on a
+          *different* surface), which made the app bar and this row two stacked
+          bars with different fills; on the same container they read as one
+          two-line header, which is what a large M3 app bar is. */}
+      <div className="ah-docked-toolbar ah-detailbar">
         <Button type="text" size="small" onClick={onBack}>
           ← {t("back")}
         </Button>
@@ -564,7 +651,7 @@ export default function SessionDetail({
               <div className="mt-2 space-y-1.5 border-t border-[var(--ah-line)] pt-2">
                 <span className="ah-label">{t("topicSegments")}</span>
                 {b.topics.map((tp, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[12.5px]">
+                  <div key={i} className="flex items-start gap-2 text-[12px]">
                     <span className="ah-inset min-w-[20px] px-1 text-center font-mono text-[12px]">{i + 1}</span>
                     <span className="min-w-0 flex-1 text-[var(--ah-text-1)]">{tp.opener}</span>
                     <span className="ah-faint shrink-0 font-mono">
@@ -665,7 +752,9 @@ export default function SessionDetail({
           >
             <div className="pb-2">
               <TurnTimeline
-                messages={data.messages.filter((m) => m.role !== "compaction")}
+                messages={data.messages.filter(
+                  (m) => m.role !== "compaction" && m.role !== "history",
+                )}
                 compactions={data.compactions}
                 t={charts}
               />
@@ -678,8 +767,26 @@ export default function SessionDetail({
                 page={200}
                 moreLabel={t("showMore")}
                 row={(m, i) =>
-                  m.role === "compaction" ? (
-                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12.5px]">
+                  m.role === "history" ? (
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12px]">
+                      <span className="ah-warn">⚠ {t("historyStart")}</span>{" "}
+                      <span className="ah-meta">
+                        {m.ordinal ?? "?"}
+                        {m.parent_session_id ? " · " : ""}
+                        {m.parent_session_id ? (
+                          <button
+                            type="button"
+                            className="ah-accent font-mono"
+                            title={`${t("openSubagent")} · ${m.parent_session_id}`}
+                            onClick={() => onOpen?.(cli, String(m.parent_session_id))}
+                          >
+                            → {String(m.parent_session_id).slice(0, 8)}…
+                          </button>
+                        ) : null}
+                      </span>
+                    </li>
+                  ) : m.role === "compaction" ? (
+                    <li key={i} className="ah-inset px-2.5 py-1.5 text-[12px]">
                       <span className="ah-warn">⚠ {t("compactionNote")}</span>{" "}
                       <span className="ah-meta">{m.text}</span>
                     </li>
@@ -700,6 +807,13 @@ export default function SessionDetail({
                           thinking: t("thinking"),
                           toolCall: t("toolCall"),
                           subagentCall: t("subagentCall"),
+                          forkResent: t("forkResent"),
+                          forkResentTip: t("forkResentTip"),
+                          forkSuperseded: t("forkSuperseded"),
+                          forkSupersededTip: t("forkSupersededTip"),
+                          firstToken: t("firstToken"),
+                          streaming: t("streaming"),
+                          agentMessage: t("agentMessage"),
                           openSubagent: t("openSubagent"),
                         }}
                       />
@@ -787,14 +901,12 @@ export default function SessionDetail({
                       render: (v: string | null, r) =>
                         r.error ? (
                           <Tooltip title={r.error}>
-                            <Tag color="red" className="mr-0!">
-                              {v ?? "error"}
-                            </Tag>
+                            <StatusChip tone="err">{v ?? "error"}</StatusChip>
                           </Tooltip>
                         ) : (
-                          <Tag color={v === "completed" ? "green" : undefined} className="mr-0!">
+                          <StatusChip tone={v === "completed" ? "ok" : "neutral"}>
                             {v ?? "—"}
-                          </Tag>
+                          </StatusChip>
                         ),
                     },
                     {
@@ -813,9 +925,7 @@ export default function SessionDetail({
                         v == null || v === 0 ? (
                           <span className="ah-faint">{v ?? "—"}</span>
                         ) : (
-                          <Tag color="red" className="mr-0!">
-                            {v}
-                          </Tag>
+                          <StatusChip tone="err">{v}</StatusChip>
                         ),
                     },
                     {
@@ -855,23 +965,29 @@ export default function SessionDetail({
                 />
               </span>
             }
-            extra={
-              <span className="flex items-center gap-1.5">
-                <Button
-                  size="small"
-                  href={api.rawUrl(cli, sid)}
-                  target="_blank"
-                  title={t("rawArchiveTitle")}
-                >
-                  {t("downloadRaw")}
-                </Button>
-                <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
-                  {t("downloadBrief")}
-                </Button>
-                <CopyButton text={shownBrief} label={t("copyBrief")} />
-              </span>
-            }
           >
+            {/* The three transport actions used to live in the card's `extra`,
+                beside a title that already carried the 摘要/全文 switch. The rail
+                is 400px wide and the two groups came to ~450px, so antd's
+                single-row head painted them on top of each other — measured: the
+                `.zip` button (x 1081–1187) over the segmented control (x
+                1109–1213) and over the title. M3's card header carries a title
+                and one trailing affordance; the actions that operate on the body
+                belong in the body, where they can also wrap on a narrower rail. */}
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <Button
+                size="small"
+                href={api.rawUrl(cli, sid)}
+                target="_blank"
+                title={t("rawArchiveTitle")}
+              >
+                {t("downloadRaw")}
+              </Button>
+              <Button size="small" onClick={downloadBrief} disabled={!shownBrief}>
+                {t("downloadBrief")}
+              </Button>
+              <CopyButton text={shownBrief} label={t("copyBrief")} />
+            </div>
             {briefMode === "full" && fullBrief && (
               <div className="ah-faint mb-1.5 font-mono text-[11px]">
                 {t("fullBriefMeta")
@@ -913,7 +1029,7 @@ export default function SessionDetail({
                   </p>
                 )}
                 {launcher.kind === "unverified" && (
-                  <p className="ah-warn mb-0 text-[12.5px]">{t("unverifiedHint")}</p>
+                  <p className="ah-warn mb-0 text-[12px]">{t("unverifiedHint")}</p>
                 )}
               </div>
             ) : (
@@ -929,6 +1045,13 @@ export default function SessionDetail({
               <Descriptions.Item label="cwd">
                 <span className="font-mono text-[12px] break-all">{meta.cwd}</span>
               </Descriptions.Item>
+              {meta.source_path && (
+                <Descriptions.Item label={t("sourcePath")}>
+                  <Tooltip title={t("sourcePathHint")}>
+                    <span className="font-mono text-[12px] break-all">{meta.source_path}</span>
+                  </Tooltip>
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label={t("model")}>
                 {meta.model ? (
                   <span className="font-mono text-[12px]">{meta.model}</span>
@@ -960,9 +1083,9 @@ export default function SessionDetail({
               )}
               {meta.permission && (
                 <Descriptions.Item label={t("permission")}>
-                  <Tag color={meta.permission === "yolo" ? "red" : "blue"} className="mr-0 font-mono!">
+                  <StatusChip tone={meta.permission === "yolo" ? "warn" : "accent"}>
                     {meta.permission}
-                  </Tag>
+                  </StatusChip>
                 </Descriptions.Item>
               )}
               {meta.parent_session_id && (
@@ -999,6 +1122,26 @@ export default function SessionDetail({
               )}
             </Descriptions>
           </Card>
+
+          {storeFacts.length > 0 && (
+            <Card size="small" title={<span className="ah-label">{t("storeFacts")}</span>}>
+              <ul className="m-0 list-none space-y-1 p-0 font-mono text-[12px]">
+                {storeFacts.map((n) => {
+                  const cut = n.indexOf(":");
+                  const key = cut > 0 ? n.slice(0, cut) : "note";
+                  const value = cut > 0 ? n.slice(cut + 1) : n;
+                  return (
+                    <li key={n} className="flex items-baseline gap-2">
+                      <span className="ah-faint shrink-0">{key}</span>
+                      <span className="ah-meta min-w-0 flex-1 truncate" title={value}>
+                        {value}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
         </div>
       </div>
     </div>

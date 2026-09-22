@@ -20,11 +20,23 @@ export interface SessionMeta {
   status: string | null; // proven end-state, null = unknown
   needs_reply?: boolean | null; // ends on an un-answered user message (null = unknown)
   domain: string; // config-driven project grouping (ADR-009)
-  /** Live git branch/worktree for the session cwd (cached 30s server-side). */
-  git?: { branch?: string; worktree_count?: number };
+  /**
+   * The git the row is about. `source: "session"` is the revision the session
+   * ran on, read from the store; `source: "cwd"` is the live probe of its
+   * working directory (cached 30s server-side), the fallback for the stores
+   * that do not record one.
+   */
+  git?: {
+    branch?: string;
+    commit?: string | null;
+    worktree_count?: number;
+    source?: "session" | "cwd";
+  };
   /** Only the bundle meta carries totals; the listing omits them. */
   tokens_in?: number | null;
   tokens_out?: number | null;
+  /** The store file this session was read from (the bundle meta carries it). */
+  source_path?: string | null;
   /** Provenance notes (supplement counts, linked sessions, tool failures…). */
   notes?: string[];
   /** Assistant identity as the product shows it (expert name + avatar URL). */
@@ -34,6 +46,9 @@ export interface SessionMeta {
   automation?: string;
   /** Task-panel session the readable snapshot no longer lists (archived or deleted). */
   archived?: boolean;
+  // Set on a row the parser did not list — a transcript with no user turn of
+  // its own. The dashboard hides these by default and shows how many there are.
+  hidden_reason?: string | null;
 }
 
 export interface UsageModel {
@@ -60,6 +75,12 @@ export interface TranscriptMessage {
   at: string | null;
   /** ms since the previous turn (store-clock cost proxy where tokens are absent). */
   dur_ms?: number;
+  /**
+   * ms this turn waited for its first answer token, from the store's own
+   * clock. Only ever sent beside a `dur_ms` the store measured, because it is
+   * a part of that total rather than a second one.
+   */
+  ttft_ms?: number;
   /** Which model answered this turn (assistant turns only, when the store records it). */
   model?: string;
   /** Input tokens this turn cost (only when the store records it). */
@@ -74,8 +95,16 @@ export interface TranscriptMessage {
   tokens_estimated?: number;
   /** Sub-agent that produced this turn (absent = main conversation). */
   subagent?: string;
+  /** This turn is the re-sent copy of a turn the user edited. */
+  resent?: boolean;
+  /** The user edited this turn and sent a new copy; this one is the old version. */
+  superseded?: boolean;
   /** Verbatim source before cleaning (absent = cleaning changed nothing). */
   raw_text?: string;
+  /** role="history" markers: the thread the earlier turns live in. */
+  parent_session_id?: string;
+  /** role="history" markers: the ordinal this page begins at. */
+  ordinal?: number;
 }
 
 export interface StoreInfo {
@@ -149,6 +178,27 @@ export interface ThreadGroup {
   session_ids: string[];
   clis: string[];
   last_active: string | null;
+}
+
+/**
+ * What the clustering actually managed to look at.
+ *
+ * `with_files < sessions` means the file-overlap signal covered only part of the
+ * store — the pass runs under a time budget because reading every session record
+ * costs ~150s on an 802-session store. The view says so out loud instead of
+ * presenting a partial cluster set as the whole picture.
+ */
+export interface ThreadsCoverage {
+  sessions: number;
+  with_files: number;
+  seconds: number;
+  budget_s: number;
+  budget_hit: boolean;
+}
+
+export interface ThreadsPayload {
+  threads: ThreadGroup[];
+  coverage: ThreadsCoverage;
 }
 
 export interface InboxItem {
@@ -287,7 +337,14 @@ export const api = {
   /** Download the session's ORIGINAL storage (zip, byte-faithful). */
   rawUrl: (cli: string, sid: string) =>
     `/api/sessions/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}/raw`,
-  threads: (cwd?: string) => get<ThreadGroup[]>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
+  threads: (cwd?: string) =>
+    get<ThreadsPayload>(`/api/threads${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
+  // One more budget's worth of file sets. The clustering reads every session's
+  // record to know which files it touched — ~150s over this machine's 802
+  // sessions — so the first call answers with what fits in its budget and this
+  // asks for the next batch.
+  threadsMore: (cwd?: string) =>
+    get<ThreadsPayload>(`/api/threads/refresh${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
   inbox: (globalScope = false) => get<InboxItem[]>(`/api/inbox?global_scope=${globalScope}`),
   launcher: (cli: string, sid: string) =>
     get<Launcher>(`/api/launcher/${encodeURIComponent(cli)}/${encodeURIComponent(sid)}`).catch(() => null),
@@ -321,14 +378,36 @@ export const api = {
   },
 };
 
+/**
+ * One label for a past *and* a future timestamp, because the cockpit shows both:
+ * a session's last turn behind us, a lease's expiry ahead of us. A future time is
+ * not "now" — the Inbox row that says `leased · in 40m` must not read as if it had
+ * already run out.
+ */
 export function relTime(iso: string | null, now = Date.now()): string {
   if (!iso) return "?";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso.slice(0, 10);
   const mins = Math.round((now - then) / 60000);
+  if (mins < 0) {
+    const ahead = -mins;
+    if (ahead < 60) return `in ${ahead}m`;
+    const hrs = Math.round(ahead / 60);
+    if (hrs < 48) return `in ${hrs}h`;
+    return `in ${Math.round(hrs / 24)}d`;
+  }
   if (mins < 1) return "now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.round(mins / 60);
   if (hrs < 48) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
+  const days = Math.round(hrs / 24);
+  if (days <= 30) return `${days}d ago`;
+  // A list of 2,500 rows is scanned, not hovered, and "412d ago" makes the reader
+  // do arithmetic to learn anything: past a month the date itself is the shorter
+  // answer. The exact value stays in the row's tooltip.
+  const d = new Date(then);
+  const md = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return d.getFullYear() === new Date(now).getFullYear()
+    ? md
+    : `${String(d.getFullYear() % 100).padStart(2, "0")}-${md}`;
 }
