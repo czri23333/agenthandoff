@@ -3699,6 +3699,465 @@ def cursor_defects(sweep: dict) -> list[str]:
     return out
 
 
+FRESHNESS_STATE = r"""() => {
+  const el = document.getElementById('ah-freshness');
+  if (!el) return {missing: true, now: Date.now()};
+  const dot = el.querySelector('.freshness-dot');
+  /* What the two classes the badge switches between actually paint, measured on
+     a probe in the badge's own parent so it inherits the same way. The assertion
+     has to be against a reference and not against the badge's other state: the
+     first version of this check only asked "does the colour change when it is
+     supposed to", which an unknown class name passes -- dropping `.ah-faint`
+     along with the warning changes the font size and nothing else, and the
+     sweep called that a pass. */
+  const probe = (cls) => {
+    const s = document.createElement('span');
+    s.className = cls;
+    s.textContent = '.';
+    el.parentElement.appendChild(s);
+    const cs = getComputedStyle(s);
+    const out = {color: cs.color, font: cs.fontSize};
+    s.remove();
+    return out;
+  };
+  const box = el.getBoundingClientRect();
+  const par = el.parentElement;
+  return {
+    text: (el.innerText || '').replace(/\s+/g, ' ').trim(),
+    w: Math.round(box.width),
+    overflow: par ? par.scrollWidth - par.clientWidth : 0,
+    updatedMs: el.getAttribute('data-updated-ms'),
+    held: el.getAttribute('data-held'),
+    color: getComputedStyle(el).color,
+    font: getComputedStyle(el).fontSize,
+    warnClass: el.classList.contains('ah-warn'),
+    refs: {faint: probe('ah-faint'), warn: probe('ah-faint ah-warn')},
+    dotOpacity: dot ? getComputedStyle(dot).opacity : null,
+    focused: document.activeElement
+      ? String(document.activeElement.className).slice(0, 22)
+      : null,
+    now: Date.now(),
+  };
+}"""
+
+
+def age_bucket(secs: float) -> tuple[int, str]:
+    """The four buckets the badge renders, in the same order it tests them.
+
+    The gate compares a *number* with the number in the label, which is the same
+    digits in either locale; the unit it returns is matched against EN prose only
+    (see `UNITS`), so the sweep pins EN and the zh arm checks the number.
+    """
+    s = int(secs)
+    if s < 60:
+        return s, "s"
+    if s < 3600:
+        return s // 60, "m"
+    if s < 86400:
+        return s // 3600, "h"
+    return s // 86400, "d"
+
+
+# The unit words as EN writes them, so `read_freshness`'s `ok` is an EN judgement.
+# The zh arm checks the number instead, which is the same digits in either locale.
+UNITS = {"s": ("s ago",), "m": ("m ago",), "h": ("h ago",), "d": ("d ago",)}
+
+
+def read_freshness(page, tries: int = 3, check_units: bool = True) -> dict:
+    """One reading of the badge, re-taken while the prose lags the attribute.
+
+    The label is repainted on a 1-second tick and rounds the age itself, so a
+    reading taken just after a boundary can name a bucket the clock has since
+    crossed; the repaint is a second away. A label that still disagrees after
+    `tries` readings is wrong rather than late, and the attempt count is carried
+    out so the caller can tell the two apart instead of trusting the retry.
+
+    `check_units` is off for the zh arm: `UNITS` holds EN words, and without this
+    the zh reading would retry on a unit it will never find and then be reported
+    for needing the retries.
+    """
+    last: dict = {}
+    for attempt in range(tries):
+        state = page.evaluate(FRESHNESS_STATE)
+        state["attempts"] = attempt + 1
+        if state.get("missing"):
+            return state
+        if state.get("updatedMs") is None:
+            # Boot state: the badge legitimately has no age before the first
+            # response lands. It is a second away from having one, so retry and
+            # let the caller decide whether the last reading still says nothing.
+            page.wait_for_timeout(1_100)
+            last = state
+            continue
+        want, unit = age_bucket((state["now"] - int(state["updatedMs"])) / 1000)
+        nums = [int(n) for n in re.findall(r"(?<!\d)\d+(?!\d)", state["text"])]
+        state["want"] = f"{want}{unit}"
+        state["nums"] = nums
+        state["unit_ok"] = any(u in state["text"] for u in UNITS[unit])
+        state["ok"] = want in nums and (state["unit_ok"] or not check_units)
+        last = state
+        if state["ok"]:
+            return state
+        page.wait_for_timeout(1_100)
+    return last
+
+
+def run_freshness_sweep(page, url: str, poll_ms: int = 30_000) -> dict:
+    """Watch the freshness badge through one held poll and one released poll.
+
+    Why a browser and not a unit test: the claim is about what a reader can tell
+    -- that `updatedAt` ages, that React's tick repaints the label as it does,
+    that the hold path stops the poll and the label says by how long, and that
+    the warn colour reaches the painted text. None of that exists once a string
+    has been rendered; all of it is what the user sees.
+
+    The mechanism arms count *requests*, not seconds. The first version asked only
+    "did the age come back down within 80 s", and that goes red on a machine busy
+    with someone else's test suite: a slow answer moves the stamp late while the
+    timer kept firing, and a wall clock cannot tell "the poll stopped" from "the
+    server was busy". So each window now reports how many `/api/sessions?since=`
+    calls the page sent -- the timer's own footprint -- and how long the stamp took
+    to move; the defect is attached to the counter and the seconds are reported.
+
+    The prose arms pin EN, because the unit words they match are EN strings
+    (`UNITS`). What that leaves the reader's own locale uncovered is the pause
+    *sentence* and the width of CJK type, so the sweep ends with a short zh arm:
+    focused and unfocused labels compared by their skeleton, so a badge that only
+    counts cannot pass it, and the header's overflow with the paused label on. Key
+    parity between the locales is enforced by TypeScript (`TKey` is the zh key
+    set); this is the half that parity cannot see.
+    """
+    out: dict = {"reads": [], "notes": {}}
+    seen = {"poll": 0, "full": 0, "answered": 0}
+
+    def on_request(req) -> None:
+        if "/api/sessions" in req.url:
+            seen["poll" if "since=" in req.url else "full"] += 1
+
+    def on_response(res) -> None:
+        if "since=" in res.url and res.status == 200:
+            seen["answered"] += 1
+
+    def read(tag: str) -> dict:
+        state = read_freshness(page)
+        state["tag"] = tag
+        out["reads"].append(state)
+        return state
+
+    page.on("request", on_request)
+    page.on("response", on_response)
+    page.goto(url.rstrip("/") + "/#/", wait_until="domcontentloaded")
+    page.wait_for_timeout(300)
+    was_lang = page.evaluate("() => localStorage.getItem('ah-lang')")
+    page.evaluate("() => localStorage.setItem('ah-lang', 'en')")
+    # A reload, not a second `goto` to the same address: with only the hash
+    # differing Chromium treats it as a same-document navigation, the app never
+    # re-reads storage, and the sweep goes on reading Chinese labels against the
+    # English prose it means to assert. Caught by the first run of this sweep,
+    # which reported a unit it could not find in a label that had the number.
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector("button.ah-row", timeout=120_000)
+    page.wait_for_selector("#ah-freshness", timeout=120_000)
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+
+    # Arm 1 -- nothing focused: the timer must be firing and the stamp it writes
+    # must move. Without this the ageing label would prove nothing: a badge that
+    # only ever counts up is indistinguishable from one whose poll died, which is
+    # the failure the label exists to make visible.
+    first = read("live")
+    budget = 3 * poll_ms + 30_000
+    started = first["now"]
+    base = dict(seen)
+    landed = None
+    while page.evaluate("Date.now()") - started < budget:
+        cur = page.evaluate(FRESHNESS_STATE)
+        if (cur.get("updatedMs") or "") != (first.get("updatedMs") or ""):
+            landed = int(cur["now"]) - started
+            break
+        page.wait_for_timeout(1_000)
+    out["notes"]["live_reset_ms"] = landed
+    out["notes"]["live_polls"] = seen["poll"] - base["poll"]
+    out["notes"]["live_answered"] = seen["answered"] - base["answered"]
+    read("live-after")
+
+    # Arm 2 -- a row focused, so the hold is on. Three readings across two
+    # minutes: the pause named, the number rising between them, the last one past
+    # the point where a healthy poll could have let the list age, and no request
+    # at all sent while focus held.
+    base = seen["poll"]
+    page.evaluate("() => { const b = document.querySelector('button.ah-row'); b && b.focus(); }")
+    page.wait_for_timeout(5_000)
+    held_a = read("held-5s")
+    page.wait_for_timeout(40_000)
+    held_b = read("held-45s")
+    page.wait_for_timeout(90_000)
+    held_c = read("held-135s")
+    out["notes"]["held_polls"] = seen["poll"] - base
+    out["notes"]["held_ages"] = [
+        (int(h["now"]) - int(h["updatedMs"])) / 1000 if h.get("updatedMs") else None
+        for h in (held_a, held_b, held_c)
+    ]
+
+    # Arm 3 -- focus released: the queue drains, so the timer comes back and the
+    # age falls. A hold that never ends would look identical to a dead poll from
+    # here, and that is the other half of the claim.
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    released = None
+    started = page.evaluate("Date.now()")
+    base = dict(seen)
+    while page.evaluate("Date.now()") - started < budget:
+        cur = page.evaluate(FRESHNESS_STATE)
+        if not cur.get("held") and (cur.get("updatedMs") or "") != (held_c.get("updatedMs") or ""):
+            released = int(cur["now"]) - started
+            break
+        page.wait_for_timeout(1_000)
+    out["notes"]["released_after_ms"] = released
+    out["notes"]["released_polls"] = seen["poll"] - base["poll"]
+    out["notes"]["released_answered"] = seen["answered"] - base["answered"]
+    read("released")
+    page.evaluate(
+        "(v) => (v === null ? localStorage.removeItem('ah-lang') : localStorage.setItem('ah-lang', v))",
+        was_lang,
+    )
+
+    # Arm 4 -- the reader's own locale, for the one thing the EN arms cannot see:
+    # that the pause is named in a *sentence* there too, and that the sentence plus
+    # CJK type still fits the header. The unit words stay EN-only (`UNITS`), so
+    # what is compared here is the number -- the same digits in either locale.
+    page.evaluate("() => localStorage.setItem('ah-lang', 'zh')")
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_selector("button.ah-row", timeout=120_000)
+    page.wait_for_selector("#ah-freshness", timeout=120_000)
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+
+    def zh_read(tag: str) -> dict:
+        """One zh reading through the same retry the other arms use.
+
+        The comparison inside `read_freshness` that is locale-free is the number
+        against the badge's own clock; the unit word is not, so `check_units` is off
+        here -- otherwise the zh readings would spend their retries looking for
+        "s ago" and then be reported for needing retries. Both of the arm's first
+        two runs said exactly that about a label one repaint behind its clock.
+        """
+        state = read_freshness(page, check_units=False)
+        state["tag"] = tag
+        return state
+
+    zh_rest = zh_read("zh-rest")
+    page.evaluate("() => { const b = document.querySelector('button.ah-row'); b && b.focus(); }")
+    page.wait_for_timeout(5_000)
+    zh_held = zh_read("zh-held")
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    out["zh"] = {"rest": zh_rest, "held": zh_held}
+    page.evaluate(
+        "(v) => (v === null ? localStorage.removeItem('ah-lang') : localStorage.setItem('ah-lang', v))",
+        was_lang,
+    )
+    page.remove_listener("request", on_request)
+    page.remove_listener("response", on_response)
+    return out
+
+
+def freshness_defects(sweep: dict, poll_ms: int = 30_000) -> list[str]:
+    """What the badge has to show before a number on it means something."""
+    reads = sweep["reads"]
+    notes = sweep["notes"]
+    out: list[str] = []
+    if not reads or any(r.get("missing") for r in reads):
+        return ["freshness: #ah-freshness was never found -- the badge is not rendered"]
+    for r in reads:
+        if r.get("updatedMs") is None:
+            out.append(f"freshness {r['tag']}: no data-updated-ms, so the label has no clock behind it")
+        elif not r.get("ok"):
+            nums = r.get("nums") or []
+            want = (r.get("want") or "").rstrip("smhd")
+            which = "unit word" if want.isdigit() and int(want) in nums else "number"
+            out.append(
+                f"freshness {r['tag']}: label '{r['text'][:40]}' lacks the {which} of "
+                f"{r.get('want')} (numbers read: {nums}, after "
+                f"{r.get('attempts')} reading(s))"
+            )
+    slow = [
+        r["tag"]
+        for r in reads + [s for s in (sweep.get("zh") or {}).values() if s.get("tag")]
+        if (r.get("attempts") or 1) > 2
+    ]
+    if slow:
+        out.append(
+            f"freshness: {len(slow)} reading(s) needed a repaint to agree ({', '.join(slow)}); "
+            "the label lags its own clock by more than a tick"
+        )
+    widths = [r.get("w") or 0 for r in reads]
+    notes["badge_px"] = [min(widths), max(widths)]
+    over = [r for r in reads if (r.get("overflow") or 0) > 0]
+    if over:
+        # A label that is honest but pushes 刷新 out of the header is not usable,
+        # and the longest form (the pause prefix plus a minute-scale age) is the
+        # one that would do it -- so this is measured on the held readings too.
+        out.append(
+            f"freshness: {len(over)} of {len(reads)} reading(s) overflowed the header row "
+            f"by {max(r['overflow'] for r in over)}px (badge up to {max(widths)}px)"
+        )
+    budget = 3 * poll_ms + 30_000
+    if not notes.get("live_polls"):
+        # The timer is the thing under test; a slow answer is not. A stamp that
+        # did not move while requests went out means the server never answered,
+        # and then an ageing badge is the right answer, not a defect.
+        out.append(
+            f"freshness: with nothing focused the page sent {notes.get('live_polls', 0)} "
+            f"delta requests in {budget / 1000:.0f}s -- the poll is not running, so the "
+            "age on screen says nothing about the list"
+        )
+    if notes.get("held_polls"):
+        out.append(
+            f"freshness: a row had focus and {notes['held_polls']} delta request(s) "
+            "went out anyway -- the hold does not hold"
+        )
+    answered = notes.get("live_answered", 0)
+    if notes.get("live_reset_ms") is None and answered:
+        # The discriminator the wall clock could not offer: requests went out and
+        # 200-answers came back, so the only thing that can have failed is the
+        # page taking the answer -- which is the product bug, as opposed to a busy
+        # machine, which is what a bare "the stamp did not move" used to claim.
+        out.append(
+            f"freshness: {answered} delta answer(s) arrived while nothing was focused "
+            "and the stamp never moved -- the page is ignoring the poll it runs"
+        )
+    elif notes.get("live_reset_ms") is None and notes.get("live_polls"):
+        notes["unanswered_polls"] = (
+            f"the stamp did not move although {notes['live_polls']} poll(s) went out "
+            "and none returned 200: the server did not answer, and an ageing badge is "
+            "the right response to that"
+        )
+    if notes.get("released_polls") and not notes.get("released_answered"):
+        notes["released_unanswered"] = (
+            f"{notes['released_polls']} poll(s) resumed after focus left but none "
+            "answered in the window"
+        )
+    elif not notes.get("released_polls"):
+        out.append(
+            f"freshness: after focus left, {notes.get('released_polls', 0)} delta "
+            f"request(s) went out in {budget / 1000:.0f}s -- a hold that never ends is "
+            "indistinguishable from a dead poll, and the reader cannot tell the two apart"
+        )
+    held = [r for r in reads if r["tag"].startswith("held")]
+    if len(held) < 3:
+        out.append(f"freshness: only {len(held)} held readings were taken")
+    else:
+        for r in held:
+            if not r.get("held"):
+                out.append(f"freshness {r['tag']}: a row had focus and the badge does not say held")
+            if "paused" not in r.get("text", "").lower():
+                out.append(f"freshness {r['tag']}: the badge counts but does not name the pause: '{r['text'][:44]}'")
+        for r in [x for x in reads if x["tag"].startswith(("live", "released"))]:
+            if r.get("held"):
+                out.append(f"freshness {r['tag']}: says held with nothing focused")
+            if "paused" in r.get("text", "").lower():
+                out.append(f"freshness {r['tag']}: still names a pause with nothing focused: '{r['text'][:44]}'")
+        ages = notes.get("held_ages") or []
+        if any(a is None for a in ages) or sorted(ages) != ages or len(set(ages)) < 3:
+            out.append(f"freshness: the age did not rise across the hold: {ages}")
+        last_age = ages[-1] if ages else None
+        if last_age is not None and last_age * 1000 < 2 * poll_ms:
+            out.append(
+                f"freshness: the last held reading is {last_age:.0f}s, inside two poll "
+                "intervals -- the hold was never long enough to show the badge ageing "
+                "past a refresh that did not run"
+            )
+
+        def secs(r: dict) -> float:
+            return (int(r["now"]) - int(r["updatedMs"])) / 1000
+
+        timed = [r for r in held if r.get("updatedMs")]
+        stale = [r for r in timed if secs(r) > 120]
+        rest = [r for r in timed if secs(r) <= 120]
+        if not stale:
+            out.append(
+                "freshness: no reading ever passed the 120s stale threshold, so the "
+                "warning was never measured"
+            )
+        refs = [r.get("refs") for r in timed if r.get("refs")]
+        if not refs:
+            out.append("freshness: no reference colours could be measured for the two classes")
+        else:
+            faint, warn = refs[0]["faint"], refs[0]["warn"]
+            if faint.get("color") == warn.get("color"):
+                out.append(
+                    f"freshness: .ah-warn computes {warn.get('color')}, the same colour "
+                    "as .ah-faint -- the warning cannot be seen in this theme"
+                )
+            for r in rest:
+                if r.get("color") != faint["color"]:
+                    out.append(
+                        f"freshness {r['tag']}: a young badge paints {r.get('color')}, "
+                        f"where .ah-faint computes {faint['color']}"
+                    )
+            for r in stale:
+                if not r.get("warnClass"):
+                    out.append(
+                        f"freshness {r['tag']}: {secs(r):.0f}s old and the element does "
+                        "not even carry the warn class"
+                    )
+                elif r.get("color") != warn["color"]:
+                    out.append(
+                        f"freshness {r['tag']}: the stale badge carries .ah-warn but "
+                        f"paints {r.get('color')} where it computes {warn['color']}"
+                    )
+                elif r.get("font") != warn.get("font"):
+                    out.append(
+                        f"freshness {r['tag']}: going stale changed the badge's font size "
+                        f"({r.get('font')} against {warn.get('font')}) -- the warning "
+                        "should only be a colour"
+                    )
+    released = [r for r in reads if r["tag"] == "released"]
+    if released and released[0].get("held"):
+        out.append("freshness: still saying held with nothing focused")
+    zh = sweep.get("zh") or {}
+    rest_zh, held_zh = zh.get("rest"), zh.get("held")
+    if not rest_zh or not held_zh or rest_zh.get("missing") or held_zh.get("missing"):
+        out.append("freshness zh: the zh arm never read the badge")
+    else:
+        if not held_zh.get("held"):
+            out.append(
+                f"freshness zh: a row had focus and the badge does not say held "
+                f"(label '{held_zh.get('text', '')[:40]}')"
+            )
+        for state in (rest_zh, held_zh):
+            want = state.get("want")
+            if not want or not state.get("updatedMs"):
+                out.append(f"freshness zh {state['tag']}: no clock behind the label")
+                continue
+            if int(str(want).rstrip("smhd")) not in state.get("nums", []):
+                out.append(
+                    f"freshness zh {state['tag']}: label '{state.get('text', '')[:40]}' "
+                    f"does not carry {str(want).rstrip('smhd')} (numbers read: "
+                    f"{state.get('nums')}, after {state.get('attempts')} reading(s))"
+                )
+        if held_zh.get("updatedMs"):
+            notes["paused_age_s"] = round(
+                (int(held_zh["now"]) - int(held_zh["updatedMs"])) / 1000
+            )
+        # The two labels are compared by their *skeleton* -- the prose left over
+        # once the digits are removed -- because the age itself legitimately ticks
+        # between the two readings, and a check on the whole string would pass for
+        # a badge that only counted.
+        def skel(state: dict) -> str:
+            return re.sub(r"[\d\s]+", "", state.get("text", ""))
+        if skel(rest_zh) == skel(held_zh):
+            out.append(
+                "freshness zh: the paused label is the same sentence as the resting one "
+                f"('{held_zh.get('text', '')[:40]}') -- the pause is counted, not named, "
+                "in the locale the reader uses"
+            )
+        over = held_zh.get("overflow") or 0
+        if over > 0:
+            out.append(
+                f"freshness zh: the paused label overflows its header row by {over}px "
+                f"at {held_zh.get('w')}px wide"
+            )
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true", help="leave the gallery on disk")
@@ -3731,6 +4190,18 @@ def main() -> int:
             "(ArrowUp/Down, j/k, PageUp/PageDown, Home/End, Enter, the shell's tab "
             "keys) and assert where the cursor ended up and what it paints -- in "
             "forced colours too, where the accent bar is dropped by the platform"
+        ),
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "also watch the running cockpit's freshness badge through one held "
+            "poll and one released poll, and assert the number it prints is the "
+            "age of the list on screen, that the page sends no delta request while "
+            "a row holds focus and resumes when focus leaves, and that the stale "
+            "warning paints the colour its class names (spec Round 60; takes ~4 "
+            "minutes, two of them with a row focused)"
         ),
     )
     parser.add_argument(
@@ -3987,6 +4458,7 @@ def main() -> int:
             overlaps: list[str] = []
             overlap_examined = 0
             cursors: list[dict] = []
+            fresh: list[dict] = []
             rail: dict = {"rows": []}
             panes: dict = {"rows": []}
             states: dict = {"rows": [], "examined": 0}
@@ -4053,6 +4525,8 @@ def main() -> int:
                         focus["expect"].setdefault(theme, value)
                 if args.keys:
                     cursors.append(run_cursor_sweep(page, url))
+                if args.fresh:
+                    fresh.append(run_freshness_sweep(page, url))
                 for route in (args.route or ["#/"]):
                     page.goto(url, wait_until="domcontentloaded")
                     page.wait_for_selector("#ah-tokens", state="attached")
@@ -4100,6 +4574,9 @@ def main() -> int:
         # Refusing to call an unasked question a pass: the sweep needs a running
         # cockpit, and `--app` was empty or the browser never reached the list.
         cursor_failures.append("cursor: --keys was asked and no cockpit was swept")
+    fresh_failures = [f for c in fresh for f in freshness_defects(c)] if args.fresh else []
+    if args.fresh and not fresh:
+        fresh_failures.append("freshness: --fresh was asked and no cockpit was swept")
     if args.focus and focus["examined"] < 20:
         # An empty producer is the failure mode this whole script exists to
         # refuse: 0 elements examined is not "no defects", it is "no evidence".
@@ -4332,6 +4809,14 @@ def main() -> int:
                     "forced_style": [c.get("forced_style") for c in cursors],
                     "defects": cursor_failures,
                 },
+                "freshness_sweep": {
+                    "enabled": args.fresh,
+                    "cockpits_swept": len(fresh),
+                    "reads": [r for c in fresh for r in c["reads"]],
+                    "zh": [c["zh"] for c in fresh if c.get("zh")],
+                    "notes": [c["notes"] for c in fresh],
+                    "defects": fresh_failures,
+                },
                 # How many distinct values the app sweep actually looked at.
                 # A violation list is only evidence if nothing produced it
                 # vacuously: the brief's own rule is that an empty set from an
@@ -4353,6 +4838,7 @@ def main() -> int:
         "app radii": app_radii,
         "focus": focus_failures,
         "keyboard cursor": cursor_failures,
+        "freshness badge": fresh_failures,
         "eclipsed rules": eclipse_failures,
         "press morph": morph_failures,
         "loading indicator": loading_failures,
@@ -4396,6 +4882,43 @@ def main() -> int:
             "rendered rows; the cursor moved to the row it claims, paged the list in "
             "at the end, painted a ring and a leading bar no resting row has, and "
             "out-ranked the pointer under forced colours."
+        )
+    if args.fresh:
+        ages = [a for c in fresh for a in (c["notes"].get("held_ages") or [])]
+        polls = [
+            (
+                c["notes"].get("live_polls", 0),
+                c["notes"].get("held_polls", 0),
+                c["notes"].get("released_polls", 0),
+            )
+            for c in fresh
+        ]
+        slow = [
+            c["notes"].get(k)
+            for c in fresh
+            for k in ("unanswered_polls", "released_unanswered")
+            if c["notes"].get(k)
+        ]
+        px = [c["notes"].get("badge_px") or [0, 0] for c in fresh]
+        answered = [
+            (c["notes"].get("live_answered", 0), c["notes"].get("released_answered", 0))
+            for c in fresh
+        ]
+        paused_age = [
+            c["notes"].get("paused_age_s") for c in fresh if c["notes"].get("paused_age_s")
+        ]
+        print(
+            f"Freshness: {sum(len(c['reads']) for c in fresh)} badge readings over "
+            f"{len(fresh)} cockpit(s), plus the zh arm's pair, the badge "
+            f"{min(p[0] for p in px)}-{max(p[1] for p in px)}px in the header; the "
+            "number in the label "
+            "equalled its own clock in every one; delta requests live/held/released "
+            f"{polls} of which answered (live/released) {answered}; the hold sent none, "
+            f"the age rose to {max(ages) if ages else 0:.0f}s while it held and to "
+            f"{max(paused_age) if paused_age else 0}s behind the pause prefix, the "
+            "warning painted the colour its class names, and the paused label named "
+            "the pause in the reader's own locale."
+            + ("".join(f" Note: {n}" for n in slow))
         )
     if args.overlap:
         print(

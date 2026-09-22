@@ -195,6 +195,11 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
       void api
         .sessionsDelta(newest, { cli: cliFilter || undefined })
         .then(({ changed }) => {
+          /* The clock this feeds answers "when was the list on screen last
+             verified", not "when did a row last move": a poll that found nothing
+             changed is a fresh answer, and aging the badge on it would cry wolf
+             on an idle machine. */
+          setUpdatedAt(Date.now());
           if (!changed.length) return;
           setSessions((cur) => {
             if (!cur) return cur;
@@ -410,15 +415,29 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const freshSecs = updatedAt === null ? null : Math.round((Date.now() - updatedAt) / 1000);
   const unreadable = stores.filter((s) => !s.readable).length;
 
-  /* What the clock says. `paused` is the honest answer while the poll is held --
-     a freshness dot that keeps its live colour while nothing is refreshing reads
-     as "the list is current", which is the one thing this badge must not claim. */
-  const freshnessLabel = () => {
-    if (paused && !refreshing) return t("refreshPaused");
-    if (refreshing) return t("updating");
-    if (freshSecs !== null && freshSecs < 60) return fmt("updatedAgo", { n: freshSecs });
-    return t("autoRefresh");
+  /* What the clock says: how old the rows on screen are, and it always says it
+     with a number. A hold that said only "paused" left the reader to guess how
+     stale the list was, and the guess is always the optimistic one (spec Round
+     60), so the pause became a prefix to the age rather than a replacement for
+     it. The age also covers the case the old label could not: `pollDelta`
+     swallows a failing request and retries on the next tick, and past a minute
+     the badge went on claiming "auto-refreshes every 30s" while the data aged
+     behind the claim. */
+  const ageText = (secs: number) => {
+    if (secs < 60) return fmt("ageSec", { n: secs });
+    if (secs < 3600) return fmt("ageMin", { n: Math.floor(secs / 60) });
+    if (secs < 86400) return fmt("ageHr", { n: Math.floor(secs / 3600) });
+    return fmt("ageDay", { n: Math.floor(secs / 86400) });
   };
+  const freshnessLabel = () => {
+    if (refreshing) return t("updating");
+    if (freshSecs === null) return paused ? t("refreshPaused") : t("loading");
+    const age = ageText(freshSecs);
+    return paused ? fmt("pausedAgo", { age }) : age;
+  };
+  /* Past two minutes without a landing is older than a healthy poll lets this
+     get, so the badge stops being quiet about it. */
+  const staleBadge = freshSecs !== null && freshSecs > 120;
 
   const indexLine = () => {
     if (mode !== "full") return null;
@@ -580,8 +599,23 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
               </span>
             </Tooltip>
           )}
-          <Tooltip title={paused ? t("refreshPausedWhy") : undefined}>
-            <span className="ah-md-hide ah-faint flex items-center gap-1.5">
+          <Tooltip title={paused ? t("refreshPausedWhy") : fmt("refreshWhy", { n: POLL_MS / 1000 })}>
+            <span
+              id="ah-freshness"
+              /* `.ah-faint` stays on in both states: the warning is meant to be a
+                 colour change only, and swapping the two classes would take the
+                 small type with it. `.ah-warn` is declared after `.ah-faint` in
+                 the sheet, so at equal specificity it wins the colour. */
+              className={`ah-md-hide ah-faint flex items-center gap-1.5 ${
+                staleBadge ? "ah-warn" : ""
+              }`}
+              /* The quantity behind the prose, for anything that has to check the
+                 prose says it: `data-*` carries the instant the rows on screen
+                 landed, so a reader script compares the number in the label with
+                 the clock instead of parsing two locales. (spec Round 60) */
+              data-updated-ms={updatedAt ?? undefined}
+              data-held={paused || undefined}
+            >
               <span
                 className="freshness-dot h-1.5 w-1.5 rounded-[var(--ah-shape-full)]"
                 style={{ opacity: refreshing ? 0.5 : paused ? 0.3 : 1 }}
