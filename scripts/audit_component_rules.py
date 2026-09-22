@@ -3452,6 +3452,253 @@ def run_focus_sweep(
     return out
 
 
+CURSOR_STATE = """() => {
+  const rows = [...document.querySelectorAll('button.ah-row')];
+  const a = document.activeElement;
+  const i = rows.indexOf(a);
+  const cs = i >= 0 ? getComputedStyle(a) : null;
+  const r = i >= 0 ? a.getBoundingClientRect() : null;
+  const rest = rows.find((x) => x !== a);
+  const rc = rest ? getComputedStyle(rest) : null;
+  return {
+    rows: rows.length,
+    idx: i,
+    tag: a ? a.tagName : null,
+    active: a && a.className ? String(a.className).slice(0, 44) : null,
+    expanders: document.querySelectorAll('button.ah-more').length,
+    focusVisible: i >= 0 && a.matches(':focus-visible'),
+    ring: cs ? [cs.outlineWidth, cs.outlineStyle, cs.outlineOffset].join(' ') : null,
+    bar: cs ? cs.boxShadow.slice(0, 46) : null,
+    restRing: rc ? [rc.outlineWidth, rc.outlineStyle].join(' ') : null,
+    onScreen: r ? (r.top >= -1 && r.bottom <= window.innerHeight + 1) : null,
+    hint: (() => {
+      const h = document.querySelector('.ah-kbdhint');
+      if (!h) return null;
+      const b = h.getBoundingClientRect();
+      return {text: (h.innerText || '').replace(/\\s+/g, ' ').slice(0, 64), w: Math.round(b.width), h: Math.round(b.height)};
+    })(),
+    hash: location.hash,
+  };
+}"""
+
+
+def run_cursor_sweep(page, url: str) -> dict:
+    """Walk the session list with the keys and report where the cursor ended up.
+
+    Only the running cockpit is swept, never the gallery: "the cursor moves" is a
+    property of the real list -- its row count, its grouping, its expander -- and
+    an audit that measures its own mock can pass while the product has nothing to
+    navigate, which is the failure this file already recorded once for the rail.
+
+    Focus is cleared with `blur()`, never by clicking the page: the centre of this
+    page is a session row, so a click there opens a session and the sweep measures
+    a route change it caused itself.
+    """
+    out: dict = {"steps": [], "notes": {}}
+
+    def step(key: str, note: str = "") -> dict:
+        page.keyboard.press(key)
+        page.wait_for_timeout(220)
+        state = page.evaluate(CURSOR_STATE)
+        state["key"] = f"{key} {note}".strip()
+        out["steps"].append(state)
+        return state
+
+    page.goto(url.rstrip("/") + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector("button.ah-row", timeout=120_000)
+    page.wait_for_timeout(900)
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    step("ArrowDown", "(from no focus)")
+    step("ArrowDown")
+    step("ArrowDown")
+    step("PageDown", "(half page)")
+    step("ArrowUp")
+    step("k", "(vim up)")
+    step("Home")
+    step("End")
+    off_end = step("ArrowDown", "(off the rendered end)")
+    out["notes"]["end_rows_before"] = out["steps"][-2]["rows"]
+    out["notes"]["end_rows_after"] = off_end["rows"]
+    # The expander is a button in the tab order, so walking back up from it must
+    # land on a row rather than dropping the reader on the page body.
+    page.evaluate("() => { const m = document.querySelector('button.ah-more'); if (m) m.focus(); }")
+    step("ArrowUp", "(from the expander)")
+    # Flat mode is the case where a truncated list has its expander *after* the
+    # last painted row -- in a grouped list the cursor leaves the group first,
+    # which the walk above shows is not a dead end (Tab reaches the expander).
+    # The control is found by structure, not by its label: the label is i18n'd.
+    try:
+        page.locator(".ant-segmented").nth(1).locator(".ant-segmented-item").nth(2).click()
+        # Then blur: an antd Segmented is a radio group and keeps focus, whose
+        # arrow keys move *its* selection rather than the cursor.
+        page.evaluate("() => document.activeElement && document.activeElement.blur()")
+        page.wait_for_timeout(800)
+        step("End", "(flat)")
+        flat_before = page.evaluate(CURSOR_STATE)["rows"]
+        flat_off = step("ArrowDown", "(flat, off the rendered end)")
+        out["notes"]["flat_rows"] = [flat_before, flat_off["rows"]]
+        out["notes"]["flat_idx"] = flat_off["idx"]
+    except Exception as exc:  # noqa: BLE001 -- a missing control is a report, not a crash
+        out["notes"]["flat_error"] = str(exc)[:120]
+    page.evaluate("() => sessionStorage.removeItem('ah-groupmode')")
+    before_shell = out["notes"]["hash_before_shell"] = page.evaluate(CURSOR_STATE)["hash"]
+    step("3", "(shell tab key)")
+    out["notes"]["hash_after_shell"] = page.evaluate(CURSOR_STATE)["hash"]
+    out["notes"]["shell_changed"] = out["notes"]["hash_after_shell"] != before_shell
+    # `/` is advertised on the strip, so it has to reach the search field from a
+    # row -- an advert the app does not honour is worse than no advert.
+    page.goto(url.rstrip("/") + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector("button.ah-row", timeout=120_000)
+    page.wait_for_timeout(700)
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    step("ArrowDown", "(before /)")
+    step("/", "(search)")
+
+    # The cursor's own paint, read after the ring animation settles, beside a
+    # resting row's -- the two must not be the same signal.
+    page.goto(url.rstrip("/") + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector("button.ah-row", timeout=120_000)
+    page.wait_for_timeout(700)
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    step("ArrowDown")
+    page.wait_for_timeout(1400)
+    out["cursor_style"] = page.evaluate(CURSOR_STATE)
+    step("Enter", "(open the row)")
+    out["notes"]["hash_after_enter"] = out["steps"][-1]["hash"]
+
+    # Forced colours: the accent bar is a box-shadow and the platform drops it, so
+    # the outline is the only cursor left -- and the block's own hover arm is
+    # (0,5,0), which the cursor arm has to carry the same weight to out-rank. The
+    # pointer is parked *on* the cursor here on purpose: that is the case where the
+    # two arms collide.
+    page.emulate_media(forced_colors="active")
+    page.goto(url.rstrip("/") + "/#/", wait_until="domcontentloaded")
+    page.wait_for_selector("button.ah-row", timeout=120_000)
+    page.wait_for_timeout(900)
+    page.evaluate("() => document.activeElement && document.activeElement.blur()")
+    step("ArrowDown", "(forced colours)")
+    page.wait_for_timeout(1500)
+    box = page.evaluate(
+        "() => { const a = document.activeElement; const b = a.getBoundingClientRect();"
+        " return {x: b.x + b.width / 2, y: b.y + b.height / 2}; }"
+    )
+    page.mouse.move(box["x"], box["y"])
+    page.wait_for_timeout(400)
+    out["forced_style"] = page.evaluate(CURSOR_STATE)
+    page.mouse.move(4, 4)
+    page.emulate_media(forced_colors="none")
+    return out
+
+
+def cursor_defects(sweep: dict) -> list[str]:
+    """What the walk above has to show before the cursor is real."""
+    steps = sweep["steps"]
+    by_key = {s["key"]: s for s in steps}
+    out: list[str] = []
+    if len(steps) < 8:
+        return [f"cursor sweep saw only {len(steps)} steps -- not enough to judge"]
+
+    def expect(label: str, ok: bool, detail: str) -> None:
+        if not ok:
+            out.append(f"cursor: {label} -- {detail}")
+
+    first = by_key.get("ArrowDown (from no focus)")
+    if first is None:
+        return ["cursor: the first ArrowDown was never measured"]
+    if first["rows"] < 5:
+        return [f"cursor: only {first['rows']} rows rendered -- the sweep cannot judge navigation"]
+    expect("first ArrowDown", first["idx"] == 0, f"idx {first['idx']} of {first['rows']}")
+    downs = [s for s in steps if s["key"] == "ArrowDown"]
+    expect(
+        "consecutive ArrowDown",
+        len(downs) >= 2 and downs[1]["idx"] == downs[0]["idx"] + 1,
+        " / ".join(str(s["idx"]) for s in downs[:3]),
+    )
+    pg = by_key.get("PageDown (half page)")
+    if pg is not None:
+        expect(
+            "PageDown steps more than one row",
+            pg["idx"] > downs[1]["idx"] + 1,
+            f"idx {pg['idx']} after {downs[1]['idx']}",
+        )
+        expect("PageDown stays on screen", pg["onScreen"], f"idx {pg['idx']}")
+    up = by_key.get("ArrowUp")
+    vim = by_key.get("k (vim up)")
+    if up and pg:
+        expect("ArrowUp", up["idx"] == pg["idx"] - 1, f"{up['idx']} after {pg['idx']}")
+    if vim and up:
+        expect("k moves like ArrowUp", vim["idx"] == up["idx"] - 1, f"{vim['idx']} after {up['idx']}")
+    home = by_key.get("Home")
+    end = by_key.get("End")
+    if home:
+        expect("Home", home["idx"] == 0, f"idx {home['idx']}")
+    if end:
+        expect("End", end["idx"] == end["rows"] - 1, f"idx {end['idx']} of {end['rows']}")
+    off = by_key.get("ArrowDown (off the rendered end)")
+    notes = sweep["notes"]
+    if off and end:
+        paged_in = notes["end_rows_after"] > notes["end_rows_before"]
+        expect(
+            "walking off the rendered end",
+            off["idx"] >= 0 and (paged_in or off["idx"] == off["rows"] - 1),
+            f"idx {off['idx']} of {off['rows']}, rows {notes['end_rows_before']} -> "
+            f"{notes['end_rows_after']}",
+        )
+    from_more = by_key.get("ArrowUp (from the expander)")
+    if from_more and notes.get("end_rows_after"):
+        expect(
+            "ArrowUp from the expander lands on a row",
+            from_more["idx"] >= 0,
+            f"idx {from_more['idx']}",
+        )
+    expect("the shell's own tab key still works", bool(notes.get("shell_changed")), "hash unchanged")
+    if notes.get("flat_error"):
+        out.append(f"cursor: the flat-mode leg was not measured -- {notes['flat_error']}")
+    elif notes.get("flat_rows"):
+        pair = notes["flat_rows"]
+        expect(
+            "walking off a flat list's end pages rows in",
+            pair[1] > pair[0] and (notes.get("flat_idx") or -1) >= 0,
+            f"rows {pair[0]} -> {pair[1]}, cursor at {notes.get('flat_idx')}",
+        )
+    slash = by_key.get("/ (search)")
+    expect(
+        "`/` reaches the search field from a row",
+        bool(slash) and slash.get("tag") == "INPUT",
+        f"active was {(slash or {}).get('active') or (slash or {}).get('tag')}",
+    )
+    style = sweep.get("cursor_style") or {}
+    hint = style.get("hint") or {}
+    expect(
+        "the shortcut strip is painted, not just in the tree",
+        bool(hint.get("text")) and (hint.get("w") or 0) > 0 and (hint.get("h") or 0) > 0,
+        json.dumps(hint, ensure_ascii=False)[:70],
+    )
+    advertised = str(hint.get("text") or "")
+    for glyph, what in (("↑", "up"), ("↓", "down"), ("↵", "open"), ("/", "search"), ("1", "tabs")):
+        expect(f"the strip advertises {what}", glyph in advertised, advertised or "(no text)")
+    rest = (style.get("restRing") or "").split()
+    ring = (style.get("ring") or "").split()
+    expect("the cursor paints a ring", len(ring) >= 2 and _px(ring[0]) and ring[1] == "solid", style.get("ring") or "none")
+    expect("a resting row paints none", len(rest) >= 2 and rest[1] == "none", style.get("restRing") or "?")
+    expect("the cursor is :focus-visible", bool(style.get("focusVisible")), "no")
+    if style.get("bar") in (None, "none"):
+        out.append("cursor: no leading bar on the focused row " + str(style.get("bar")))
+    expect("Enter opens the row", str(notes.get("hash_after_enter", "")).startswith("#/session"), notes.get("hash_after_enter") or "")
+    forced = sweep.get("forced_style") or {}
+    fring = (forced.get("ring") or "").split()
+    fwidth = _px(fring[0]) if fring else None
+    if len(fring) < 2 or fring[1] != "solid" or fwidth is None:
+        out.append(f"cursor forced-colours: no outline while hovered ({forced.get('ring')})")
+    elif fwidth < 3:
+        out.append(
+            "cursor forced-colours: the hover arm out-ranks the cursor "
+            f"({forced.get('ring')}) -- the box-shadow bar is dropped by the platform, "
+            "so this outline is the only cursor left"
+        )
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true", help="leave the gallery on disk")
@@ -3474,6 +3721,16 @@ def main() -> int:
         help=(
             "also focus every focusable element on each --app/--route, in both "
             "themes, and check the ring, the radius and the choreography"
+        ),
+    )
+    parser.add_argument(
+        "--keys",
+        action="store_true",
+        help=(
+            "also walk the running cockpit's session list with real key presses "
+            "(ArrowUp/Down, j/k, PageUp/PageDown, Home/End, Enter, the shell's tab "
+            "keys) and assert where the cursor ended up and what it paints -- in "
+            "forced colours too, where the accent bar is dropped by the platform"
         ),
     )
     parser.add_argument(
@@ -3729,6 +3986,7 @@ def main() -> int:
             }
             overlaps: list[str] = []
             overlap_examined = 0
+            cursors: list[dict] = []
             rail: dict = {"rows": []}
             panes: dict = {"rows": []}
             states: dict = {"rows": [], "examined": 0}
@@ -3793,6 +4051,8 @@ def main() -> int:
                     focus["keyboard"] += compact_focus["keyboard"]
                     for theme, value in compact_focus["expect"].items():
                         focus["expect"].setdefault(theme, value)
+                if args.keys:
+                    cursors.append(run_cursor_sweep(page, url))
                 for route in (args.route or ["#/"]):
                     page.goto(url, wait_until="domcontentloaded")
                     page.wait_for_selector("#ah-tokens", state="attached")
@@ -3835,6 +4095,11 @@ def main() -> int:
     app_weights, app_sizes = off_scale(app_sweep)
     app_colors, app_radii, app_allowed = off_token(app_sweep)
     focus_failures = focus_defects(focus["rows"], focus["expect"]) if args.focus else []
+    cursor_failures = [f for c in cursors for f in cursor_defects(c)] if args.keys else []
+    if args.keys and not cursors:
+        # Refusing to call an unasked question a pass: the sweep needs a running
+        # cockpit, and `--app` was empty or the browser never reached the list.
+        cursor_failures.append("cursor: --keys was asked and no cockpit was swept")
     if args.focus and focus["examined"] < 20:
         # An empty producer is the failure mode this whole script exists to
         # refuse: 0 elements examined is not "no defects", it is "no evidence".
@@ -4058,6 +4323,15 @@ def main() -> int:
                     ),
                     "defects": focus_failures,
                 },
+                "cursor_sweep": {
+                    "enabled": args.keys,
+                    "cockpits_swept": len(cursors),
+                    "steps": [s for c in cursors for s in c["steps"]],
+                    "notes": [c["notes"] for c in cursors],
+                    "cursor_style": [c.get("cursor_style") for c in cursors],
+                    "forced_style": [c.get("forced_style") for c in cursors],
+                    "defects": cursor_failures,
+                },
                 # How many distinct values the app sweep actually looked at.
                 # A violation list is only evidence if nothing produced it
                 # vacuously: the brief's own rule is that an empty set from an
@@ -4078,6 +4352,7 @@ def main() -> int:
         "app colours": app_colors,
         "app radii": app_radii,
         "focus": focus_failures,
+        "keyboard cursor": cursor_failures,
         "eclipsed rules": eclipse_failures,
         "press morph": morph_failures,
         "loading indicator": loading_failures,
@@ -4112,6 +4387,15 @@ def main() -> int:
             f"{focus['expect'] or '(none measured)'} at 3px/2px, "
             f"{sum(1 for r in focus['rows'] if r.get('delegated'))} delegated "
             "to the box the reader sees."
+        )
+    if args.keys:
+        rendered = [s["rows"] for c in cursors for s in c["steps"] if s["rows"]]
+        print(
+            f"Keys: {sum(len(c['steps']) for c in cursors)} real key presses over "
+            f"{len(cursors)} cockpit(s) of up to {max(rendered) if rendered else 0} "
+            "rendered rows; the cursor moved to the row it claims, paged the list in "
+            "at the end, painted a ring and a leading bar no resting row has, and "
+            "out-ranked the pointer under forced colours."
         )
     if args.overlap:
         print(

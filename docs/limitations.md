@@ -501,6 +501,38 @@ sampled away.
     is a question any user can ask of their own store rather than something this
     file asserts.
 
+35. **The keyboard cursor is real in flat mode and partial in grouped mode, and
+    the productivity-tool research is only 1/12 spent.** Spec Round 53 added
+    `↑`/`↓`/`j`/`k`/`PageUp`/`PageDown`/`Home`/`End`/`Enter`, a shortcut strip, and
+    a poll that holds while a row or a field has focus (measured: 0 `/api/sessions`
+    requests in a 62.4 s window with a row focused, 2 in the same-length control
+    window; `python scripts/audit_component_rules.py --app-only --keys --app
+    http://127.0.0.1:8620` re-asks it). What is still open, in the words the
+    research used:
+
+    - **Grouped paging.** `↓` at the end of a truncated group moves to the next
+      group rather than paging that group in, so keyboard paging is proven only in
+      flat mode (50 → 100 rows). The expander stays Tab-reachable and `↑` from it
+      returns to the last row. Which reading a reader wants is unmeasured: there is
+      one user of this app and they have not tried it yet.
+    - **Not shipped from the twelve**: pinyin-initial matching for CJK titles
+      (PowerToys Run's *Use Pinyin*; the title filter is a substring match, so a
+      session named 回答两个字：可以 has nothing latin to type), frequency×recency
+      ranking (Raycast's ordering, PowerToys' *Selected item weight*), the density
+      toggle with `tabular-nums`, column
+      visibility and sort persistence, the contextual action zone (Tab through
+      per-row buttons), ⌘K with multi-select cross-CLI handoff, the preview pane
+      (Space / ⌘Y), ⌘1-9 source switch, undo toasts, "Today/This week" absolute
+      time buckets, and `overflow-anchor: none` with a self-managed scroll offset
+      once the list is virtualised.
+    - **A hold is not a queue.** While the pause is on, the list is exactly as
+      stale as it was when focus arrived. The badge says 自动更新已暂停 rather than
+      keeping its live dot, but nothing yet shows *how* stale: the age label only
+      updates when a refresh actually lands.
+    - **Fuzzy matching is substring-only**, so the highlight component shows a
+      contiguous run; the character-subsequence highlight the research describes
+      would need the matcher to report which characters it used.
+
 ## How to check any of this yourself
 
 ```bash
@@ -516,16 +548,20 @@ python -m agent_handoff.evidence --check      # README/JSON vs the fixtures
 python -m agent_handoff.conformance --check   # format fingerprints vs the baseline
 ```
 
-Three checks need more than a checkout, and are therefore commands a maintainer
+Four checks need more than a checkout, and are therefore commands a maintainer
 runs rather than tests CI runs:
 
 ```bash
 python scripts/sanitize_fixtures.py --cli <id>   # needs that CLI's live store
 python scripts/sweep_row_shapes.py --cli <id>    # same, and exits 1 on a shape
                                                  # no list accounts for
+python scripts/audit_hidden_sessions.py          # same: every id the stores name,
+                                                 # classified, LOST exits 1
 python scripts/audit_component_rules.py          # needs playwright + `npm ci`
 python scripts/audit_component_rules.py --app http://127.0.0.1:8620/ \
   --route '#/' --route '#/memory' --focus          # the ring, in both themes
+python scripts/audit_component_rules.py --app-only --keys \
+  --app http://127.0.0.1:8620                      # the row cursor, with real keys
 ```
 
 The last of those asks the browser whether each Material rule in `web/src/m3.css`
@@ -533,6 +569,9 @@ reaches an element at all. Its absence is what let five families of dead CSS shi
 — including a white snackbar on the dark theme — while every static gate was
 green, because a rule can read every token it names and still apply to nothing.
 `--focus` is the third question: not whether a rule matches, but what a keyboard
-user sees when it does.
+user sees when it does. `--keys` is the fourth: whether the keys the strip
+advertises move the cursor to the row they claim — asked of the running cockpit,
+never of the audit's own gallery, because a mock has no 247-row list to walk off
+the end of.
 
 If you close a gap here, delete its entry. This file is done when it is empty.

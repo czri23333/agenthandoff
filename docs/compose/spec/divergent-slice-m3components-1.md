@@ -1948,6 +1948,120 @@ nothing: the listing derives the rollout list once anyway, and it is the per-row
 probes that re-enter it. That is the same mistake shape as Round 51's warm-arm
 comparison — an instrument that measures a cheap neighbour of the thing it names.
 
+### Round 53 — the list had no keyboard, and the refresh moved the row you were reading
+
+The brief was "go and look at how productivity tools design their UI, then apply
+it". The research came back with twelve construction-ready items (Raycast's manual
+for the key bindings, `fzf --track` for "follow the item, not the index", PowerToys
+Run's *Input smoothing* / *Selected item weight* / *Tab through context buttons*,
+TablePlus's Space-to-preview, the ARIA APG listbox pattern, and Pencil & Paper's
+data-table survey for the alignment and row-height rules). This slice ships the
+subset the cockpit can honour without inventing data it does not have: a keyboard
+cursor, a poll that cannot move the row under that cursor, and a shortcut strip
+that advertises only keys the app actually implements.
+
+Two things were measured before anything was written, because both had been
+assumed at some point:
+
+| Question | How it was asked | Answer |
+|---|---|---|
+| Does a keyboard reader have any way to move between rows? | count the row buttons in the tab order | **247** rendered rows, and every row is a `<button>`, so every row is its own tab stop — that half is structural, the count is what the DOM said. Either way: no arrow-key path at all |
+| Is there a "current row" state to hang that on? | grep for who sets `aria-selected` on a row | **nobody**. `.ah-row[aria-selected="true"]` was styled and dead — the same failure shape this file already records for `.ah-li`: a claim about a stylesheet, not about the product |
+
+What shipped, in four pieces:
+
+1. **`web/src/keys.ts`** — `rowNav`: `↑`/`↓` and `j`/`k`, `PageUp`/`PageDown` at
+   half a screen, `Home`/`End`, focus-follows-selection and never
+   pointer-follows-selection (reading a row with the mouse is not selecting it).
+   Enter and Space need no handler: the rows already are `<button>`s.
+2. **Walking off the rendered end pages more rows in.** The expander is looked up
+   by *document order after the cursor*, not as `querySelector(".ah-more")` — a
+   grouped list holds one expander per group (three on this machine), so the
+   document-first lookup the first version used would have paged in a different
+   group than the one the cursor left and focused one of *its* rows. The new
+   cursor is then "a row node that did not exist a frame ago", because the
+   insertion shifts every index below it.
+3. **The poll holds while the reader is navigating** (`navHeld`, and the badge
+   switches to 自动更新已暂停 rather than keeping its live colour). The delta merge
+   re-sorts by `updated_at`, so a session that gets a turn jumps to the top and
+   the row under the cursor moves out from under it. Both `focusin` *and*
+   `focusout` recompute the flag.
+4. **The cursor's paint**: `:focus-visible` claims the dead `[aria-selected]`
+   slot, and carries three channels — the M3 ring, a 3px accent bar on the row's
+   leading edge, and the 12 % focus layer — plus the corner morph. In
+   forced-colours mode the bar is dropped by the platform (measured:
+   `box-shadow: none` on a focused row), so that block gets an outline arm too.
+
+Evidence, from real Chromium at 1400×1000 against the live store (247 rows
+rendered of 2,638 sessions), every judgement read off the DOM rather than off a
+"successfully pressed" return value:
+
+| Key | Cursor index | Notes |
+|---|---|---|
+| `↓` from no focus | 0 | `:focus-visible` true, ring 3px, bar present |
+| `↓` ×3 | 0 → 1 → 2 → 3 | one row per press |
+| `PageDown` | 3 → 11 | half a screen at 56px rows; still fully on screen |
+| `↑`, `k` | 10, 9 | `k` moves exactly like `↑` |
+| `Home`, `End` | 0, 246 | |
+| `↓` off the rendered end | 246 | grouped mode: parks, and the cursor is not lost |
+| `End`, `↓` in flat mode | 49 → **rows 50 → 100**, cursor 50 | this is where paging-in is reachable from the keyboard |
+| `↑` from the expander | 246 | Tab reaches it, ArrowUp comes back to a row |
+| `Enter` | — | hash `#/` → `#/session/qoder-ide/004a40e8…` |
+| `/` from a row | — | focus lands on the search `INPUT` |
+| `3` from a row | — | hash `#/inbox`: the shell's own keys still reach the shell |
+
+The refresh hold, as an A/B over **62.4 s windows** — two full 30 s periods, so
+the cadence cannot hide in the phase:
+
+| Arm | `/api/sessions` requests | Cursor |
+|---|---|---|
+| a row holds focus | **0** | index 3 in all 31 samples |
+| focus on the body (control) | **2** | — |
+
+The control arm is what makes the first row mean anything: a counter that cannot
+see a poll also reports zero while the app is working normally.
+
+`scripts/audit_component_rules.py --keys` is the gate — 18 real key presses, run
+against the **running cockpit** and never against the tool's own gallery, because
+"the cursor moves" is a property of the real list's row count, grouping and
+expander (the rail sweep's recorded lesson). It also asserts the strip is painted
+(`1320×31`, text present) and that every glyph it advertises — `↑ ↓ ↵ / 1` — is
+one this slice proved, since an advert the app does not honour is worse than no
+advert. Mutation proof: `if (false && step > 0 && at >= last)` fails with exactly
+one defect, `walking off a flat list's end pages rows in -- rows 50 -> 50, cursor
+at 49`, and the unmutated run is green. The forced-colours arm carries its own
+natural experiment: at `(0,4,0)` it lost to the block's own hover arm (measured
+`1px solid rgb(0, 0, 0)` on a row that was both the cursor and under the
+pointer), which is why it is `(0,5,0)` — the arms above it are `:is(...)` lists
+whose most specific member, `.ant-select.ah-select-chip`, is two classes.
+
+**Five things this round nearly shipped, all caught by re-measuring rather than
+by reading the code.** (a) The pause was `focusin`-only: clicking the gap between
+rows blurs without a new focus event, so the flag stayed true and the list
+stopped refreshing for the rest of the session. (b) The forced-colours arm above.
+(c) A probe that cleared focus with `page.click("body")` — which clicks the
+*centre* of the page, and the centre of this page is a session row, so it opened
+a session and then measured a route change it had caused. (d) A 40 s observation
+window for a 30 s cadence: both arms read exactly one poll, which looks like "the
+guard does nothing" and is actually the interval landing in the first 50 ms.
+(e) The worst one: a probe that switched to flat mode by clicking the toolbar's
+segmented control and left focus on it. An antd `Segmented` is a radio group, its
+arrow keys move *its* selection, and the app's typing guard correctly refuses to
+run list navigation from a field — so every number in that run was a grouping
+change (domain → activity → flat) dressed up as paging. The void run is recorded
+rather than deleted because the guard it exercised is the behaviour, not the bug.
+
+What this slice does **not** claim: grouped mode does not page in from the
+keyboard at a group's end — `↓` leaves the group instead, which is the other
+defensible reading of `↓`, and the expander stays one Tab away. The hold is a
+hold, not a queue: while it is on, the list is exactly as stale as it was when
+focus arrived, and the badge says so rather than keeping a live dot. And the
+research's remaining items — pinyin-initial matching, frequency×recency ranking,
+the density toggle with `tabular-nums`, column and sort persistence, the
+contextual action zone, ⌘K, a preview pane, `overflow-anchor: none` under
+virtualisation, "Today/This week" absolute buckets — are listed in
+`docs/limitations.md` and unshipped.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

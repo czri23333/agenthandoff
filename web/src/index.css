@@ -429,12 +429,50 @@ body {
    what it takes to beat the element-level `button:active:not(:disabled)`
    shorthand further down the file at (0,2,1). */
 .ah-row:active:not(:disabled),
-.ah-row[aria-selected="true"] {
+.ah-row:focus-visible {
   border-radius: var(--ah-c-list-item-shape-active);
   /* The generic press scale is for a *control*; an M3 list item answers a press
      by widening its corner and compositing the 12% layer, and resizing a row
      full of text would reflow the thing the reader is looking at. */
   transform: none;
+}
+
+/* The keyboard cursor. `[aria-selected="true"]` used to sit in the rule above —
+   styled, and never set by any view, so the "selected row" state was a claim
+   about a stylesheet. Round 53 gives that slot to `:focus-visible`, which the
+   native `<button>` rows set for free when the cursor moves with the keys.
+   Two channels, because the ring alone is not enough here: the outline is drawn
+   at the row's own radius and a full-width 56px band of it is hard to locate in
+   a 50-row page, so the cursor also paints a 3px accent bar on the row's leading
+   edge. The box-shadow composes with the focus state layer the generic
+   `:focus-visible` rule already applies. */
+.ah-row:focus-visible {
+  box-shadow:
+    inset 3px 0 0 0 var(--ah-accent),
+    inset 0 0 0 9999px
+      color-mix(in srgb, var(--ah-state-layer-color, currentColor) var(--ah-state-focus), transparent);
+}
+
+/* The shortcut strip under the list. Keycaps are our own small mono chips — M3
+   has no keycap token, so the surfaces are the app's, not an invented token.
+   The two roles are deliberate: the labels are CJK and so take `body-small`
+   (12px, the repo's CJK floor), while the keycaps hold only latin and symbols
+   and may take `label-small` (11px), which `tokens.json` marks mono-only. */
+.ah-kbdhint {
+  border-top: 1px solid var(--ah-line);
+  color: var(--ah-text-3);
+  font-family: var(--ah-font-mono);
+  font-size: var(--ah-type-body-small-size);
+  line-height: var(--ah-type-body-small-line);
+}
+
+.ah-kbdhint kbd {
+  background: var(--ah-surface-2);
+  border: 1px solid var(--ah-line);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: var(--ah-type-label-small-size);
+  padding: 0 4px;
 }
 
 .ah-skeleton {
@@ -801,6 +839,24 @@ html {
     ):active:not(:disabled):not([aria-disabled="true"]) {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+
+  /* The keyboard cursor's 3px leading bar is a box-shadow, and everything else in
+     this block answers with an outline for exactly that reason -- measured: under
+     emulated forced colours a focused row computes `box-shadow: none`, so the bar
+     is gone and the outline is the only cursor left. This arm has to *win* that
+     outline, and two versions of it did not. A bare `.ah-row:focus-visible` lost
+     to the hover arm above, so a row where the cursor and the pointer happened to
+     be in the same place computed `1px solid rgb(0, 0, 0)` -- the same signal as
+     anywhere the mouse rested. The reason is the weight of those arms: they are
+     `:is(...)` lists whose most specific member is `.ant-select.ah-select-chip`,
+     two classes, so `:is(...) + :hover + :not(:disabled) + :not([aria-disabled])`
+     is (0,5,0) rather than the (0,4,0) it reads as at a glance. Five conditions
+     here, later in the block, is what makes the cursor the answer. `:not([hidden])`
+     is the fifth, and a hidden row has no cursor to paint anyway. */
+  .ah-row:focus-visible:not(:disabled):not([aria-disabled="true"]):not([hidden]) {
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
   }
 }
 

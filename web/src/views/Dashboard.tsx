@@ -11,6 +11,7 @@ import {
   type StoreInfo,
 } from "../api";
 import { CliBadge, CopyButton, EmptyState, Highlight, StatusTag } from "../components";
+import { ROW_SCOPE } from "../keys";
 import { ActivityGrid } from "../charts";
 import { hasKey, useFmt, useT, type TKey } from "../i18n";
 
@@ -122,7 +123,45 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   // Incremental poll (§4-3): ask only for sessions changed since the newest
   // updated_at we hold, then merge. A changed child arrives with its parent
   // shell so the tree mounts without a full reload.
+  // The delta merge below re-sorts by `updated_at`, so a session that gets a new
+  // turn jumps to the top and the row a reader is looking at -- or the row the
+  // keyboard cursor is on -- moves out from under them. While the search field or
+  // a row has focus the poll is held instead (spec Round 53): a query typed into
+  // 2,600 rows must not have its result set reshuffled under it, which is what
+  // Obsidian's quick switcher and Linear's list do. The manual refresh button
+  // still reloads, and the hint row says the clock is held so a stale badge is
+  // never mistaken for a live one.
+  const navHeld = useRef(false);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    /* Both events, not just `focusin`. A first version listened only for
+       focusin -- and when focus leaves for the page body (a click on the gap
+       between rows, an Escape that blurs the field) no focusin fires, so the
+       flag stayed true and the list silently stopped refreshing for the rest of
+       the session. `relatedTarget` is where focus is going; on a blur with
+       nowhere to go it is null, which is the same as "nothing is focused". */
+    const held = (el: EventTarget | null) =>
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      !!(el instanceof Element && el.closest?.(ROW_SCOPE));
+    const onIn = (e: FocusEvent) => {
+      navHeld.current = held(e.target);
+      setPaused(navHeld.current);
+    };
+    const onOut = (e: FocusEvent) => {
+      navHeld.current = held(e.relatedTarget);
+      setPaused(navHeld.current);
+    };
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => {
+      document.removeEventListener("focusin", onIn);
+      document.removeEventListener("focusout", onOut);
+    };
+  }, []);
+
   const pollDelta = useCallback(async () => {
+    if (navHeld.current) return;
     setSessions((prev) => {
       if (!prev) {
         void load();
@@ -340,6 +379,16 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const freshSecs = updatedAt === null ? null : Math.round((Date.now() - updatedAt) / 1000);
   const unreadable = stores.filter((s) => !s.readable).length;
 
+  /* What the clock says. `paused` is the honest answer while the poll is held --
+     a freshness dot that keeps its live colour while nothing is refreshing reads
+     as "the list is current", which is the one thing this badge must not claim. */
+  const freshnessLabel = () => {
+    if (paused && !refreshing) return t("refreshPaused");
+    if (refreshing) return t("updating");
+    if (freshSecs !== null && freshSecs < 60) return fmt("updatedAgo", { n: freshSecs });
+    return t("autoRefresh");
+  };
+
   const indexLine = () => {
     if (mode !== "full") return null;
     if (searchError) return <span className="ah-err ah-meta">{searchError}</span>;
@@ -482,17 +531,15 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
               </span>
             </Tooltip>
           )}
-          <span className="ah-md-hide ah-faint flex items-center gap-1.5">
-            <span
-              className="freshness-dot h-1.5 w-1.5 rounded-[var(--ah-shape-full)]"
-              style={{ opacity: refreshing ? 0.5 : 1 }}
-            />
-            {refreshing
-              ? t("updating")
-              : freshSecs !== null && freshSecs < 60
-                ? fmt("updatedAgo", { n: freshSecs })
-                : t("autoRefresh")}
-          </span>
+          <Tooltip title={paused ? t("refreshPausedWhy") : undefined}>
+            <span className="ah-md-hide ah-faint flex items-center gap-1.5">
+              <span
+                className="freshness-dot h-1.5 w-1.5 rounded-[var(--ah-shape-full)]"
+                style={{ opacity: refreshing ? 0.5 : paused ? 0.3 : 1 }}
+              />
+              {freshnessLabel()}
+            </span>
+          </Tooltip>
           <Button size="small" type="text" onClick={() => setShowActivity((v) => !v)}>
             {t("activity")}
           </Button>
@@ -543,6 +590,30 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             ))
           )
         )}
+      </div>
+      {/* Shortcut strip (spec Round 53). Every key here is wired and tested in the
+          browser; nothing is advertised that the app does not do. It sits outside
+          the scroll area on purpose -- a hint you have to scroll to find is not a
+          hint -- and it is the only place the cockpit states that the rows are a
+          keyboard list, which is otherwise invisible to a first-time reader who
+          arrives with the mouse in hand. */}
+      <div className="ah-kbdhint flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-1.5">
+        <span>
+          <kbd>↑</kbd>
+          <kbd>↓</kbd> {t("hintSelect")}
+        </span>
+        <span>
+          <kbd>↵</kbd> {t("hintOpen")}
+        </span>
+        <span>
+          <kbd>/</kbd> {t("hintSearch")}
+        </span>
+        <span>
+          <kbd>1</kbd>–<kbd>5</kbd> {t("hintViews")}
+        </span>
+        <span>
+          <kbd>T</kbd> {t("hintTheme")}
+        </span>
       </div>
     </div>
   );
@@ -616,7 +687,7 @@ function PagedRows({
         <li>
           <button
             onClick={() => setShown((n) => n + PAGE)}
-            className="ah-faint w-full py-1.5 text-center font-mono text-[12px]"
+            className="ah-more ah-faint w-full py-1.5 text-center font-mono text-[12px]"
           >
             {t("showMore")} ({rows.length - shown})
           </button>

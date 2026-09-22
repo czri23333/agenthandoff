@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { App as AntApp, Dropdown, Layout, Tooltip, Typography } from "antd";
 import { ApartmentOutlined, AppstoreOutlined, DatabaseOutlined, InboxOutlined, MedicineBoxOutlined } from "@ant-design/icons";
+import { rowNav } from "./keys";
 import { getLang, setAppLang, useT, type Lang } from "./i18n";
 import { getSeed, seeds, setSeed, setThemeMode, useTheme, type ThemeMode } from "./theme";
 import Dashboard from "./views/Dashboard";
@@ -33,6 +34,7 @@ type TabDef = {
 
 const TABS: TabDef[] = [
   { id: "dashboard", key: "1", labelKey: "sessions", hash: "", icon: <AppstoreOutlined /> },
+
   { id: "threads", key: "2", labelKey: "threads", hash: "threads", icon: <ApartmentOutlined /> },
   { id: "inbox", key: "3", labelKey: "inbox", hash: "inbox", icon: <InboxOutlined /> },
   { id: "doctor", key: "4", labelKey: "doctor", hash: "doctor", icon: <MedicineBoxOutlined /> },
@@ -144,6 +146,7 @@ export default function App() {
         return;
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (rowNav(e)) return;
       const tab = TABS.find((tb) => tb.key === e.key);
       if (tab) {
         goTo(tab.id);
