@@ -2283,25 +2283,36 @@ for it.** 64 KB × 2,491 rows is 144 MB per rebuild against 37 MB before, and th
 poll runs every 30 s. The answer is therefore memoised against the version of every
 file it was read from, plus the listing date it was checked against, plus the window
 and file cap: cold 144.2 MB, **warm 0.1 MB (2 reads)**. Mutating a transcript
-re-derives its row; a second poll reads nothing. Nine mutation-checked behaviours are
-run by `D:/tmp-agenthandoff/r56_mutation.py`, including "turn the memo off and the
-test's assertion stops holding", so none of these are claims about code that cannot
-fail.
+re-derives its row; a second poll reads nothing. Sixteen mutation-checked
+behaviours are run by `D:/tmp-agenthandoff/r56_mutation.py` (the count is re-read
+from the script's own output in Round 58, which re-ran it and got 16 ok: it was
+recorded here as nine, which was a guess at how many had survived drafting, not a
+count), including "turn the memo off and the test's assertion stops holding", so
+none of these are claims about code that cannot fail.
 
 What is still not answered is named with counts in `docs/limitations.md`: 745 rows
-in stores that have no probe at all (their transcripts are SQLite, where this is a
-one-row query), 6 rows whose turn is above the window, and the 8 the guard
-silences. The last two cost 0.5 MB to reach, which is a bounded retry worth doing
-next rather than a reason the column stays quiet.
+in stores that have no probe at all, 6 rows whose turn is above the window, and the
+8 the guard silences. The last two cost 0.5 MB to reach, which is a bounded retry
+worth doing next rather than a reason the column stays quiet.
 
-**Delivery state at commit time:** this round's commits (`8efcfed` and the doc
-follow-ups after it) are local. The
-push did not go out — this machine had no external network in the window this round
-was committed (07:07–07:19 UTC: `github.com`, `pypi.org` and `google.com` all fail
-to connect both directly and through the configured `127.0.0.1:7892` proxy), so
-`origin` still points at Round 55. Retry `git push origin HEAD` with the proxy
-variables stripped, and confirm with `git ls-remote` rather than trusting the
-push's own exit line.
+**Round 58 corrects one sentence above it.** The 745 was written with the
+parenthetical "their transcripts are SQLite, where this is a one-row query" — and
+the one-row query is precisely the wrong question: the newest message row is an
+assistant row for **both** SQLite stores' every session, because rows exist for
+calls that reach no reader. Round 58 wrote the probes that ask the question the
+detail page answers, which took 680 of those 745 rows off the list (zcode 458,
+opencode 222) at 0 disagreements over the full stores; the 65 left are the four
+stores whose reads are genuinely different, named in item 39.
+
+**Delivery state, corrected in Round 58:** this round's commits were written while
+this machine had no external network (07:07–07:19 UTC: `github.com`, `pypi.org`
+and `google.com` all fail to connect both directly and through the configured
+`127.0.0.1:7892` proxy), so they sat local for two rounds. Connectivity returned:
+`137049d..4fdacbd` is on `origin/compose/divergent-slice-m3components-1` as of
+09:13 UTC — Rounds 56, 57, the rebuilt bundle and Round 58 — confirmed by
+`git ls-remote` rather than by the push's own exit line, which is the check worth
+keeping: the retry recipe is only "strip the proxy variables", and a push that
+prints a range is not by itself evidence the remote moved.
 
 ### Round 57 — the time column said "now" about the future, and "412d ago" about the past
 
