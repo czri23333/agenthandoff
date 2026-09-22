@@ -117,6 +117,25 @@ _TOOLLOOP_TITLE = "工具循环会话（无用户消息）"
 # per file: measured, the jsonl family alone spent 3.9s of an 11s build.
 _PEEK_CACHE: dict[tuple[str, float, int], tuple] = {}
 
+# (path, mtime, size) -> the session id that file's own records report. Same
+# version key and the same argument as _PEEK_CACHE, and it is the difference
+# between four qoder-family stores *sharing* one 4,261-file store and each of
+# them re-reading the head of all 4,261 files on every 20s rebuild: measured, the
+# uncached id peek cost 2.7s of an 11.3s poll and 8,995 of its ~9,000 opens.
+_ID_CACHE: dict[tuple[str, float, int], str] = {}
+
+# (path, mtime, size) -> "this roll opens with a session_meta/add_user_message
+# row", i.e. it is one turn of a fragmented chat rather than a conversation.
+# Same version key again; without it every store that shares the qoder store
+# re-reads the head of all 2,302 canonical files per poll to ask a question the
+# first store already answered.
+_FRAG_HEAD_CACHE: dict[tuple[str, float, int], bool] = {}
+
+# store -> {fragment text: the (path, mtime, size) that was carrying it}. A text
+# is only skipped by a later scan while that exact version is still on disk: the
+# proof is checked with one stat per remembered text, never by re-reading them.
+_PROVEN_ABSORBED_TEXTS: dict[str, dict] = {}
+
 # ~/.qoder-cn (and ~/.qoder) is SHARED by the whole qoder family: the IDE's own
 # chats live under <project>/transcript/ or in plain <project> dirs, while
 # qoderwake team-groups/workers and qoderwork workspaces each create top-level
@@ -375,11 +394,28 @@ class JsonlSessionParser(Parser):
 
     def _peek_id(self, path: Path) -> str:
         """Session id as the store reports it, falling back to the file stem."""
+        try:
+            st = path.stat()
+            key = (str(path), st.st_mtime, st.st_size)
+        except OSError:
+            key = None  # cannot version an unreadable file: read it every time
+        if key is not None:
+            hit = _ID_CACHE.get(key)
+            if hit is not None:
+                return hit
+        sid = ""
         for row in read_jsonl(path, limit=10):
-            sid = row.get("sessionId") or row.get("session_id")
-            if sid:
-                return str(sid)
-        return path.stem
+            value = row.get("sessionId") or row.get("session_id")
+            if value:
+                sid = str(value)
+                break
+        if not sid:
+            sid = path.stem
+        if key is not None:
+            if len(_ID_CACHE) > 8192:  # a long-lived process, a growing store
+                _ID_CACHE.clear()
+            _ID_CACHE[key] = sid
+        return sid
 
     def _origin(self) -> str | None:
         """Store directory (e.g. .qoderwork vs .qoderworkcn) = account scope."""
@@ -2216,12 +2252,29 @@ class QodercnIdeParser(JsonlSessionParser):
         meta = super()._peek(path)
         if meta is not None:
             # Detect qoder per-turn fragments from the early session_meta row.
+            try:
+                st = path.stat()
+                fkey = (str(path), st.st_mtime, st.st_size)
+            except OSError:
+                fkey = None
+            if fkey is not None:
+                known = _FRAG_HEAD_CACHE.get(fkey)
+                if known is not None:
+                    if known:
+                        self._frag_ids.add(meta.session_id)
+                    return meta
+            frag = False
             for r in read_jsonl(path, limit=6):
                 if r.get("type") == "session_meta":
-                    st = (r.get("data") or {}).get("content", {}).get("session_type")
-                    if st == "add_user_message":
-                        self._frag_ids.add(meta.session_id)
+                    st2 = (r.get("data") or {}).get("content", {}).get("session_type")
+                    frag = st2 == "add_user_message"
                     break
+            if fkey is not None:
+                if len(_FRAG_HEAD_CACHE) > 8192:
+                    _FRAG_HEAD_CACHE.clear()
+                _FRAG_HEAD_CACHE[fkey] = frag
+            if frag:
+                self._frag_ids.add(meta.session_id)
         return meta
 
     def _list_all(self) -> list[SessionMeta]:
@@ -2345,15 +2398,32 @@ class QodercnIdeParser(JsonlSessionParser):
         the same message inside the task/uuid conversation. Listing both shows one
         conversation twice; the fragment is the redundant copy, so it is absorbed.
         Result is cached per store (invalidated by newest file mtime) and the scan
-        is byte-capped so a large store cannot stall a dashboard load.
+        is byte-capped so a large store cannot stall a dashboard load. Each text
+        the scan proves is remembered together with the version of the file that
+        proved it, so the next scan only answers for fragments whose proof is
+        missing: a proof that lapsed - the session that carried it was rewritten
+        or deleted - is re-derived rather than trusted.
         """
         frag_metas = [m for m in metas if m.session_id in self._frag_ids]
         if not frag_metas:
             return set()
+        files: list[Path] = []
         try:
-            sig = max(p.stat().st_mtime for p in self._iter_jsonl())
+            # The caller listed this store moments ago; re-globbing it here to
+            # ask "what is the newest file" cost a second full walk per store per
+            # poll for a number the listing already held.
+            files = sorted({p for group in self._index.values() for p in group})
+            if not files:
+                files = self._iter_jsonl()
         except (OSError, ValueError):
-            sig = None
+            files = []
+        versions = {}
+        for p in files:
+            with contextlib.suppress(OSError):
+                versions[p] = (p.stat().st_mtime, p.stat().st_size)
+        # None when the store said nothing: an empty store, or one whose files
+        # all vanished mid-walk. Same as the old `max()` raising ValueError.
+        sig = max((v[0] for v in versions.values()), default=None)
         cache_key = str(self.root)
         cached = _QODER_ABSORB_CACHE.get(cache_key)
         if cached is not None and cached[0] == sig:
@@ -2364,30 +2434,46 @@ class QodercnIdeParser(JsonlSessionParser):
             txt = self._fragment_user_text(m.session_id)
             if txt:
                 frag_texts[m.session_id] = txt
-        wanted = set(frag_texts.values())
-        absorbed: set[str] = set()
+        proven = _PROVEN_ABSORBED_TEXTS.setdefault(cache_key, {})
+        live: dict[str, tuple] = {}
+        for txt, proof in proven.items():
+            try:
+                stp = Path(proof[0]).stat()
+            except OSError:
+                continue
+            if (stp.st_mtime, stp.st_size) == proof[1:]:
+                live[txt] = proof
+        wanted = {t for t in frag_texts.values() if t not in live}
         if wanted:
             real_paths = sorted(
-                (p for p in self._iter_jsonl() if p.stem not in self._frag_ids),
-                key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
+                (p for p in files if p.stem not in self._frag_ids),
+                key=lambda p: versions.get(p, (-1.0, 0))[0],
                 reverse=True,
             )
             scanned = 0
             for path in real_paths:
                 if not wanted or scanned > _ABSORB_SCAN_CAP_BYTES:
                     break
-                with contextlib.suppress(OSError):
-                    scanned += path.stat().st_size
+                version = versions.get(path)
+                if version is None:  # unreadable now: it cannot prove anything
+                    continue
+                scanned += version[1]
                 for row in read_jsonl(path):
                     if row.get("type") != "user":
                         continue
                     role, text, _raw, _tools = self._row_content(row)
                     if role == "user" and text and text.strip() in wanted:
                         wanted.discard(text.strip())
+                        proven[text.strip()] = (str(path), *version)
+                        # The proof is this file's version, which the scan just
+                        # read off `versions`: it counts for this answer, not only
+                        # for the next poll.
+                        live[text.strip()] = proven[text.strip()]
                         if not wanted:
                             break
-            found = set(frag_texts.values()) - wanted
-            absorbed = {sid for sid, txt in frag_texts.items() if txt in found}
+            if len(proven) > 4096:  # a long-lived process, a growing store
+                proven.clear()
+        absorbed = {sid for sid, txt in frag_texts.items() if txt in live}
         if sig is not None:
             _QODER_ABSORB_CACHE[cache_key] = (sig, absorbed)
         return absorbed

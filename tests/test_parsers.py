@@ -872,3 +872,138 @@ def test_one_open_does_not_reread_the_store_for_the_model_hint(tmp_path):
     finally:
         jf.read_jsonl = real
         jf._ANCHOR_FACTS.clear()
+
+
+def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path):
+    """A fragment is hidden only while its proof is on disk, and the proof costs
+    one stat per remembered text - never a re-read of the store.
+
+    qoder writes every user turn twice: once as an `add_user_message` fragment
+    file, once inside the task/uuid conversation. Listing both shows one
+    chat twice, so `_absorbed_fragment_ids` hides the fragment - and that scan
+    ran on every 20s rebuild, because its cache key was the newest mtime of
+    the whole store (which moves every second a session is live). The scan
+    reached 4.1s of an 11.3s poll and, on this machine's stores, ~170,000 JSON
+    rows parsed per poll (spec Round 50).
+
+    Caching the answers is only honest if the answer is the same one, so this
+    pins all four directions: the absorbed fragment goes, the unabsorbed one
+    stays, a repeat pass reads no transcript at all, and deleting the session
+    that proved the match brings the fragment back.
+    """
+    import json
+    import time
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--w"
+    proj.mkdir(parents=True)
+    for name in (
+        "_PEEK_CACHE",
+        "_ID_CACHE",
+        "_FRAG_HEAD_CACHE",
+        "_QODER_ABSORB_CACHE",
+        "_PROVEN_ABSORBED_TEXTS",
+    ):
+        getattr(jf, name).clear()
+
+    def meta(sid: str, cwd: str, minute: int) -> dict:
+        return {
+            "type": "session_meta",
+            "sessionId": sid,
+            "timestamp": f"2026-09-20T10:{minute:02d}:00Z",
+            "cwd": cwd,
+            "data": {"meta_type": "session_info", "content": {"session_type": "add_user_message"}},
+        }
+
+    def user(sid: str, cwd: str, minute: int, text: str) -> dict:
+        return {
+            "type": "user",
+            "sessionId": sid,
+            "timestamp": f"2026-09-20T10:{minute:02d}:00Z",
+            "cwd": cwd,
+            "message": {"role": "user", "content": text},
+        }
+
+    def write(name: str, rows: list[dict]) -> Path:
+        path = proj / f"{name}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    # 20 unrelated sessions: the scan the old code repeated used to read these.
+    for i in range(20):
+        write(
+            f"task-{i:02d}",
+            [
+                user(f"task-{i:02d}", f"C:/w{i}", 30 + i, f"unrelated question {i}"),
+                {
+                    "type": "assistant",
+                    "sessionId": f"task-{i:02d}",
+                    "timestamp": f"2026-09-20T10:{40 + (i % 10):02d}:00Z",
+                    "cwd": f"C:/w{i}",
+                    "message": {"role": "assistant", "content": "ok"},
+                },
+            ],
+        )
+    # frag-echo: the IDE also kept its text inside task-00, so it must go.
+    write("frag-echo", [meta("frag-echo", "C:/a", 5), user("frag-echo", "C:/a", 5, "hello")])
+    # frag-alone: no session carries this turn, so it must stay listed.
+    write("frag-alone", [meta("frag-alone", "C:/b", 6), user("frag-alone", "C:/b", 6, "only here")])
+    # The proving file goes last: its mtime is the store's newest, so deleting
+    # it below is something the cache key can actually notice.
+    time.sleep(0.05)
+    proof = write("task-00-proof", [user("task-00-proof", "C:/a", 7, "hello")])
+
+    real_read = jf.read_jsonl
+    reads = {"n": 0}
+
+    def counted(path, *a, **kw):
+        reads["n"] += 1
+        return real_read(path, *a, **kw)
+
+    jf.read_jsonl = counted
+    try:
+        p = QodercnIdeParser(tmp_path / ".qoder-cn")
+        first = {m.session_id for m in p.list_sessions()}
+        cold_reads = reads["n"]
+        assert "frag-echo" not in first, "the duplicated turn echo was not absorbed"
+        assert "frag-alone" in first, "absorption swallowed a fragment nothing carries"
+
+        reads["n"] = 0
+        again = QodercnIdeParser(tmp_path / ".qoder-cn")
+        second = {m.session_id for m in again.list_sessions()}
+        warm_reads = reads["n"]
+        assert second == first, f"a second pass changed the answer: {second ^ first}"
+        assert warm_reads == 0, f"a pass over an unchanged store read {warm_reads} files"
+        assert warm_reads < cold_reads
+
+        # The proof is no longer what it was: the session still exists, but the
+        # turn it carried is gone. A remembered match must be re-derived, not
+        # trusted - otherwise the fragment stays hidden although nothing lists
+        # the conversation, i.e. a chat silently leaves the cockpit.
+        time.sleep(0.02)
+        write("task-00-proof", [user("task-00-proof", "C:/a", 7, "a different turn entirely")])
+        fourth = {m.session_id for m in QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        assert "frag-echo" in fourth, (
+            "a fragment stayed absorbed after the session that proved it changed"
+        )
+
+        # And gone altogether: same demand from the other direction.
+        proof.unlink()
+        reads["n"] = 0
+        third = {
+            m.session_id for m in QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()
+        }
+        assert "frag-echo" in third, (
+            "the absorbed fragment stayed hidden after its proof was deleted"
+        )
+    finally:
+        jf.read_jsonl = real_read
+        for name in (
+            "_PEEK_CACHE",
+            "_ID_CACHE",
+            "_FRAG_HEAD_CACHE",
+            "_QODER_ABSORB_CACHE",
+            "_PROVEN_ABSORBED_TEXTS",
+        ):
+            getattr(jf, name).clear()

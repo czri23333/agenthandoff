@@ -129,8 +129,19 @@ sampled away.
    that cost +4.5% / −1.1% / −1.8%, which is nothing this measurement can
    separate from noise; the same sessions' cold build ranged 11.3–13.5 s across
    those runs, so treat the 5.4 s above as a different day's store, not a
-   baseline to hold later runs to. The next gain would be per store
-   (a cheaper head read for one family at a time), and no such change is in flight.
+   baseline to hold later runs to. That predicted next gain — a cheaper head read
+   per rebuild — is now taken (spec Round 50), and the honest way to state it is
+   by *work done* rather than seconds, because the two figures in this item are
+   different scopes on different days' stores: the number Round 50 moves is
+   `_build_session_roots(None, None, None)` — all 20 stores this machine has
+   (4,631 `.jsonl` files in the seven the jsonl family reads; 2,638 rows listed)
+   — whose steady-state rebuild went from **4,599 transcript opens to 16** and
+   from 15 store walks to 9, for **11.3 s → 8.3 s**. The seconds are the part
+   this machine cannot measure tightly; the opens are a counter. What is left in
+   that rebuild is now attributed: the two per-row probes (`peek_status` 1.3 s
+   and `peek_needs_reply` 1.1 s over its 3,350 rows, both called from the same
+   loop) and the rows of sessions that genuinely grew since the last pass — not
+   re-reads of files nobody touched.
 8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change
    page without hitting the theme switch), a session title column squeezed to

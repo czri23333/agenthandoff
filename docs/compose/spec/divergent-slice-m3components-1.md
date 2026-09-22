@@ -1720,6 +1720,91 @@ never ran and its red proved nothing. A mutation that fails is only evidence onc
 control run shows the same path reachable and passing; the proof was redone under a
 home-directory temp path.
 
+### Round 50 — a rebuild of the list re-read what the last rebuild had answered
+
+The cockpit rebuilds the session list every 20 s (`_CACHE_TTL`), off the request
+path. That rebuild cost **11.3 s** on this machine's stores (4,631 jsonl files,
+2,638 listed rows) and it was doing it with every content cache warm.
+
+The guess that would have been wrong here was the per-row probes: `peek_status`
+and `peek_needs_reply` run for all 3,350 rows on *every* request, uncached, and
+looked like the obvious whale. Measured, they are **1.85 s + 1.16 s** against
+`list_sessions`'s **14.95 s**. So the target was the listing itself, and a
+cProfile of one steady-state build named the parts:
+
+| What a build did, before | Measured |
+|---|---|
+| `read_jsonl` calls | **13,890**, which JSON-parsed **254,634 rows** |
+| `_peek_id` (the head read that groups files into one session) | 8,995 calls, **2.65 s** — no cache, and a shared store is asked twice per build (`qoder-ide`+`qoderwake` over 4,261 files, `qodercn-ide`+`qoderwake-cn` over 132) |
+| `_absorbed_fragment_ids` (which turn-echoes duplicate a real session) | **4.13 s**, re-running on **every** rebuild |
+| store walks (`_iter_jsonl`) | 15 per build, 2.92 s — 2 of them inside `_absorbed_fragment_ids` alone |
+| `nt.stat` | 135,243 calls, 3.49 s |
+| warm pass over `qoder-ide` alone, phase-split | 2.36 s, of which `_peek_id` **1.14 s** and `_peek` 0.53 s |
+
+Four changes, each keyed by the same `(path, mtime, size)` version the `_peek`
+cache already uses — an append-only roll cannot change its own id, its fragment
+shape, or who carries its text without its size or mtime changing:
+
+1. **`_peek_id` memoised.** The head read of all 4,261 files, once, for the four
+   stores that share those two stores instead of doing it each.
+2. **The absorb scan's cache key stopped being the whole store.** Its signature
+   was `max(mtime over every file)`, i.e. it moved every second a session was
+   live, so the cache could not engage; it also **re-globbed the store twice** to
+   compute that number, for a file list `list_sessions` had built moments before.
+   Now the signature comes from that list, and each file is stat'd once.
+3. **Each proven text remembers the file version that proved it**, checked with
+   one stat per remembered text. A proof that lapsed — the session carrying it
+   was rewritten or deleted — is re-derived rather than trusted.
+4. **The fragment-head answer is memoised** (the first 6 rows of every canonical
+   file, read again per store per build).
+
+| Steady-state build | Before | After |
+|---|---|---|
+| transcript files opened | **4,599** | **16** |
+| store walks | 15 | 9 |
+| rows JSON-parsed | 168,896 | 130,830 |
+| wall clock | 11.29 s | 8.26 s |
+| `_peek_id` over `qoder-ide`, warm | 1.138 s | **0.070 s** |
+
+The seconds are the noisy part (the store is being written by the session doing
+the measuring, and this machine runs six other python processes); the open count
+is the one to believe. The rows still parsed are now dominated by the two
+per-row probes and by the sessions that really did grow — the remaining target,
+named by measurement rather than by guess.
+
+**What this round nearly shipped.** Two things, and both are why the tests are
+shaped as they are.
+
+* The fragment/absorb rule — the store's most complicated listing behaviour — had
+  **no test at all** (`grep -rn "absorb\|add_user_message" tests/` was empty).
+* The first version of change 3 kept a *monotone* set of proven texts, arguing
+  that an append-only store cannot un-prove a match. It can: the store deletes
+  sessions. That would have hidden a turn-echo whose real conversation was
+  deleted — a chat silently leaving the list, which is the P0 this project has
+  been paid to avoid. A differential instrument against a verbatim copy of the
+  previous algorithm caught the first instance of the bug class (newly proven
+  texts were recorded but not counted for the answer being built, so a cold store
+  absorbed nothing), and the proof-per-version form is what replaced the set.
+
+`tests/test_parsers.py::test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it`
+holds all four directions: the duplicated turn echo goes, the one nothing
+carries stays, a second pass over an unchanged store reads **0** files, and
+rewriting or deleting the proving session brings the fragment back. Mutation
+matrix — each mechanism disabled alone, the control green first:
+
+| Mutation | Result |
+|---|---|
+| don't count a text proven during this scan | red: `the duplicated turn echo was not absorbed` |
+| trust a remembered proof whose file changed | red: `a fragment stayed absorbed after the session that proved it changed` |
+| `_ID_CACHE` off | red: `a pass over an unchanged store read 23 files` |
+| fragment-head cache off | red: same cost assert |
+
+The first draft of the deletion case passed with the proof check removed: a
+deleted file is caught by `stat()` raising, which happens *before* the version
+comparison, so it never reached the code the test claimed to pin. The case was
+rewritten as "the file still exists, its text is gone" — which is the actual
+claim — and then went red as it should.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
