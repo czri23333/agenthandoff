@@ -142,15 +142,22 @@ sampled away.
    finds **2,411** calls on the same steady rebuild — 37 from the reader and
    **2,323 from `_tail_rows`**, the per-row probes that read a transcript's end to
    answer "needs an answer" and "how did it end". What the remaining seconds are
-   is attributed in the spec (Round 50), and Round 51 cut the syscalls it named:
-   a rebuild's `os.stat` calls went **114,728 → 65,746** by walking the store with
-   `os.scandir` (the directory entry already carries type, mtime and size, so the
-   id peek, the meta peek, the canonical ranking and the fragment scan stopped
-   re-asking) and by resolving each store root once. Answers held fixed: four
-   rebuilds with the facts on and off, 2,491 rows × 12 fields, 0 differing rows.
-   What is left is now 69 % the codex store's own head reads (45,540 stats in
-   `_rollouts`/`_header_payload`), and 2,321 of the 2,405 opens per rebuild are the
-   per-row tail probes answering "needs an answer", which is worth re-asking.
+   is attributed in the spec (Round 50), and Rounds 51–52 cut what that named: a
+   rebuild's `os.stat` calls went **114,728 → 15,556** and its wall clock
+   **11.29 s → 3.48 s**. Round 51 walked the store with `os.scandir` (the directory
+   entry already carries type, mtime and size, so the id peek, the meta peek, the
+   canonical ranking and the fragment scan stopped re-asking) and resolved each
+   store root once. Round 52 found the codex store holding 69 % of what was left:
+   `_session_files` re-derived the whole rollout list once per session — 103
+   sessions × 110 files × 2 stats — and it is now memoised against the file list it
+   came from, so a rollout that appears or is renamed still re-derives. Answers held
+   fixed both times: four rebuilds with the walk facts on and off, 2,491 rows × 12
+   fields, 0 differing rows at the on/off boundary and at the same-configuration
+   control; and all 103 codex rows × 8 fields plus both per-row probes, with and
+   without the memo, identical. What is left is attributed rather than assumed:
+   `_family_of_path`'s per-session `resolve()` (2,320 stats), `dsh`'s own listing
+   (1,432), and 2,319 opens per rebuild from the per-row tail probes — a question
+   worth re-asking, since the answer is supposed to be current.
 8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change
    page without hitting the theme switch), a session title column squeezed to

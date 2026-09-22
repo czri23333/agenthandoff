@@ -2330,11 +2330,10 @@ class QodercnIdeParser(JsonlSessionParser):
         meta = super()._peek(path)
         if meta is not None:
             # Detect qoder per-turn fragments from the early session_meta row.
-            try:
-                st = path.stat()
-                fkey = (str(path), st.st_mtime, st.st_size)
-            except OSError:
-                fkey = None
+            # The parent peek just built this same version key from the walk's
+            # directory entry; asking the OS again here was 2,434 stats a rebuild.
+            ver = self._version(path)
+            fkey = (str(path), ver[0], ver[1]) if ver else None
             if fkey is not None:
                 known = _FRAG_HEAD_CACHE.get(fkey)
                 if known is not None:

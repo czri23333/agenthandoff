@@ -296,3 +296,101 @@ def test_the_filename_names_the_thread_when_the_header_has_no_id(tmp_path):
     assert raw is not None
     assert [m.text for m in raw.messages] == ["orphan ask"]
     assert parser.load(SID) is None
+
+def test_a_rebuild_derives_the_rollout_list_once_per_file_list(tmp_path):
+    """Filtering rollouts per session must not re-derive the rollout list.
+
+    `_session_files` walks every rollout to pick one thread's, and the list
+    endpoint calls it once per session: measured on this machine's codex store
+    (110 files, 103 sessions) that was 207 derivations of the same list and
+    **45,540 of the 65,746 `os.stat` calls in one rebuild of all twenty
+    stores** (spec Round 52). The memo is keyed by the file list it came from,
+    so a rollout that appears, vanishes or is renamed still re-derives; this
+    checks both halves -- the answer cannot move, and the cost must not scale
+    with sessions.
+    """
+    threads = [SID, "019fac11-2222-7222-8222-222222222222", OTHER]
+    paths = []
+    for i, sid in enumerate(threads):
+        for part in (0, 1):
+            path = tmp_path / "sessions" / f"rollout-2026-08-0{i}T00-0{part}-{sid[-4:]}.jsonl"
+            _write(
+                path,
+                [
+                    _header(f"{sid}-{part}" if part else sid, ts_to_iso(1_780_000_000.0 + part)),
+                    _turn("user", f"ask {i}-{part}", ts_to_iso(1_780_000_050.0 + part)),
+                    _turn("assistant", "ok", ts_to_iso(1_780_000_060.0 + part)),
+                ],
+                1_780_000_100.0 + 100 * i + part,
+            )
+            paths.append(path)
+    store = tmp_path / "sessions"
+    files = {str(p) for p in paths}
+
+    real_stat = Path.stat
+    asked = {"n": 0}
+
+    def counted(self, *a, **kw):
+        if str(self) in files:
+            asked["n"] += 1
+        return real_stat(self, *a, **kw)
+
+    orig_rollouts = CodexParser._rollouts
+    Path.stat = counted
+    try:
+        def rebuild(parser_factory):
+            """What `_build_session_roots` does per store: list, then ask every
+            row its two questions -- and it is those probes that re-enter
+            `_session_files`, not the listing."""
+            asked["n"] = 0
+            pr = parser_factory()
+            rows = sorted((m.session_id, m.title, m.updated_at) for m in pr.list_sessions())
+            for m in rows:
+                pr.peek_status(m[0])
+                pr.peek_needs_reply(m[0])
+            return rows, asked["n"]
+
+        # Arm 1: the memo as shipped.
+        rows_memo, with_memo = rebuild(lambda: CodexParser(store))
+
+        # Arm 2: the same code, told to pretend the store moved every time.
+        def unmemorised(self):
+            self._rollout_cache = None
+            return orig_rollouts(self)
+
+        CodexParser._rollouts = unmemorised
+        rows_unmemo, without_memo = rebuild(lambda: CodexParser(store))
+        CodexParser._rollouts = orig_rollouts
+
+        assert rows_memo, "nothing listed, so the equality below is vacuous"
+        assert rows_memo == rows_unmemo, "the memo changed the answer"
+        assert without_memo > with_memo * 2, (
+            f"{with_memo} stat calls with the memo against {without_memo} without it: "
+            "the rollout list is still being re-derived per session"
+        )
+        # Cost tracks the files, not files x sessions.
+        assert with_memo <= 4 * len(files), f"{with_memo} stats for {len(files)} rollout files"
+        # And the cost must track the files, not files x sessions.
+        assert with_memo <= 4 * len(files), f"{with_memo} stats for {len(files)} files"
+
+        # The key has to be the file *set*, not the instance: a new rollout in
+        # the same instance must be seen without any help.
+        late = store / "rollout-2026-08-09T00-00-late.jsonl"
+        _write(
+            late,
+            [
+                _header("019fac11-9999-7999-8999-999999999999", ts_to_iso(1_780_000_900.0)),
+                _turn("user", "brand new ask", ts_to_iso(1_780_000_910.0)),
+                _turn("assistant", "ok", ts_to_iso(1_780_000_920.0)),
+            ],
+            1_780_000_999.0,
+        )
+        grown = CodexParser(store)
+        grown.list_sessions()  # fills the memo
+        rows_after = sorted((m.session_id, m.title) for m in grown.list_sessions())
+        assert len(rows_after) == len(rows_memo) + 1, (
+            "a rollout added after the memo reuses stale rows"
+        )
+    finally:
+        Path.stat = real_stat
+        CodexParser._rollouts = orig_rollouts

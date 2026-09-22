@@ -1890,6 +1890,64 @@ arms differed by cache state as well as by the facts, and the measured gap under
 revert collapsed from 3.3× to 108-vs-96 — still red, but by an accident of order
 rather than by a margin.
 
+### Round 52 — every session asked the codex store to re-walk itself
+
+Round 51's attribution left one store holding **69 % of what remained**: 45,540 of
+the 65,746 `os.stat` calls in `codex._rollouts` and `_header_payload`. The shape was
+a quadratic, not a missing cache: `_session_files` filters the rollout list down to
+one thread, and the list endpoint calls it **once per session** — plus
+`peek_status` and `peek_needs_reply` call it again per row. Each call rebuilt the
+list: 110 files walked, each stat'd for the header cache key and again for its
+mtime. 103 sessions × 110 files × 2 = the measured storm. On a cold store that is
+also 182,000 rows parsed, which is why this round's parse-volume number moved so
+much and is not quoted as an A/B (see below).
+
+`_rollouts` is now memoised against **the file list it was built from**, not against
+the instance: a rollout that appears, disappears or is renamed changes that key and
+re-derives, so `load()` of a session created one second ago cannot be answered from
+a stale list. A file merely *appended to* leaves the key — and can only change that
+entry's own mtime, which the header cache already versions, while the list this
+feeds is served behind a 20 s cache regardless.
+
+| Steady rebuild, same instrument | Round 50 start | now |
+|---|---|---|
+| wall clock | 11.29 s | **3.48 s** |
+| distinct files opened through the reader | 4,599 | **12** |
+| `os.stat` calls (attributed instrument; see the note below) | 114,728 | **15,556** |
+| codex `list_sessions()` | 32 ms cold / — | 32 ms first, **3 ms** repeat |
+
+The stat column is not a direct read of the counter: the tracer sees one call twice,
+once at `pathlib.Path.stat` and once at the `os.stat` it reaches, so both sides of
+that column are the raw tally divided by two (31,112 raw now, 229,456 at the start).
+The halving is calibrated against cProfile, which reports the primitive
+`nt.stat` directly: 114,727 calls there against 114,728 from this instrument on the
+same build.
+
+
+Rows JSON-parsed is deliberately absent: the same instrument read 130,830 rows in
+one round's run and 5,381 in this one, and the difference is mostly what the store
+was writing at the time (a live IDE session invalidates peeks by the second), so it
+is not a clean before/after and does not belong in a table.
+
+What the stat storm was made of is now: `_family_of_path`'s per-session
+`Path.resolve()` (2,320), `dsh`'s own listing (1,432), and `_tail_rows` (1,160) —
+the last of those being the per-row "needs an answer" probes, which re-ask because
+the answer is supposed to be current.
+
+`tests/test_codex_aggregation.py::test_a_rebuild_derives_the_rollout_list_once_per_file_list`
+replays the shape the endpoint uses (list, then both probes per row) twice — with
+the memo and with it defeated — on a 6-file/3-thread store: the rows and probe
+answers must be equal, and the cost must not scale with sessions
+(`assert with_memo <= 4 * len(files)`). Mutation: neutering the key comparison makes
+it red at `156 stat calls with the memo against 156 without it`. Against the live
+store, the same A/B over **all 103 sessions** — 8 listed fields each plus both probe
+answers — came back identical.
+
+The test's first draft measured `list_sessions()` alone and passed while proving
+nothing: the listing derives the rollout list once anyway, and it is the per-row
+probes that re-enter it. That is the same mistake shape as Round 51's warm-arm
+comparison — an instrument that measures a cheap neighbour of the thing it names.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
