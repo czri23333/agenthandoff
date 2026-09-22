@@ -181,6 +181,16 @@ _FRAG_HEAD_CACHE: dict[tuple[str, float, int], bool] = {}
 # proof is checked with one stat per remembered text, never by re-reading them.
 _PROVEN_ABSORBED_TEXTS: dict[str, dict] = {}
 
+# store -> {path: ((mtime, size), the fragment texts this version of the file was
+# read for and does not contain)}. `proven` above remembers what a scan *found*;
+# this remembers what it did not, which is the half that a live store pays for:
+# a turn the store genuinely does not carry is proven absent only by reading up
+# to the scan's byte budget, and while another session is being written that
+# budget is re-spent on every 20 s rebuild - 50,000 JSON rows of it on this
+# machine's qoder store, for a dozen fragments whose answer never changes
+# (spec Round 55).
+_ABSORB_ABSENT_TEXTS: dict[str, dict] = {}
+
 # ~/.qoder-cn (and ~/.qoder) is SHARED by the whole qoder family: the IDE's own
 # chats live under <project>/transcript/ or in plain <project> dirs, while
 # qoderwake team-groups/workers and qoderwork workspaces each create top-level
@@ -2510,7 +2520,12 @@ class QodercnIdeParser(JsonlSessionParser):
         the scan proves is remembered together with the version of the file that
         proved it, so the next scan only answers for fragments whose proof is
         missing: a proof that lapsed - the session that carried it was rewritten
-        or deleted - is re-derived rather than trusted.
+        or deleted - is re-derived rather than trusted. What the scan also
+        remembers, per file version, is the list of texts it did *not* find, so a
+        store that is being appended to does not re-read the files whose answer
+        cannot have changed; the byte budget is still spent on them, which keeps
+        the set of files a scan consults - and so what it can absorb - exactly
+        what it was before.
         """
         frag_metas = [m for m in metas if m.session_id in self._frag_ids]
         if not frag_metas:
@@ -2544,6 +2559,7 @@ class QodercnIdeParser(JsonlSessionParser):
             if txt:
                 frag_texts[m.session_id] = txt
         proven = _PROVEN_ABSORBED_TEXTS.setdefault(cache_key, {})
+        absent = _ABSORB_ABSENT_TEXTS.setdefault(cache_key, {})
         live: dict[str, tuple] = {}
         for txt, proof in proven.items():
             try:
@@ -2567,6 +2583,16 @@ class QodercnIdeParser(JsonlSessionParser):
                 if version is None:  # unreadable now: it cannot prove anything
                     continue
                 scanned += version[1]
+                seen = absent.get(str(path))
+                if seen is not None and seen[0] == version:
+                    # Read once, answered forever (until this file's version
+                    # moves): these texts are not in it. Skipping the re-read is
+                    # the whole point of the record - the byte budget above is
+                    # still spent, so the set of files this scan consults - and
+                    # therefore what it can prove - is the same as when every
+                    # file was read every time.
+                    wanted.difference_update(seen[1])
+                    continue
                 for row in read_jsonl(path):
                     if row.get("type") != "user":
                         continue
@@ -2580,6 +2606,14 @@ class QodercnIdeParser(JsonlSessionParser):
                         live[text.strip()] = proven[text.strip()]
                         if not wanted:
                             break
+                if wanted:
+                    # Every text still standing was looked for in this file and
+                    # not found: it is absent from *this version* of it. A scan
+                    # that proved its last text mid-file records nothing, since
+                    # it only read a prefix.
+                    absent[str(path)] = (version, frozenset(wanted))
+                if len(absent) > 4096:  # a long-lived process, a growing store
+                    absent.clear()
             if len(proven) > 4096:  # a long-lived process, a growing store
                 proven.clear()
         absorbed = {sid for sid, txt in frag_texts.items() if txt in live}

@@ -920,6 +920,7 @@ def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path
         "_FRAG_HEAD_CACHE",
         "_QODER_ABSORB_CACHE",
         "_PROVEN_ABSORBED_TEXTS",
+        "_ABSORB_ABSENT_TEXTS",
     ):
         getattr(jf, name).clear()
 
@@ -1021,6 +1022,141 @@ def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path
             "_FRAG_HEAD_CACHE",
             "_QODER_ABSORB_CACHE",
             "_PROVEN_ABSORBED_TEXTS",
+            "_ABSORB_ABSENT_TEXTS",
+        ):
+            getattr(jf, name).clear()
+
+
+def test_a_file_that_did_not_answer_once_does_not_have_to_answer_again(tmp_path):
+    """The absorb scan remembers what a file version did *not* contain.
+
+    Proving a fragment is redundant means finding its text inside a real
+    session, so a store full of fragments whose text lives nowhere costs a full
+    read of the newest files - and on a machine with a live session, that price
+    is re-paid by every 20 s rebuild, because the store signature the scan's own
+    cache keys on moves constantly. Measured on this machine's qoder store:
+    50,912 JSON rows parsed per rebuild to prove that 1 of 1 fragments is not
+    absorbed - an answer that cannot change while the files do not (spec Round 55).
+
+    The record is of what a scan did not find, so the two directions it could go
+    wrong in are both pinned here: a file that has not moved must not be re-read,
+    and a file that *has* moved must be re-read and believed again - including
+    when the new content is the proof the old content lacked, which is the case
+    where a stale negative would silently keep hiding a conversation... and the
+    case where it would wrongly surface a duplicate. Both answers are checked,
+    not just the read counts, because a scan that stops consulting a file also
+    stops being able to absorb through it.
+    """
+    import json
+    import time
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--w"
+    proj.mkdir(parents=True)
+    for name in (
+        "_PEEK_CACHE",
+        "_ID_CACHE",
+        "_FRAG_HEAD_CACHE",
+        "_QODER_ABSORB_CACHE",
+        "_PROVEN_ABSORBED_TEXTS",
+        "_ABSORB_ABSENT_TEXTS",
+    ):
+        getattr(jf, name).clear()
+
+    def row(sid: str, minute: int, text: str, kind: str = "user") -> dict:
+        return {
+            "type": "session_meta" if kind == "meta" else kind,
+            "sessionId": sid,
+            "timestamp": f"2026-09-20T10:{minute:02d}:00Z",
+            "cwd": "C:/w",
+            **(
+                {"data": {"content": {"session_type": "add_user_message"}}}
+                if kind == "meta"
+                else {"message": {"role": "user", "content": text}}
+            ),
+        }
+
+    def write(name: str, rows: list[dict]) -> Path:
+        path = proj / f"{name}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    # A fragment nothing carries: the scan must read every real session to learn
+    # that, which is the cost the record exists to stop paying twice.
+    write(
+        "frag-lost",
+        [row("frag-lost", 1, "", "meta"), row("frag-lost", 1, "a turn nowhere else")],
+    )
+    # The session that is written while the dashboard polls: its version moves
+    # between passes, so the store signature moves with it.
+    live = write(
+        "task-live",
+        [row("task-live", 2, "first question"), row("task-live", 2, "answer", "assistant")],
+    )
+    for i in range(12):
+        write(f"task-{i:02d}", [row(f"task-{i:02d}", 10 + i, f"unrelated {i} and then some")])
+
+    real_read = jf.read_jsonl
+    reads = {"paths": []}
+
+    def counted(path, *a, **kw):
+        reads["paths"].append(Path(path).name)
+        return real_read(path, *a, **kw)
+
+    jf.read_jsonl = counted
+    try:
+        first = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        cold = sorted(set(reads["paths"]))
+        assert "frag-lost" in first, "a fragment nothing carries was swallowed anyway"
+        assert "task-00.jsonl" in cold, (
+            f"the pass that fills the record did not read the file the next pass "
+            f"is supposed to skip; it read only {cold}"
+        )
+
+        reads["paths"] = []
+        time.sleep(0.02)
+        with open(live, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row("task-live", 3, "an answer, then a follow-up")) + "\n")
+        second = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        warm = sorted(set(reads["paths"]))
+        assert second == first, f"a store that only grew changed the answer: {second ^ first}"
+        assert "task-00.jsonl" not in warm, (
+            f"an unchanged file was re-read for the same answer; the pass read {warm}"
+        )
+        assert "task-live.jsonl" in warm, "the file that moved was not re-read"
+
+        # The proof arrives in a file the scan had already ruled out. A negative
+        # that outlived the file version would leave this turn unabsorbed - one
+        # conversation shown twice - so the version must be believed, not the
+        # memory.
+        time.sleep(0.02)
+        with open(proj / "task-00.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row("task-00", 4, "a turn nowhere else")) + "\n")
+        reads["paths"] = []
+        third = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        assert "frag-lost" not in third, (
+            "the text arrived in a file the scan had ruled out, and the fragment "
+            f"still shows; that pass read {sorted(set(reads['paths']))}"
+        )
+
+        # And leaving again: the same demand from the other direction.
+        time.sleep(0.02)
+        (proj / "task-00.jsonl").write_text(
+            json.dumps(row("task-00", 4, "unrelated 0 and then some twice over")) + "\n",
+            encoding="utf-8",
+        )
+        fourth = {m.session_id for m in jf.QodercnIdeParser(tmp_path / ".qoder-cn").list_sessions()}
+        assert "frag-lost" in fourth, "the fragment stayed hidden after its proof left"
+    finally:
+        jf.read_jsonl = real_read
+        for name in (
+            "_PEEK_CACHE",
+            "_ID_CACHE",
+            "_FRAG_HEAD_CACHE",
+            "_QODER_ABSORB_CACHE",
+            "_PROVEN_ABSORBED_TEXTS",
+            "_ABSORB_ABSENT_TEXTS",
         ):
             getattr(jf, name).clear()
 
@@ -1160,3 +1296,101 @@ def test_a_listing_pass_carries_the_versions_it_already_read(tmp_path):
         Path.stat = real_stat
         for name in ("_PEEK_CACHE", "_ID_CACHE", "_FRAG_HEAD_CACHE", "_QODER_ABSORB_CACHE"):
             getattr(jf, name).clear()
+
+
+def test_one_rebuild_walks_a_store_once_not_once_per_session(tmp_path):
+    """A discovery pass is the boundary a file-list cache can key on.
+
+    The list endpoint rebuilds by listing a store and then peeking every session
+    in it, and Codex answered "where are the transcripts" from the OS every time
+    -- 207 recursive walks of its store per rebuild, which measured as much as
+    the parsing the rollout memo was there to skip (spec Round 52, counted again
+    in Round 55: the memo's key is the very thing it caches).
+
+    Three claims, because a cache with a boundary can fail on either side of it:
+    inside a pass the store is walked once; outside one nothing is remembered,
+    so a caller that never opens a window keeps the old per-question answer;
+    and a *new* pass re-derives, which is what lets a session created while the
+    cockpit was idle appear on the next poll rather than never.
+    """
+    import json
+
+    from agent_handoff.parsers.base import discovery_pass
+
+    root = tmp_path / "codex" / "sessions"
+    day = root / "2026" / "09" / "20"
+    day.mkdir(parents=True)
+
+    def session(i: int) -> str:
+        sid = f"ses-{i:02d}"
+        rows = [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "session_id": sid,
+                    "id": sid,
+                    "timestamp": f"2026-09-20T09:{i:02d}:00Z",
+                    "cwd": "C:/w",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": f"ask {i}"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "ok"}],
+                },
+            },
+        ]
+        (day / f"rollout-2026-09-20T09-{i:02d}-00-{sid}.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        return sid
+
+    for i in range(6):
+        session(i)
+    p = CodexParser(root)
+    ids = sorted(m.session_id for m in p.list_sessions())
+    assert len(ids) == 6, f"the fixture does not list six sessions: {ids}"
+
+    walks: list[int] = []
+    real_walk = p._walk_files
+    p._walk_files = lambda: (walks.append(1), real_walk())[1]  # count, then walk
+
+    def peek_all() -> None:
+        for sid in ids:
+            p.peek_status(sid)
+            p.peek_needs_reply(sid)
+
+    with discovery_pass():
+        walks.clear()
+        peek_all()
+        inside = len(walks)
+    walks.clear()
+    peek_all()
+    outside = len(walks)
+
+    assert inside == 1, f"a pass of {len(ids)} sessions walked the store {inside} times"
+    assert outside == len(ids) * 2, (
+        f"outside a pass the answer went stale: {outside} walks for "
+        f"{len(ids) * 2} peeks -- a caller that opens no window must not inherit one"
+    )
+
+    # A session created while the cockpit sat idle must appear on the next pass,
+    # not be hidden behind the list the previous one built.
+    ids.append(session(7))
+    with discovery_pass():
+        walks.clear()
+        peek_all()
+        rewalked = len(walks)
+    fresh = sorted(m.session_id for m in p.list_sessions())
+    assert rewalked == 1, f"a second pass did not re-derive the file list ({rewalked} walks)"
+    assert "ses-07" in fresh, f"the new session never reached the store's file list: {fresh}"

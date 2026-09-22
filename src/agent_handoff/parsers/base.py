@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import itertools
 import json
 import re
 from abc import ABC, abstractmethod
@@ -337,6 +340,39 @@ def is_injected(text: str) -> bool:
     """
     head = text.lstrip()[:80]
     return any(head.startswith(m) for m in INJECTED_TURN_PREFIXES)
+
+
+_PASS_IDS = itertools.count(1)
+_CURRENT_PASS: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "ah_discovery_pass", default=0
+)
+
+
+@contextlib.contextmanager
+def discovery_pass():
+    """Open a window in which a store is walked once, not once per session.
+
+    A cockpit rebuild lists every session and then peeks each one, and both
+    halves begin by asking where the transcripts are. Codex answered that with a
+    fresh recursive walk per session - 207 walks of its store per rebuild, which
+    cost as much as the work the walk's own memo was guarding (spec Round 52,
+    measured again in Round 55). The memo cannot key on the file list, because
+    the file list *is* the walk, so it needs a boundary that is not derived from
+    the answer: this window, closed by the caller that opens it.
+
+    Outside any window nothing is remembered. A pass token is unique per pass,
+    so a value recorded in one can never be honoured by the next.
+    """
+    token = _CURRENT_PASS.set(next(_PASS_IDS))
+    try:
+        yield
+    finally:
+        _CURRENT_PASS.reset(token)
+
+
+def current_pass() -> int:
+    """This thread's pass token, or 0 when no window is open."""
+    return _CURRENT_PASS.get()
 
 
 def read_jsonl(path: Path, limit: int | None = None) -> list[dict]:

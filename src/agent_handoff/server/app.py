@@ -44,6 +44,7 @@ from agent_handoff.exchange import (
 )
 from agent_handoff.locations import discover
 from agent_handoff.parsers import all_parsers
+from agent_handoff.parsers.base import discovery_pass as ah_discovery_pass
 from agent_handoff.render import render_markdown
 from agent_handoff.resume import render_brief, render_full_brief
 from agent_handoff.summarize import build_full_transcript, summarize
@@ -438,6 +439,17 @@ def sessions(
 
 
 def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
+    """One discovery pass over every store: the whole build sees one file list.
+
+    The build lists each store and then peeks each session it listed, and a
+    parser that answers "where are the transcripts" from the OS does it once per
+    question. The pass is the boundary that question cannot derive from.
+    """
+    with ah_discovery_pass():
+        return _collect_session_roots(cli, cwd, q)
+
+
+def _collect_session_roots(cli: str | None, cwd: str | None, q: str | None) -> list:
     out = []
     for p in all_parsers():
         if cli and p.cli != cli:

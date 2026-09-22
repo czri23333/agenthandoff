@@ -53,7 +53,7 @@ from agent_handoff.model import (
     SessionMeta,
     ts_to_iso,
 )
-from agent_handoff.parsers.base import Parser, as_text_blocks, read_jsonl
+from agent_handoff.parsers.base import Parser, as_text_blocks, current_pass, read_jsonl
 
 # A rollout filename carries the thread's UUID first; a continuation file
 # appends a second one: ``rollout-<ts>-<thread-id>_<continuation>.jsonl``.
@@ -130,6 +130,9 @@ class CodexParser(Parser):
         self._usage_cache: dict[str, dict] = {}
         # (the file list, the rollouts derived from it) -- see `_rollouts`.
         self._rollout_cache: tuple[list[Path], list[_Rollout]] | None = None
+        # (the pass token that filled it, the walk's answer) -- see `_files`.
+        self._files_pass: int = 0
+        self._files_list: list[Path] = []
 
     def available(self) -> bool:
         return self.root.is_dir()
@@ -162,6 +165,24 @@ class CodexParser(Parser):
         return dict(self._usage_for(session_id).get("last_tokens") or {})
 
     def _files(self) -> list[Path]:
+        """Every rollout file the store holds, walked once per discovery pass.
+
+        `_rollouts` memoises against this list, so the list cannot memoise
+        against itself: asking the OS *is* the walk. Each of the store's 103
+        sessions made a rebuild walk it again -- 207 recursive walks, which
+        measured as much as the parsing the memo was there to skip (spec
+        Round 52, counted again in Round 55). The boundary this cache needs
+        therefore cannot be derived from its own answer; `base.discovery_pass()`
+        is the one the server opens around a rebuild.
+        """
+        tok = current_pass()
+        if tok and tok == self._files_pass:
+            return self._files_list
+        out = self._walk_files()
+        self._files_pass, self._files_list = tok, out
+        return out
+
+    def _walk_files(self) -> list[Path]:
         if not self.available():
             return []
         out = list(self.root.rglob("rollout-*.jsonl"))

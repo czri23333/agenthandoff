@@ -558,6 +558,32 @@ sampled away.
       the same failure shape as everything else in this file: a check whose
       producer cannot see the thing it names passes green while saying nothing.
 
+37. **Which fragments the list absorbs moves within minutes, without a code
+    change.** The absorb rule proves "some real session contains this exact user
+    text", searched newest-first under a 60 MB byte budget, so membership depends
+    on which carrier files happen to rank inside the budget *right now*. Measured
+    on `qodercn-ide`: 2 fragments absorbed at 04:01 and 0 at 04:31, with the
+    pre-Round-55 algorithm in the same process agreeing with the new one both
+    times — the quest-task transcripts that carry those texts get rewritten, which
+    re-ranks them. An exhaustive search with no budget (`r55_truth.py`, all 132
+    files, 105 MB) finds 1 carrier for a text the budgeted scan cannot reach, and
+    **37** carriers for the fragment whose text is `继续`. Consequences: the row
+    count a user sees for one chat is not reproducible from a transcript alone,
+    and a common short phrase absorbed against an unrelated session hides a
+    conversation whose text is "visible" only in a chat it was never part of.
+    The rule should key on where the vendor writes the echo — the same project
+    directory measured as the carrier location for every absorbed fragment here —
+    rather than on text identity across the store.
+
+38. **The discovery-pass window is opened by one caller.** `base.discovery_pass()`
+    freezes a store's file list for its duration, and only
+    `server/app.py::_build_session_roots` opens one. Every other path — `handoff
+    list`, the evidence and conformance tools, the detail endpoint — walks per
+    question exactly as before, which is correct but still costs what it always
+    cost. Two rebuilds in one process also each walk once, so a caller that loops
+    rebuilds itself pays per rebuild; the pass is a per-window coherence boundary,
+    not a cache with a lifetime.
+
 ## How to check any of this yourself
 
 ```bash

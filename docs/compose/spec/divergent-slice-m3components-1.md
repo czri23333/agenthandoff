@@ -2130,6 +2130,78 @@ with the sentinel, so a session a user named
 now, so it is at least countable, but the rule should key off a fact about the
 turns. Recorded in `docs/limitations.md`.
 
+### Round 55 — a rebuild re-read the files whose answer could not have changed
+
+Round 50 bought the absorb scan a proof-per-text cache and Round 51 bought the
+listing a carried version map; this round found what those two left unpaid. The
+instrument is `D:/tmp-agenthandoff/r55_base.py` (every jsonl open, every row
+parsed, every `os.stat` and every recursive walk, credited to the innermost
+instrumented function so a parent cannot repeat its child's cost), run over
+this machine's 20 available stores three times warm because one reading is not a
+trend.
+
+**The scan's cost is not the matches, it is the misses.** Of the 13
+`add_user_message` fragments in the two qoder stores, 0 were provable inside the
+scan's 60 MB newest-first budget — and an unprovable fragment keeps
+`wanted` non-empty, so the budget is re-spent by every rebuild whose store
+signature moved, which is every rebuild while any session is live. Measured on
+one listing state: **27,491 rows parsed** (`qodercn-ide`) and **50,941 rows**
+(`qoder-ide`) per rebuild, 0.29 s and 0.75 s of self time, to answer a question
+whose answer cannot change while the files do not. The whole-store warm total
+swung between **5,906 and 108,303 rows** across three runs, which is the same
+mechanism showing up as variance.
+
+The record added is a *negative*: per file version, the fragment texts that this
+file was read for and does not contain. The byte budget is still spent on a
+consulted file whether or not it is re-read, which is what keeps the set of files
+a scan consults — and therefore everything it can prove — exactly what it was.
+A scan that proved its last text partway through a file records nothing, because
+it only read a prefix; a file whose `(mtime, size)` moved is re-read and believed
+again, including when the new content is the proof the old content lacked.
+
+A/B in one process against the same listing state (`r55_verify.py`), reference
+arm = the algorithm as it was: rows **27,491 → 13** and **50,941 → 2** warm, with
+the absorbed sets identical in both stores and the listed ids identical across
+passes. That both stores currently prove *nothing* is the finding, not the
+sample: the positive direction is pinned by the fixture test, which asserts the
+four outcomes a negative record could get wrong — still absorbed, still listed,
+absorbed when the text arrives in a file already ruled out, listed again when it
+leaves.
+
+**A cache keyed on the walk it caches.** `_rollouts` memoises against the file
+list it was built from, which is sound, and obtains that key by calling
+`_files()` — a recursive walk. 103 Codex sessions × 2 peeks = **207 walks of the
+store per rebuild**, 0.50 s of self time for a memo whose whole purpose was to
+skip work. The key cannot be derived from the answer, so the boundary has to come
+from the caller: `base.discovery_pass()` is a window the server opens around a
+rebuild, and `_files()` remembers its walk only inside the window that produced
+it. Inside: 1 walk. Outside: the old per-question answer, because a caller that
+opens no window must not inherit one — that asymmetry is the second assertion of
+the new test, and the third is that a *new* pass re-derives, so a session created
+while the cockpit was idle reaches the next poll rather than never. Whole-rebuild
+walks: **214 → 8**; `os.stat`: 16,136 → 15,518; opens unchanged at 2,446 (this
+round adds none); warm seconds 3.34/3.58/3.87 → 3.05/3.07 under an instrument
+that inflates both arms alike, so the counts are the claim.
+
+Three mutations, three red tests: disable the record (an unchanged file is
+re-read), trust the record without checking the version (a fragment stays hidden
+after its proof arrives in a file the scan had ruled out), and honour the memo
+outside a pass (the walk count goes to 0 inside the pass, i.e. the answer goes
+stale for a caller that never asked for a window). `conformance --check` matches
+all 14 baselines; `evidence --check` clean.
+
+**What this round found on the way and did not fix.** The absorb rule proves
+"some real session contains this exact user text" within a byte budget over an
+mtime ordering, so on this machine *which* fragments are absorbed moves within
+minutes with no code change (2 absorbed at 04:01, 0 at 04:31 — the quest-task
+transcripts that carry them get rewritten, which re-ranks them in the budget).
+And one fragment's text — `继续` — lives in **37** real session files: an
+absorption on that text hides a turn echo by pointing at a conversation that may
+have nothing to do with it. Both are recorded in `docs/limitations.md`, and both
+argue for a rule that keys on where the vendor writes the echo rather than on
+text identity.
+
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49
