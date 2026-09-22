@@ -621,8 +621,10 @@ sampled away.
     `codebuddy`'s `5771fa81` produced this round's only known contradiction. The
     guard catches that instance; it cannot catch a store that both appends out of
     order and keeps its newest turn beyond 64 KB. `scripts/probe_audit.py` is the
-    check that would notice: 0 contradictions over 3,350 sessions today, sampled
-    40 per store where the store is larger.
+    check that would notice: `scripts/probe_audit.py` reports 0 contradictions for
+    either probe over 3,352 sessions today, sampled 40 per store where the store is
+    larger — and inverting the probe on purpose makes it report 37 and exit 1, so
+    the 0 is reachable-but-not-hit, not unreachable.
 
 41. **The probe reads the last turn in the window; the page reads the newest turn.**
     `load()` sorts a session's messages by their recorded timestamp when every one

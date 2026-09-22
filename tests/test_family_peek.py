@@ -56,10 +56,11 @@ def _qoder(tmp_path: Path, sessions: dict[str, list[dict]]) -> QodercnIdeParser:
 def test_a_turn_deeper_than_the_old_window_is_still_answered(tmp_path, monkeypatch):
     """A qoder tail is 30-100 KB of non-dialogue, so the turn moved out of reach.
 
-    935 of the 936 rows this machine's ``qoder-ide`` store refused to answer had
-    their newest turn on disk: attachments and history snapshots between 16 KB and
-    EOF pushed it above the window the probe read, and the column said "unknown"
-    about a conversation that was waiting -- or not -- in plain sight.
+    This machine's ``qoder-ide`` store answered 1,350 of its 2,287 rows with the
+    old window and answers 2,279 with this one: the refused rows had their newest
+    turn on disk all along — attachments and history snapshots between 16 KB and
+    EOF pushed it above what the probe read, and the column said "unknown" about a
+    conversation that was waiting, or not waiting, in plain sight.
     """
     p = _qoder(
         tmp_path,
