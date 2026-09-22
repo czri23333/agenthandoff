@@ -429,67 +429,24 @@ def test_the_window_is_walked_in_the_order_the_page_sorts_by(tmp_path):
     assert _page_ends_on(p, "s1") is True
 
 
-def test_the_window_depth_is_not_a_function_of_session_length(tmp_path):
+def test_the_window_depth_is_not_a_function_of_session_length(tmp_path, statement_counter):
     """A 300-row session costs the same bounded read as a 3-row one."""
     long = [("assistant", T0 + i * 1000, [_text(f"回答 {i}")]) for i in range(300)]
     p = _zcode(tmp_path, {"short": [("user", T0, [_text("问题")])], "long": long})
-    with _statements(ZcodeParser) as counter:
+    with statement_counter(ZcodeParser) as counter:
         counter.reset()
         p.peek_needs_reply("short")
-        short = counter.total
+        short = counter.statements
         counter.reset()
         p.peek_needs_reply("long")
-        length = counter.total
+        length = counter.statements
     assert (short, length) == (2, 2), "the probe's cost grew with the transcript"
-
-
-class _statements:
-    """Count the SQL statements a probe sends, for the cost assertions below."""
-
-    def __init__(self, cls):
-        self.cls = cls
-        self.total = 0
-        self._real = cls._connect
-
-    def __enter__(self):
-        outer = self
-
-        class Prox:
-            def __init__(self, con):
-                self._con = con
-
-            def execute(self, sql, *a, **kw):
-                outer.total += 1
-                return self._con.execute(sql, *a, **kw)
-
-            def __enter__(self):
-                self._con.__enter__()
-                return self
-
-            def __exit__(self, *exc):
-                return self._con.__exit__(*exc)
-
-            def __getattr__(self, name):
-                return getattr(self._con, name)
-
-        def connect(self):
-            return Prox(outer._real(self))
-
-        self.cls._connect = connect
-        return self
-
-    def __exit__(self, *exc):
-        self.cls._connect = self._real
-        return False
-
-    def reset(self):
-        self.total = 0
 
 
 # -- the memo ---------------------------------------------------------------
 
 
-def test_a_warm_pass_asks_the_store_nothing(tmp_path):
+def test_a_warm_pass_asks_the_store_nothing(tmp_path, statement_counter):
     """30-second rebuilds against a store that has not moved re-derive nothing.
 
     A SQLite store is one file for every conversation, so re-running the probe
@@ -500,9 +457,9 @@ def test_a_warm_pass_asks_the_store_nothing(tmp_path):
         {"s1": [("user", T0, [_text("还在等吗")]), ("assistant", T0 + 1000, [_text("在。")])]},
     )
     assert p.peek_needs_reply("s1") is False
-    with _statements(ZcodeParser) as counter:
+    with statement_counter(ZcodeParser) as counter:
         assert ZcodeParser(p.db_path).peek_needs_reply("s1") is False
-    assert counter.total == 0, f"a warm pass issued {counter.total} statements"
+    assert counter.statements == 0, f"a warm pass issued {counter.statements} statements"
 
 
 def test_a_changed_store_re_derives_instead_of_repeating_itself(tmp_path):
@@ -526,7 +483,7 @@ def test_a_changed_store_re_derives_instead_of_repeating_itself(tmp_path):
     assert ZcodeParser(p.db_path).peek_needs_reply("s1") is True
 
 
-def test_the_wal_sidecar_is_part_of_the_version(tmp_path):
+def test_the_wal_sidecar_is_part_of_the_version(tmp_path, statement_counter):
     """A commit that only reaches the WAL still counts as new content.
 
     Both stores run in WAL mode, so the db file is the least lively of the two:
@@ -538,13 +495,13 @@ def test_the_wal_sidecar_is_part_of_the_version(tmp_path):
         {"s1": [("user", T0, [_text("问题")]), ("assistant", T0 + 1000, [_text("答")])]},
     )
     assert p.peek_needs_reply("s1") is False
-    with _statements(ZcodeParser) as counter:
+    with statement_counter(ZcodeParser) as counter:
         assert ZcodeParser(p.db_path).peek_needs_reply("s1") is False
-    assert counter.total == 0
+    assert counter.statements == 0
     (tmp_path / "db.sqlite-wal").write_bytes(b"\x00" * 64)
-    with _statements(ZcodeParser) as after:
+    with statement_counter(ZcodeParser) as after:
         assert ZcodeParser(p.db_path).peek_needs_reply("s1") is False
-    assert after.total > 0, "a WAL the version key cannot see is a store that never changes"
+    assert after.statements > 0, "a WAL the version key cannot see is a store that never changes"
     assert pb.db_version(p.db_path) != pb.db_version(tmp_path / "missing.sqlite")
 
 

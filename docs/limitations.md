@@ -596,11 +596,12 @@ sampled away.
     rebuilds itself pays per rebuild; the pass is a per-window coherence boundary,
     not a cache with a lifetime.
 
-39. **`Needs input` still says nothing for 207 listed rows.** The 745 rows Round 56
+39. **`Needs input` still says nothing for 205 listed rows.** The 745 rows Round 56
     counted without a probe are down to 65: `zcode` (458 rows) and `opencode` (222)
     got their probes in Round 58, and both now answer every row the store lists —
     458/458 and 222/222 agreeing with their own detail page (全量, not sampled).
-    What is left, measured on this machine 2026-09-22:
+    The other 140 are the JSONL family's own declines. What is left, measured on
+    this machine 2026-09-22:
     * **No probe yet** — `dsh` 51 rows, `cherrystudio` 10, `qoderwork-app` 1,
       `qoderwork-cn-app` 2, `kimi` 1. Each is a different read: `dsh` stores zstd
       rolls, so there is no seekable tail and a probe costs a full decompress of
@@ -611,7 +612,7 @@ sampled away.
       change counter (see Round 58's note in the spec); `kimi`'s `wire.jsonl`
       holds no dialogue rows on this machine today, so `unknown` is the honest
       answer even with a probe written.
-    * **142 rows inside the JSONL family**, now split by mechanism rather than
+    * **140 rows inside the JSONL family**, now split by mechanism rather than
       left as one number: **126 of them are the hidden tool-loop transcripts**
       item 36 counts (93 `qodercn-ide`, 14 `qoder-ide`, 19 `codebuddy`) — the
       same rows, whose audit reads `0 msgs, none a user turn`, so `unknown` is
@@ -619,13 +620,23 @@ sampled away.
       them; **14 are the listed declines Round 56 measured** (6 turns above the
       64 KB window, 8 silenced by the date guard — re-counted here over all four
       family stores: `codebuddy` 3, `qoder-ide` 8, `qodercn-ide` 2, `workbuddy`
-      1); and **2 are `qoderwake-cn` rows whose transcripts the shared store does
-      not index at list time**, so the delegated probe has no address to read
-      while `load()` — which falls back to a scan — still finds 11 messages and
-      ends on a user turn. Those 2 are the only ones in the 142 that are silent
-      about something the page can answer, and the fix is the one Round 56
-      built for the walking listing: record the resolved path during the pass so
-      the probe never has to scan per row.
+      1).
+    * **Closed in Round 59, and it was not what this note said.** Two of the
+      former 142 were `qoderwake-cn` rows attributed to "transcripts the shared
+      store does not index at list time", with the fix already designed: record
+      the resolved path during the listing pass so the probe never scans per row.
+      Both halves were wrong. Those rows are not wake transcripts — they are the
+      daemon's **team-group chats**, whose messages sit in the wake store's own
+      `team_group_messages_v3`, which is precisely what `load()` reads for them.
+      The probe had no address to read because there is no file to have, and
+      `load()` did not "fall back to a scan"; it queried SQLite. So Round 59
+      gave the entry a probe of its own store — the conversation table says
+      which ids it owns, the rest still delegate — and all 11 rows the entry
+      lists now answer (全量: 11/11, 0 disagreements with the detail page). What
+      those two rows said is the reason this was worth the detour: both chats
+      end on an unanswered user turn, so the column was silent about the two
+      rows of this store most likely to be waiting for the user. The header's
+      `⚠ 等你回复` now reads 49 where it read 47.
       What that leaves worth doing: the 6 window misses cost 0.5 MB to reach and
       one of them (`codebuddy`'s) sits 14.8 MB above EOF — a second, larger
       window answers 5 of the 6 and the sixth argues for a byte cap rather than a

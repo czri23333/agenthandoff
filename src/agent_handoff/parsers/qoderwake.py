@@ -23,11 +23,44 @@ from pathlib import Path
 
 from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta
-from agent_handoff.parsers.base import Parser
+from agent_handoff.parsers.base import Parser, db_version, probe_memo
 from agent_handoff.parsers.jsonl_family import QodercnIdeParser, _family_of_path
 
 # sender_type -> conversation role
 _ROLE = {"user": "user", "member": "assistant"}
+
+
+def _body_text(payload_json) -> str:
+    """The text a team-chat message carries, exactly as the page reads it.
+
+    `load()` and the needs-input probe ask the same question of the same rows, so
+    the extraction lives in one function: a probe that re-derives its renderer's
+    predicate is a probe that can drift from the page it must agree with (Round
+    58's lesson, applied before it had to be learned twice).
+    """
+    try:
+        p = json.loads(payload_json) if payload_json else {}
+    except (ValueError, TypeError):
+        return ""
+    body = p.get("body") if isinstance(p, dict) else None
+    btext = body.get("text") if isinstance(body, dict) else body
+    return str(btext or "")
+
+
+def _carries_turn(parser: Parser, sender_type, payload_json) -> tuple[str, str] | None:
+    """The role and text of a message that reaches the transcript, else None.
+
+    A message counts when its sender maps to a role and its body carries text
+    that survives cleaning and is not an injected reminder — the page drops the
+    rest, and so must anything that claims to read the page's last word.
+    """
+    role = _ROLE.get(str(sender_type))
+    if role is None:
+        return None
+    text = parser.clean_text(_body_text(payload_json))
+    if not text or parser.is_noise(text):
+        return None
+    return role, text
 
 
 def _norm_ts(value) -> str | None:
@@ -58,6 +91,11 @@ class QoderwakeParser(Parser):
     def __init__(self, root=None) -> None:
         self.root = Path(root) if root else home() / self.store_dirname / "data" / "store"
         self._shared = self._shared_parser()
+        # Per-pass state for the needs-input probe: the store version the
+        # answers were read at, and which session ids are this daemon's own team
+        # chats (as opposed to wake transcripts in the shared qoder store).
+        self._probe_version: tuple | None = None
+        self._team_ids: set[str] | None = None
 
     def _shared_parser(self):
         """The wake-family transcripts inside the shared qoder store."""
@@ -80,8 +118,13 @@ class QoderwakeParser(Parser):
             return []
         return self._shared.list_sessions()
 
+    # Message rows the team-chat probe reads, newest first. A message whose body
+    # is empty or purely injected carries no turn, so the probe walks back to the
+    # one that does — the same rule the detail page applies when it drops rows.
+    _PROBE_ROWS = 50
+
     def peek_needs_reply(self, session_id: str) -> bool | None:
-        """Ask the store that holds the transcript.
+        """Ask whichever store holds this conversation's messages.
 
         Half of this entry's rows are wake transcripts in the shared qoder store,
         and the listing reaches them through `_shared` — which is the parser that
@@ -89,11 +132,55 @@ class QoderwakeParser(Parser):
         delegation this entry answered "unknown" for every one of its own rows
         while its sibling parser was reading the very file (spec Round 56).
 
-        The other half are the daemon's team-group chats, whose messages live in
-        SQLite; no transcript is read for them and the answer stays unknown
-        rather than being guessed from the conversation row's timestamp.
+        The other half are the daemon's team-group chats: their messages live in
+        this SQLite store (`team_group_messages_v3`), and until spec Round 59 this
+        probe had no answer for them at all — measured on this machine, the two
+        conversations it holds both end on an unanswered user turn, so the column
+        was silent about exactly the rows its own detail page could answer. Round
+        58's `probe_memo` carries them now: one bounded query per conversation per
+        store change, and the answer is the newest message that reaches the page,
+        which is what `load()` renders and nothing else.
+
+        A team chat is identified by the conversation table, not by how its id
+        looks: the set is read once per pass, because the alternative is a
+        existence-check query on every row of the listing.
         """
-        return None if self._shared is None else self._shared.peek_needs_reply(session_id)
+        if self._team_ids is None:
+            self._team_ids = self._read_team_ids()
+        if session_id not in self._team_ids:
+            return None if self._shared is None else self._shared.peek_needs_reply(session_id)
+        if self._probe_version is None:
+            self._probe_version = db_version(self._db())
+        return probe_memo(
+            str(self._db()), session_id, self._probe_version, lambda: self._team_needs(session_id)
+        )
+
+    def _read_team_ids(self) -> set[str]:
+        """The conversation ids this daemon owns, or nothing if it cannot be read."""
+        if not self.available():
+            return set()
+        try:
+            with self._connect() as con:
+                rows = con.execute("SELECT id FROM team_group_conversations_v3").fetchall()
+            return {str(r[0]) for r in rows}
+        except sqlite3.Error:
+            return set()
+
+    def _team_needs(self, session_id: str) -> bool | None:
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT sender_type, payload_json FROM team_group_messages_v3"
+                    " WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                    (session_id, self._PROBE_ROWS),
+                ).fetchall()
+        except sqlite3.Error:
+            return None
+        for sender_type, pj in rows:
+            turn = _carries_turn(self, sender_type, pj)
+            if turn is not None:
+                return turn[0] == "user"
+        return None
 
     def hidden_sessions(self) -> list[SessionMeta]:
         """The wake transcripts the shared store dropped, which this entry owns.
@@ -219,21 +306,18 @@ class QoderwakeParser(Parser):
 
         messages: list[Message] = []
         for sender_type, _kind, pj, created_at in mrows:
-            role = _ROLE.get(str(sender_type))
-            if role is None:
+            turn = _carries_turn(self, sender_type, pj)
+            if turn is None:
                 continue
-            try:
-                p = json.loads(pj) if pj else {}
-            except (ValueError, TypeError):
-                continue
-            body = p.get("body")
-            btext = body.get("text") if isinstance(body, dict) else body
-            praw = str(btext or "")
-            text = self.clean_text(praw)
-            if not text or self.is_noise(text):
-                continue
+            role, text = turn
             messages.append(
-                self.msg(role, praw, text=text, at=_norm_ts(created_at), model=convo_model)
+                self.msg(
+                    role,
+                    _body_text(pj),
+                    text=text,
+                    at=_norm_ts(created_at),
+                    model=convo_model,
+                )
             )
 
         return self.build_raw(meta, messages, [], Counter(), Counter())

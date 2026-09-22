@@ -2433,8 +2433,11 @@ children nested under a parent, one variable — the two probes):
 `answered 2,594 → 3,274`, `unknown 887 → 207`, i.e. coverage 74.5% → 94.1%. The
 remaining 207 are named in `docs/limitations.md` item 39: 65 rows in four stores
 whose reads are genuinely different (`dsh`'s zstd rolls, `cherrystudio`'s unindexed
-message table, `kimi`'s dialogue-free wire log), and 142 inside the JSONL family
-whose mechanism split is not measured yet — item 39 says so rather than guessing.
+message table, `kimi`'s dialogue-free wire log), and 142 inside the JSONL family.
+That 142 was measured after this block was first written, and the split is in item
+39: 126 hidden tool-loop transcripts (honest unknown — no user turn exists), 14
+Round 56 declines, and 2 `qoderwake-cn` rows this file attributed to an unindexed
+transcript and which were something else entirely (Round 59).
 
 **Evidence.** 23 tests in `tests/test_sqlite_peek.py`, and a 22-mutation sweep over
 both probes, the role gate, the noise predicate, the spawn tie-break, the window
@@ -2452,6 +2455,103 @@ rebuilt bundle, and `src/agent_handoff/server/static` is tracked — every earli
 frontend round committed its 13 built files beside its source (`faadf3a`,
 `5885fae`). So a checkout of Round 57 still served the old labels. `e58db5c`
 rebuilds and commits them; the served chunk now carries both new branches.
+
+
+### Round 59 — the two wake rows: this file had the wrong cause, and the wrong fix
+
+Item 39 said, in yesterday's words, that 2 of the 142 remaining `unknown` rows were
+"`qoderwake-cn` rows whose transcripts the shared store does not index at list
+time, so the delegated probe has no address to read while `load()` — which falls
+back to a scan — still finds 11 messages and ends on a user turn", and that the fix
+was "the one Round 56 built for the walking listing: record the resolved path
+during the pass". **Every part of that is wrong except the count.** Those two rows
+have no transcript file, so there was no path to record; `load()` does not fall
+back to a scan for them; and the probe was not reading a badly-indexed store — it
+was reading the *wrong store*. The rows are the daemon's **team-group chats**, and
+their messages sit in the wake store's own SQLite tables,
+`team_group_conversations_v3` and `team_group_messages_v3`, which is exactly the
+pair `load()` queries for them. Found by asking the store what it holds rather than
+by reasoning from the delegation code: 2 conversations, 36 messages on this
+machine.
+
+The entry is a hybrid, which is why Round 56's answer looked right. Of its 11
+listed rows, 9 are wake transcripts inside the shared qoder store — for those, the
+delegation Round 56 added is the correct read, and they answer. The other 2 are
+this section's rows, and the delegated probe can only say `unknown` about a
+conversation the shared store never heard of.
+
+**Why silence was expensive on these two rows and not elsewhere.** Both chats end
+on an unanswered user turn — measured against `load()`, and the titles are
+`AI绘画训练项目规划` and `引擎3.1.1全面技术分析`. So the 2 rows of this store most
+likely to be waiting for the user were the only 2 it could not talk about, in the
+one column whose job is to say when to come back. The header's `⚠ 等你回复` chip
+counts roots needing a reply: it reads **49** where the same build without this
+probe reads **47**.
+
+**One predicate, so the page and the probe cannot drift.** Round 58's lesson was
+that a probe must mirror the renderer's text rule rather than invent one; here the
+rule got extracted instead of duplicated — `_carries_turn()` answers "does this
+message reach the transcript, and as which role", and both `load()` and the probe
+call it. That was not a stylistic choice: the mutation sweep started with **2 BAD
+PATCH TARGET** results because the predicate was still written in two places, so
+the drift risk this file keeps warning about was present in the diff being written.
+The store's rows make the rule necessary: a `member` turn with an empty `body`, a
+`system` broadcast (`member_joined`) whose sender maps to no role, a harness
+`<system-reminder>` that survives cleaning and only `is_noise` rejects, and a
+`body` written as a plain string today but as `{"text": …}` in older rows. Each is
+a test, and each is asserted against the page as well as by hand.
+
+**A team chat is one the conversation table lists, not one whose id looks like
+it.** `team_group_session_…` is the prefix today; the set is read once per pass and
+the mutation that swaps the table lookup for a prefix test is caught, as is the one
+that derives the set from the *message* table — which would hand a
+conversation-with-no-messages-back to the shared store, the exact bug this round
+fixed, in a new shape.
+
+**Cost, in counters, with an unindexed scan named.** `team_group_messages_v3` has
+five indexes and none of them leads with `session_id` (they lead with `uid`, then
+group/mission/created), so `EXPLAIN QUERY PLAN` for the window is `SCAN
+team_group_messages_v3` + `USE TEMP B-TREE FOR ORDER BY`. That is affordable
+because Round 58's memo makes it a per-store-change scan rather than a per-poll
+one: measured over the whole entry on the live store, a cold pass is **4 statements
+and 40 rows** for all 11 rows (2 of them answered here for the first time), and a
+warm pass re-derives nothing — only the conversation-id read runs, once per
+listing. The window is 50 rows and the store holds 36, so today the probe sees
+every message; the tests still pin the case where the window holds no turn and the
+column declines instead of guessing.
+
+**What the list page ships now** (same build, same 3,481 rows including children,
+one variable — this probe): `answered 3,274 → 3,276`, `unknown 207 → 205`. The 205
+are item 39's remaining three groups: 65 rows in stores with no probe, 126 hidden
+tool-loop transcripts with no user turn to find, and 14 Round 56 declines.
+
+**Evidence.** 16 tests in `tests/test_qoderwake_peek.py`; agreement with the
+detail page over **all 11 rows the live entry lists** (全量, 0 disagreements), plus
+a built store for the international edition, which holds 0 rows on this machine —
+so that edition's path is proven by a store the test writes, **not** by live data,
+and it stays untested against a real international daemon. A 15-mutation sweep over
+the naive "last row decides" rule, the role gate, both text predicates, the
+string-vs-object body, the window size, the empty-window decline, the tie-break,
+the ordering direction, the memo, the delegation, both ways of recognising a team
+chat, and the locked-store decline: **all caught, with a control arm** that runs
+the unmutated code first — added in the same edit as the fix, because the first
+sweep reported `MISSED 1` for "cleaning is skipped", and the reason was not a
+missing test but a vacuous one: its two candidate rows shared a role, so no
+mutation could change what the assertion saw. That test is now shaped
+member-after-user, which is what makes the difference observable.
+`scripts/probe_audit.py` moves `qoderwake-cn` to `needs: silent=0` with `lying=0`
+across 3,355 sessions; `pytest` 611 green, `scripts/ci_local.py --with-frontend`
+green (10 gates).
+Verified in the running page against the live store: both team-chat rows render
+with the ⚠ badge (`qoderwake-cn 引擎3.1.1全面技术分析 team_gro⎇ feat/product-v7·
+引擎3.1.1 ⚠`), and the 9 `团队工作会话 (QoderWake)` rows beside them — which do have
+answers, `not waiting` — render without it.
+
+**Also this round:** the statement-counting helper that Round 58's tests grew
+locally became `conftest.py`'s `statement_counter` fixture, since the wake tests
+ask the same question (does a warm pass read anything?), and the Round 58 file was
+converted to it — 23 of its tests now share the instrument rather than duplicating
+it.
 
 
 ## [S1] Problem
