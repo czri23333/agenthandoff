@@ -142,9 +142,15 @@ sampled away.
    finds **2,411** calls on the same steady rebuild — 37 from the reader and
    **2,323 from `_tail_rows`**, the per-row probes that read a transcript's end to
    answer "needs an answer" and "how did it end". What the remaining seconds are
-   is attributed in the spec (Round 50): `nt.stat` 123,534 calls / 3.2 s, and the
-   two `qoderwake` entries each re-deriving the shared store's listing because
-   `all_parsers()` builds fresh instances per rebuild.
+   is attributed in the spec (Round 50), and Round 51 cut the syscalls it named:
+   a rebuild's `os.stat` calls went **114,728 → 65,746** by walking the store with
+   `os.scandir` (the directory entry already carries type, mtime and size, so the
+   id peek, the meta peek, the canonical ranking and the fragment scan stopped
+   re-asking) and by resolving each store root once. Answers held fixed: four
+   rebuilds with the facts on and off, 2,491 rows × 12 fields, 0 differing rows.
+   What is left is now 69 % the codex store's own head reads (45,540 stats in
+   `_rollouts`/`_header_payload`), and 2,321 of the 2,405 opens per rebuild are the
+   per-row tail probes answering "needs an answer", which is worth re-asking.
 8. **Narrow screens work, degraded.** A 3-page × 6-width × 2-theme sweep found and
    fixed a header whose controls overlapped below ~700px (you could not change
    page without hitting the theme switch), a session title column squeezed to

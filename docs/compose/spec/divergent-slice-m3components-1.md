@@ -1824,6 +1824,72 @@ comparison, so it never reached the code the test claimed to pin. The case was
 rewritten as "the file still exists, its text is gone" — which is the actual
 claim — and then went red as it should.
 
+### Round 51 — the store's directory entries were read twice: once by the walk, once per question
+
+Round 50 left a named remainder instead of a guess, and the named thing turned out
+to be syscalls rather than reads: a steady rebuild of this machine's 20 stores made
+**114,728 `os.stat` calls** for 2,638 listed rows, and attributed by call site:
+
+| Site | stat calls per rebuild |
+|---|---|
+| `codex._header_payload` | 22,770 |
+| `codex._rollouts` | 22,770 |
+| `_absorbed_fragment_ids` (newest-first order for the scan) | 17,576 |
+| `_group_files.rank` (canonical file tie-break by size) | 13,092 |
+| `_family_of_path` (`Path.resolve()` per session — including the store root, 4,640 times over) | 9,280 |
+| `_peek_id` (cache key) | 8,997 |
+
+Four of those sites ask the *same* question -- what version is this file -- about
+the *same* 4,261 files, in the same pass, and the pass begins with a directory walk
+that was already told the answer.
+
+Two changes, both keeping the walk's answer instead of re-asking:
+
+1. **`_iter_jsonl` walks with `os.scandir`.** `Path.rglob` decides dir-vs-file by
+   stat'ing, and the caller's `is_file()` stat'ed again: 4,263 stats and 0.254 s for
+   the 4,262-file qoder store. The hand-rolled walk is **0.106 s and 0 stats**, and
+   it returns the identical set -- checked against `rglob` on all seven family
+   stores and on the two ways a hand-rolled matcher usually differs from pathlib's
+   (an uppercase `.JSONL`, and a *directory* named `something.jsonl`).
+2. **The walk carries each file's `(mtime, size)`** on the instance
+   (`_dirfacts`, replaced wholesale by every base walk), and `_peek_id`, `_peek`,
+   `_group_files` and the fragment scan read through one `_version()` helper that
+   falls back to `stat()` when the entry is not there. A parser whose `_iter_jsonl`
+   is overridden (the qoderwork mixin) has no facts and behaves exactly as before.
+   Plus: the store root is resolved once per process instead of once per session.
+
+| Steady rebuild | Round 50 | Round 51 |
+|---|---|---|
+| `os.stat` calls | 114,728 | **65,746** |
+| wall clock | 8.26–8.46 s | **6.44 s** |
+| files opened | 2,411 | 2,405 |
+
+The 48,982 saved calls are the four sites above. What remains is now **69 % codex**
+(45,540 calls in `_rollouts`/`_header_payload`, a store this round did not touch),
+and the open count barely moved because 2,321 of those opens are `_tail_rows`
+answering "needs an answer" per row -- a question that must be re-asked to be
+worth anything.
+
+**Answer-preserving, shown rather than argued.** `entry.stat()` and `Path.stat()`
+feed the same `(path, mtime, size)` keys that the content caches are validated by,
+so a disagreement between them would silently serve a stale title. Four rebuilds of
+all seven family stores, 2,491 rows × 12 fields each, alternating the facts on and
+off (`A facts-on, B facts-off, C facts-on, D facts-off`): A-vs-B and B-vs-C are the
+on/off boundary and A-vs-C is the same-configuration control — **0 differing rows**
+at all three, and a clean A-vs-C says the store itself did not move while it was
+being measured.
+
+`tests/test_parsers.py::test_a_listing_pass_carries_the_versions_it_already_read`
+pins the cost as a ratio against the same code with its facts thrown away, both
+passes starting cold: **33 stats carrying, 108 without**, on a 21-file fixture. A
+ratio rather than a magic bound, because a revert then fails on the numbers
+(`the pass with facts asked the OS 108 times`) instead of on a constant somebody
+has to re-derive. That ratio only means something because both arms start cold: the
+first draft left the second pass running on caches the first one had filled, so the
+arms differed by cache state as well as by the facts, and the measured gap under a
+revert collapsed from 3.3× to 108-vs-96 — still red, but by an accident of order
+rather than by a margin.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

@@ -58,6 +58,51 @@ def _tail_rows(path: Path, max_bytes: int = 65536) -> list[dict]:
     return rows
 
 
+def _walk_jsonl(root: Path, facts: dict | None = None) -> list[Path]:
+    """Every `.jsonl` under `root`, without asking the OS about each one.
+
+    `Path.rglob` works out dir-vs-file by stat'ing, and the caller's `is_file()`
+    stat'ed again: over the store the qoder family shares that was 4,263
+    `os.stat` calls and 0.254 s for 4,262 files, paid once per listing and by
+    two listings per rebuild (the IDE's own and `qoderwake`'s view of the same
+    directory). `os.scandir` carries the type in the same directory read that
+    produced the name, which is 0.106 s and no stat. Symlinks are followed and
+    an unreadable directory is passed over, both as `rglob` does: one locked
+    project directory must not empty the whole list.
+
+    `facts`, when given, collects `str(path) -> (mtime, size)` from the same
+    directory entries. That is the point of the hand-rolled walk: the listing
+    then asks 4,261 files for their version four times over (the id peek, the
+    meta peek, the canonical ranking and the fragment scan's newest-first
+    order), and a stat that the directory read already answered costs nothing.
+    """
+    out: list[Path] = []
+    stack = [root]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=True):
+                    stack.append(Path(entry.path))
+                elif entry.name.lower().endswith(".jsonl") and entry.is_file(follow_symlinks=True):
+                    path = Path(entry.path)
+                    if facts is not None:
+                        try:
+                            est = entry.stat()
+                        except OSError:
+                            est = None
+                        if est is not None:
+                            facts[str(path)] = (est.st_mtime, est.st_size)
+                    out.append(path)
+            except OSError:
+                continue
+    return out
+
+
 def _mtime_iso(stamp: float) -> str | None:
     """Last resort dating: the filesystem, when the store recorded nothing."""
     if not stamp:
@@ -143,11 +188,25 @@ _PROVEN_ABSORBED_TEXTS: dict[str, dict] = {}
 # the wake/work transcripts belong to their own CLI entries.
 _FAMILY_MARKERS = ("qoderwake", "qoderwork")
 
+#: `_family_of_path` runs once per listed session per rebuild and resolved the
+#: store root on every one of those calls: 4,640 resolutions of eight distinct
+#: roots, each a round of `stat` calls, in the measured 70,386-stat rebuild.
+_RESOLVED_ROOTS: dict[str, Path | None] = {}
+
 
 def _family_of_path(root: Path, path: str) -> str | None:
     """Which qoder family a transcript belongs to, from the store dir name."""
+    rkey = str(root)
+    if rkey not in _RESOLVED_ROOTS:
+        try:
+            _RESOLVED_ROOTS[rkey] = Path(root).resolve()
+        except OSError:
+            _RESOLVED_ROOTS[rkey] = None
+    resolved = _RESOLVED_ROOTS[rkey]
+    if resolved is None:
+        return None
     try:
-        rel = Path(path).resolve().relative_to(Path(root).resolve())
+        rel = Path(path).resolve().relative_to(resolved)
     except (ValueError, OSError):
         return None
     for part in rel.parts:
@@ -338,6 +397,11 @@ class JsonlSessionParser(Parser):
         self.root = root or (home() / self.projects_dirname / "projects")
         # sid -> every file that reports it, filled by list_sessions().
         self._index: dict[str, list[Path]] = {}
+        # str(path) -> (mtime, size) from the last walk of this store. Replaced
+        # wholesale by every base `_iter_jsonl()` call, so it never outlives the
+        # pass that filled it; a parser whose `_iter_jsonl` is overridden simply
+        # has none, and every reader below falls back to a stat.
+        self._dirfacts: dict[str, tuple[float, int]] = {}
 
     def available(self) -> bool:
         return self.root.is_dir()
@@ -347,7 +411,30 @@ class JsonlSessionParser(Parser):
     def _iter_jsonl(self) -> list[Path]:
         if not self.available():
             return []
-        return sorted(p for p in self.root.rglob("*.jsonl") if p.is_file())
+        facts: dict[str, tuple[float, int]] = {}
+        found = sorted(_walk_jsonl(self.root, facts))
+        self._dirfacts = facts
+        return found
+
+    def _version(self, path: Path) -> tuple[float, int] | None:
+        """(mtime, size) for a transcript, from the directory read that named it.
+
+        A listing pass asks 4,261 files for their version four times over -- the
+        id peek, the meta peek, the canonical ranking and the fragment scan's
+        newest-first order -- which was 40,000 of the 114,728 `os.stat` calls in
+        one measured rebuild. `os.scandir` had both numbers in the entry it
+        already returned, so the walk carries them. None means no answer: a file
+        the walk did not see that a stat cannot describe either, which a caller
+        must not mistake for version (0, 0).
+        """
+        hit = self._dirfacts.get(str(path))
+        if hit is not None:
+            return hit
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime, st.st_size)
 
     def _group_files(self, paths: list[Path], sid: str) -> list[Path]:
         """Rank a session's files: canonical transcript first, companions after."""
@@ -360,11 +447,8 @@ class JsonlSessionParser(Parser):
                 score = 2
             elif path.name.startswith("agent-"):
                 score = 1  # sub-agent transcript, part of the session but not its head
-            try:
-                size = path.stat().st_size
-            except OSError:
-                size = 0
-            return (score, size)
+            ver = self._version(path)
+            return (score, ver[1] if ver else 0)
 
         return sorted(paths, key=rank, reverse=True)
 
@@ -394,11 +478,8 @@ class JsonlSessionParser(Parser):
 
     def _peek_id(self, path: Path) -> str:
         """Session id as the store reports it, falling back to the file stem."""
-        try:
-            st = path.stat()
-            key = (str(path), st.st_mtime, st.st_size)
-        except OSError:
-            key = None  # cannot version an unreadable file: read it every time
+        ver = self._version(path)
+        key = (str(path), ver[0], ver[1]) if ver else None
         if key is not None:
             hit = _ID_CACHE.get(key)
             if hit is not None:
@@ -429,11 +510,8 @@ class JsonlSessionParser(Parser):
         under hundreds of tool-hint/meta rows (measured: a 13 MB compacted roll
         keeps its summary at line 487).
         """
-        try:
-            stat = path.stat()
-            key = (str(path), stat.st_mtime, stat.st_size)
-        except OSError:
-            key = (str(path), 0.0, 0)
+        ver = self._version(path)
+        key = (str(path), ver[0], ver[1]) if ver else (str(path), 0.0, 0)
         hit = _PEEK_CACHE.get(key)
         if hit is not None:
             if not hit:
@@ -2419,8 +2497,9 @@ class QodercnIdeParser(JsonlSessionParser):
             files = []
         versions = {}
         for p in files:
-            with contextlib.suppress(OSError):
-                versions[p] = (p.stat().st_mtime, p.stat().st_size)
+            ver = self._version(p)
+            if ver is not None:
+                versions[p] = ver
         # None when the store said nothing: an empty store, or one whose files
         # all vanished mid-walk. Same as the old `max()` raising ValueError.
         sig = max((v[0] for v in versions.values()), default=None)

@@ -1007,3 +1007,140 @@ def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path
             "_PROVEN_ABSORBED_TEXTS",
         ):
             getattr(jf, name).clear()
+
+
+def test_a_listing_pass_carries_the_versions_it_already_read(tmp_path):
+    """One directory walk answers the version questions of the whole pass.
+
+    A listing asks 4,261 files for their `(mtime, size)` four times over -- the
+    id peek, the meta peek, the canonical ranking, and the fragment scan's
+    newest-first order. That was 48,982 of the 114,728 `os.stat` calls in one
+    measured rebuild of this machine's stores (spec Round 51), for numbers
+    `os.scandir` had already returned in the entry that named the file.
+
+    The claim is about syscalls, not about a return value, so it is pinned as a
+    ratio against the same code with its facts thrown away: identical answers,
+    and the pass that carries its directory entries must ask the OS about the
+    store's own files far less often. A revert of the carrier makes the two
+    counts equal, which fails the ratio without touching an expected number.
+    """
+    import json
+
+    import agent_handoff.parsers.jsonl_family as jf
+
+    proj = tmp_path / ".qoder-cn" / "projects" / "C--v"
+    proj.mkdir(parents=True)
+    names = []
+    for i in range(10):
+        sid = f"ses-{i:02d}"
+        rows = [
+            {
+                "type": "user",
+                "sessionId": sid,
+                "cwd": "C:/v",
+                "timestamp": f"2026-09-20T09:{i:02d}:00Z",
+                "message": {"role": "user", "content": f"question {i}"},
+            },
+            {
+                "type": "assistant",
+                "sessionId": sid,
+                "cwd": "C:/v",
+                "timestamp": f"2026-09-20T09:{i:02d}:30Z",
+                "message": {"role": "assistant", "content": "ok"},
+            },
+        ]
+        (proj / f"{sid}.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+        )
+        names.append(sid)
+        # A companion file per session: ranking these is one of the four sites
+        # that used to stat each candidate again.
+        (proj / f"agent-{sid}.jsonl").write_text(
+            json.dumps({"type": "user", "sessionId": sid, "cwd": "C:/v"}) + "\n",
+            encoding="utf-8",
+        )
+        names.append(f"agent-{sid}")
+    # One fragment, so the absorb scan's own newest-first ordering runs too.
+    (proj / "frag-0.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "sessionId": "frag-0",
+                "cwd": "C:/v",
+                "timestamp": "2026-09-20T09:50:00Z",
+                "data": {
+                    "meta_type": "session_info",
+                    "content": {"session_type": "add_user_message"},
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "user",
+                "sessionId": "frag-0",
+                "cwd": "C:/v",
+                "timestamp": "2026-09-20T09:50:00Z",
+                "message": {"role": "user", "content": "a turn nothing else has"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    names.append("frag-0")
+
+    store = {str(proj / f"{n}.jsonl") for n in names}
+    asked = {"n": 0}
+    real_stat = Path.stat
+
+    def counted(self, *a, **kw):
+        if str(self) in store:
+            asked["n"] += 1
+        return real_stat(self, *a, **kw)
+
+    Path.stat = counted
+    try:
+        for name in ("_PEEK_CACHE", "_ID_CACHE", "_FRAG_HEAD_CACHE", "_QODER_ABSORB_CACHE"):
+            getattr(jf, name).clear()
+
+        def listing(with_facts: bool):
+            # Both passes start cold: a warm content cache makes the second pass
+            # cheaper for a reason that has nothing to do with the facts, and a
+            # comparison that runs that way can be passed by accident.
+            for name in (
+                "_PEEK_CACHE",
+                "_ID_CACHE",
+                "_FRAG_HEAD_CACHE",
+                "_QODER_ABSORB_CACHE",
+                "_PROVEN_ABSORBED_TEXTS",
+            ):
+                getattr(jf, name).clear()
+            asked["n"] = 0
+            p = QodercnIdeParser(tmp_path / ".qoder-cn")
+            if not with_facts:
+                base = p._iter_jsonl
+
+                def blind(b=base, self=p):
+                    got = b()
+                    self._dirfacts = {}  # throw the entries away: stat per question
+                    return got
+
+                p._iter_jsonl = blind
+            metas = p.list_sessions()
+            rows = sorted(
+                (m.session_id, m.title, m.updated_at, m.source_path) for m in metas
+            )
+            return asked["n"], rows
+
+        carried, rows_carried = listing(True)
+        blind, rows_blind = listing(False)
+        assert rows_carried == rows_blind, "carrying the directory entries changed the listing"
+        assert rows_carried, "nothing was listed, so the comparison above is vacuous"
+        assert carried * 2 < blind, (
+            f"the pass with facts asked the OS {carried} times and the one without "
+            f"{blind}: the walk's versions are not being carried"
+        )
+    finally:
+        Path.stat = real_stat
+        for name in ("_PEEK_CACHE", "_ID_CACHE", "_FRAG_HEAD_CACHE", "_QODER_ABSORB_CACHE"):
+            getattr(jf, name).clear()
