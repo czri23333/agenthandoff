@@ -80,6 +80,21 @@ class QoderwakeParser(Parser):
             return []
         return self._shared.list_sessions()
 
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """Ask the store that holds the transcript.
+
+        Half of this entry's rows are wake transcripts in the shared qoder store,
+        and the listing reaches them through `_shared` — which is the parser that
+        owns the file index, the fragment merge and the tail probe. Without the
+        delegation this entry answered "unknown" for every one of its own rows
+        while its sibling parser was reading the very file (spec Round 56).
+
+        The other half are the daemon's team-group chats, whose messages live in
+        SQLite; no transcript is read for them and the answer stays unknown
+        rather than being guessed from the conversation row's timestamp.
+        """
+        return None if self._shared is None else self._shared.peek_needs_reply(session_id)
+
     def hidden_sessions(self) -> list[SessionMeta]:
         """The wake transcripts the shared store dropped, which this entry owns.
 

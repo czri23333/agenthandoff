@@ -584,6 +584,62 @@ sampled away.
     rebuilds itself pays per rebuild; the pass is a per-window coherence boundary,
     not a cache with a lifetime.
 
+39. **`Needs input` still says nothing for 745 listed rows, and for 14 more it
+    declines on purpose.** Two different gaps, both measured on this machine
+    (2026-09-22, whole store):
+    * **No probe at all** — the stores whose conversations are not JSONL
+      transcripts have no tail to read: `zcode` 458 rows, `opencode` 222, `dsh`
+      51, `cherrystudio` 10, `qoderwork-app` 1, `qoderwork-cn-app` 2, `kimi` 1.
+      Each of those parsers knows how to read its messages (the detail page works);
+      none implements `peek_needs_reply`, so every row is `unknown`. A per-store
+      cheap signal is the fix — `zcode` and `opencode` keep a message sequence in
+      SQLite, where "the last message is a user one" is a one-row query, not a scan.
+    * **A window that cannot reach the turn** — 6 of the JSONL family's 2,491 rows
+      end on a turn further above EOF than 64 KB (5 within 256 KB, 1 needs more
+      than 2 MB), and 8 more are declined by the date guard described below.
+      Answering all 14 looks cheap: the nearest turns sum to 0.5 MB. It is cheap
+      *today, on this machine*, and the same retry on another store's quiet rows is
+      priced by how many rows decline, not by a constant — so the shape worth
+      doing next is a second, larger window (1 MB, head file only, memoised by
+      version like the first) that runs only on rows the 64 KB window gave up on.
+      Reading every row's whole transcript stays off the table: 144 MB per rebuild
+      for the rows already answered. Round 56's memo makes even that a
+      per-store-change price rather than a per-poll one (measured: 2 reads, 0.1 MB
+      on a warm rebuild), which is what makes the smaller retry affordable at all.
+    The guard's own trade is measured against the probe without it: 8 "not waiting"
+    answers silenced, 7 of them ones the window had right, and the 8th is this
+    round's only known contradiction with a detail page. Relative to the probe as
+    it shipped before Round 56, 4 rows that used to answer now decline.
+
+40. **One row per store shape can still be answered wrongly, and only the detail
+    page knows.** `load()` sorts a session's messages by their recorded timestamp
+    when every message carries one, so "what the reader sees last" is the *newest*
+    turn, not the last row in the file. The probe reads the end of the file.
+    Measured across 2,485 live rows: a window's newest turn is its last physical
+    turn in every case (0 divergences), so the two definitions agree *inside* a
+    window — but the newest turn can sit above the window entirely, which is how
+    `codebuddy`'s `5771fa81` produced this round's only known contradiction. The
+    guard catches that instance; it cannot catch a store that both appends out of
+    order and keeps its newest turn beyond 64 KB. `scripts/probe_audit.py` is the
+    check that would notice: 0 contradictions over 3,350 sessions today, sampled
+    40 per store where the store is larger.
+
+41. **The probe reads the last turn in the window; the page reads the newest turn.**
+    `load()` sorts a session's messages by their recorded timestamp when every one
+    of them carries one, so its last row is the *newest*, while the probe stops at
+    the last row *in the file*. Measured on the 2,485 live rows that have a turn
+    inside their window, those two are the same row in every case — the stores
+    append in order — so nothing is paid today for the difference, and reading every
+    candidate row in the window to find the newest would raise rows-parsed per
+    rebuild for 0 changed answers. It is therefore left as an alignment that the
+    gate checks rather than the code enforces: `scripts/probe_audit.py` judges the
+    probe against the whole transcript with `load()`'s ordering rule mirrored
+    (including its stable tie-break, which one row of this machine's stores needs —
+    two turns in the same second), and reports a `needs: lying` count that must stay
+    0. Two things the gate cannot catch are named by that sentence: a wrong turn
+    predicate (it is the probe's own), and a store whose messages arrive without
+    timestamps, where `load()` skips its sort and the two definitions coincide again.
+
 ## How to check any of this yourself
 
 ```bash

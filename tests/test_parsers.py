@@ -921,6 +921,7 @@ def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path
         "_QODER_ABSORB_CACHE",
         "_PROVEN_ABSORBED_TEXTS",
         "_ABSORB_ABSENT_TEXTS",
+        "_NEEDS_REPLY_CACHE",
     ):
         getattr(jf, name).clear()
 
@@ -1023,6 +1024,7 @@ def test_the_qoder_turn_echo_is_absorbed_by_the_session_that_carries_it(tmp_path
             "_QODER_ABSORB_CACHE",
             "_PROVEN_ABSORBED_TEXTS",
             "_ABSORB_ABSENT_TEXTS",
+            "_NEEDS_REPLY_CACHE",
         ):
             getattr(jf, name).clear()
 
@@ -1061,6 +1063,7 @@ def test_a_file_that_did_not_answer_once_does_not_have_to_answer_again(tmp_path)
         "_QODER_ABSORB_CACHE",
         "_PROVEN_ABSORBED_TEXTS",
         "_ABSORB_ABSENT_TEXTS",
+        "_NEEDS_REPLY_CACHE",
     ):
         getattr(jf, name).clear()
 
@@ -1157,6 +1160,7 @@ def test_a_file_that_did_not_answer_once_does_not_have_to_answer_again(tmp_path)
             "_QODER_ABSORB_CACHE",
             "_PROVEN_ABSORBED_TEXTS",
             "_ABSORB_ABSENT_TEXTS",
+            "_NEEDS_REPLY_CACHE",
         ):
             getattr(jf, name).clear()
 

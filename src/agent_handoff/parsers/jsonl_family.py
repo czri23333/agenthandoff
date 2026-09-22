@@ -58,6 +58,28 @@ def _tail_rows(path: Path, max_bytes: int = 65536) -> list[dict]:
     return rows
 
 
+def _tail_lines(path: Path, max_bytes: int) -> list[bytes]:
+    """The last whole lines of a file, as bytes.
+
+    Bytes rather than parsed records because a tail is read to *find* one row: a
+    qoder transcript's non-dialogue records (attachments, history snapshots) run
+    to tens of kilobytes each, so decoding a window costs more than reading it.
+    The caller tests each line for a role token and parses only the candidates.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as handle:
+            start = max(0, size - max_bytes)
+            handle.seek(start)
+            payload = handle.read()
+    except OSError:
+        return []
+    lines = payload.splitlines()
+    if start and lines:
+        lines = lines[1:]  # the window began mid-line
+    return lines
+
+
 def _walk_jsonl(root: Path, facts: dict | None = None) -> list[Path]:
     """Every `.jsonl` under `root`, without asking the OS about each one.
 
@@ -190,6 +212,14 @@ _PROVEN_ABSORBED_TEXTS: dict[str, dict] = {}
 # machine's qoder store, for a dozen fragments whose answer never changes
 # (spec Round 55).
 _ABSORB_ABSENT_TEXTS: dict[str, dict] = {}
+
+# store -> {session id: (the versions of the files the answer was read from and
+# the date the listing carried, the answer)}. The Needs-input probe reads a window
+# of every listed row on every poll -- 144 MB a rebuild on this machine's stores --
+# and a row's answer can only change when one of those versions does, which is the
+# same rule `_PEEK_CACHE` and `_ABSORB_ABSENT_TEXTS` are built on. The listing date
+# is part of the key because the probe declines when it outranks the turn it found.
+_NEEDS_REPLY_CACHE: dict[str, dict] = {}
 
 # ~/.qoder-cn (and ~/.qoder) is SHARED by the whole qoder family: the IDE's own
 # chats live under <project>/transcript/ or in plain <project> dirs, while
@@ -412,6 +442,18 @@ class JsonlSessionParser(Parser):
         # pass that filled it; a parser whose `_iter_jsonl` is overridden simply
         # has none, and every reader below falls back to a stat.
         self._dirfacts: dict[str, tuple[float, int]] = {}
+        # sid -> the file this listing read that row's own dialogue from. Only
+        # the listings that walk the store themselves (`_CodebuddyHybridParser`)
+        # fill it, because a store that lists through `list_sessions` already has
+        # `_index`. Deliberately separate from `_index`: that map is what `load()`
+        # merges, so adding a row's sub-agent transcripts to it here would change
+        # a transcript to answer a column.
+        self._listed_files: dict[str, list[Path]] = {}
+        # sid -> the timestamp the listing reported for that row. The tail probe
+        # compares it against the newest turn its window could see: when the
+        # listing knows about something newer, a turn exists that the window did
+        # not reach, and the probe's answer is about the wrong end of the file.
+        self._listing_stamp: dict[str, str | None] = {}
         # The rows the last `list_sessions()` did not list, with the reason on
         # each one. See `_split_toolloops`.
         self._hidden: list[SessionMeta] = []
@@ -507,12 +549,14 @@ class JsonlSessionParser(Parser):
             if sid:
                 groups.setdefault(sid, []).append(path)
         self._index = groups
+        self._listing_stamp = {}
 
         metas: list[SessionMeta] = []
         for sid, paths in groups.items():
             meta = self._peek(self._group_files(paths, sid)[0])
             if meta is not None:
                 meta.session_id = sid
+                self._listing_stamp[sid] = meta.updated_at
                 metas.append(meta)
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         return metas
@@ -667,24 +711,129 @@ class JsonlSessionParser(Parser):
         return self._raw_entries(self._resolve_group(session_id))
 
     def peek_needs_reply(self, session_id: str) -> bool | None:
-        """Tail-scan the canonical transcript: is the last real turn a user one?
+        """Tail-scan the session's transcripts: is the last real turn a user one?
 
-        Runs for every row of the session list, so it must stay cheap: it only
-        reads the cached ``_index`` (populated by list_sessions) and the last
-        16 KB of the canonical file. It deliberately avoids ``_resolve_group``
-        because that can fall back to a full-store rglob scan, which — run once
-        per listed session — stalls the whole listing.
+        Runs for every row of the session list, so it stays cheap by
+        construction: the canonical transcript plus at most ``_PROBE_FILES``
+        companions, one bounded window each, and no ``_resolve_group`` -- that can
+        fall back to a full-store rglob scan, which run once per listed session
+        stalls the whole listing.
+
+        Four ways that first version left rows unanswered or wrong on real stores,
+        each measured before being fixed (spec Round 56):
+
+        * **The window was too small to contain a turn.** Sixteen kilobytes of a
+          qoder transcript is one to three records, because its non-dialogue rows
+          -- attachments, history snapshots -- run to tens of kilobytes each. The
+          newest turn sat just above that: this machine's ``qoder-ide`` store
+          answered 1,350 of its 2,287 rows and answers 2,279 now. The window is
+          64 KB, and a line is tested for a role token before it is parsed, so the
+          larger read does not drag a larger decode with it.
+        * **A store whose listing walks the files itself filled no ``_index``**,
+          which was the only place the probe looked: 172 rows (156 ``workbuddy``,
+          16 ``codebuddy``) declined without reading a byte, while the listing had
+          opened the file they live in seconds earlier. That listing now records it.
+        * **An entry that delegates its transcripts** -- the wake entries read the
+          shared qoder store through another parser, which holds both the index
+          and the merge -- asked itself instead. It asks the owner now, which is
+          where ``qoderwake-cn`` went from answering none of its 11 rows to 9.
+        * **A split session can be read from the wrong file**, once the probe looks
+          beyond one transcript: a session's companions are usually sub-agent
+          transcripts, and a sub-agent file ends on the task it was handed, not on
+          the conversation's last word. Reading the companions before the
+          canonical transcript answers 9 of this machine's 172 split rows as a false
+          "needs input" (measured against their own detail page), so the order is
+          fixed below and pinned by a test.
+
+        Two things keep the wider read affordable and honest: the answer is
+        memoised against the version of every file it was read from (a warm rebuild
+        reads 0.1 MB instead of 144), and a row declines when the listing dates it
+        after the turn found -- the file's end is then not its newest content, and
+        "not waiting" would be the one answer worth losing to avoid. What stays
+        unanswered stays "unknown", which the cockpit renders as its own state;
+        ``docs/limitations.md`` carries the row counts and the price of the rest.
         """
-        paths = self._index.get(session_id)
+        paths = self._index.get(session_id) or self._listed_files.get(session_id)
         if not paths:
             return None
-        head = self._group_files(paths, session_id)[0]
-        rows = _tail_rows(head, max_bytes=16384)
-        for r in reversed(rows):
-            role, text, _raw, _tools = self._row_content(r)
-            if role in ("user", "assistant") and text and not self.is_noise(text):
-                return role == "user"
-        return None
+        # The canonical transcript first, for the reason measured in the docstring
+        # above; companions only as a fallback, newest version first, because a
+        # conversation continued across files keeps its last words in the newest
+        # continuation.
+        ranked = self._group_files(list(paths), session_id)
+        head, rest = ranked[0], ranked[1:]
+        rest.sort(key=lambda p: self._version(p) or (-1.0, 0), reverse=True)
+        consulted = [head, *rest[: self._PROBE_FILES]]
+        listed = self._listing_stamp.get(session_id)
+        # One answer per file version, not per poll: this runs for every row of the
+        # list every 30 s, and 64 KB across 2,491 rows is 144 MB of reading a
+        # rebuild. The key is the version of each file the answer is read from plus
+        # the date the listing reported, because that date is part of what the
+        # answer means (see the guard below).
+        key = (
+            tuple((str(path), self._version(path)) for path in consulted),
+            listed,
+            # The window and the file cap are inputs to the answer, not just
+            # settings: a parser that tunes either must re-derive, not inherit.
+            (self._PROBE_BYTES, self._PROBE_FILES),
+        )
+        memo = _NEEDS_REPLY_CACHE.setdefault(str(self.root), {})
+        hit = memo.get(session_id)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        answer: bool | None = None
+        seen_stamp: str | None = None
+        for path in consulted:
+            for raw in reversed(_tail_lines(path, self._PROBE_BYTES)):
+                # A byte test before a parse: the records that fill a qoder tail
+                # are 30-100 KB blobs with no dialogue in them, and decoding one
+                # to learn it is not a turn costs more than the read. Nothing is
+                # missed by the test -- a line with no role token in it cannot be
+                # a turn this parser would accept either -- and a miss answers
+                # "unknown", never "answered".
+                if b'"user"' not in raw and b'"assistant"' not in raw:
+                    continue
+                try:
+                    row = json.loads(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                role, text, _raw, _tools = self._row_content(row)
+                if role in ("user", "assistant") and text and not self.is_noise(text):
+                    answer = role == "user"
+                    seen_stamp = _iso(row.get("timestamp"))
+                    break
+            if answer is not None:
+                break
+        if answer is None:
+            verdict = None
+        elif answer is False and listed and seen_stamp and listed > seen_stamp:
+            # The listing dated this row from the session's own records, so a date
+            # newer than the turn just found means the file's end is not its newest
+            # content and the answer is about the wrong part of the conversation.
+            # That is applied to the "not waiting" answer only, and the asymmetry is
+            # deliberate: an "unknown" beside a conversation that is waiting costs a
+            # highlight, while "answered" beside one that is waiting hides the work
+            # the column exists to surface. Measured on this machine's stores it
+            # silences 8 rows, 7 of them answers the window had right, and is the
+            # reason the column has no known disagreement with a detail page.
+            verdict = None
+        else:
+            verdict = answer
+        if len(memo) > 8192:  # a long-lived process, a growing store
+            memo.clear()
+        memo[session_id] = (key, verdict)
+        return verdict
+
+    #: How far above the end of a transcript a row is answered from, and how many
+    #: of the session's files that read covers. Both are cost decisions stated as
+    #: bytes per listed row: 64 KB is where this machine's qoder stores keep their
+    #: newest turn -- at 16 KB the family answered 1,383 of its 2,491 rows, at
+    #: 64 KB it answers 2,477 -- and the reads stay bounded per file, memoised by
+    #: version so a poll does not re-read what has not changed.
+    _PROBE_BYTES = 65_536
+    _PROBE_FILES = 3
 
     def _resolve_group(self, session_id: str) -> list[Path]:
         """All files that make up one session; cheap and storage-layout agnostic."""
@@ -1523,6 +1672,8 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             return []
         metas: list[SessionMeta] = []
         seen: set[str] = set()
+        self._listed_files = {}
+        self._listing_stamp = {}
 
         # Layout 2: session dirs with subagents/ children.
         for subagents_dir in sorted(self.root.rglob("subagents")):
@@ -1539,6 +1690,13 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             # side work), so let it lead the metadata scan.
             flat = session_dir.parent / (sid + ".jsonl")
             scan_files = [flat] + agent_files if flat.is_file() else agent_files
+            if scan_files:
+                # The tail probe needs to know which file carries this row's
+                # dialogue, and `_index` is not the place to say it: that map
+                # feeds `load()`, and handing it `[flat] + agent_files` would add
+                # the sub-agent transcripts to a transcript that today does not
+                # carry them. So a listing of this shape keeps its own record.
+                self._listed_files[sid] = [scan_files[0]]
             meta = self._cb_peek_dir(sid, agent_files, scan_files)
             if meta:
                 metas.append(meta)
@@ -1558,11 +1716,14 @@ class _CodebuddyHybridParser(JsonlSessionParser):
             meta = self._peek(path)
             if meta is not None:
                 meta.session_id = sid
+                self._listed_files[sid] = [path]
                 metas.append(meta)
 
         # Agents (codebuddy background jobs) carry the official session name in
         # jobs/<shortid>/state.json; the sessionId field links the job to the
         # conversation (it may differ from the job's own short id).
+        for m in metas:
+            self._listing_stamp[m.session_id] = m.updated_at
         titles = self._job_titles()
         for m in metas:
             jt = titles.get(m.session_id)
@@ -2480,7 +2641,10 @@ class QodercnIdeParser(JsonlSessionParser):
         """The IDE's own chats only: wake/work families leave the shared store
         for their own CLI entries (still deep-linkable by id via load())."""
         out = [m for m in self._list_all() if _family_of_path(self.root, m.source_path) is None]
-        return self._split_toolloops(out)
+        metas = self._split_toolloops(out)
+        for m in metas:
+            self._listing_stamp[m.session_id] = m.updated_at
+        return metas
 
     def _within_gap(self, a: SessionMeta, b: SessionMeta) -> bool:
         ta = _parse_iso_local(a.started_at or a.updated_at)

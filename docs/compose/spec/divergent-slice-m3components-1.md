@@ -2201,6 +2201,99 @@ have nothing to do with it. Both are recorded in `docs/limitations.md`, and both
 argue for a rule that keys on where the vendor writes the echo rather than on
 text identity.
 
+### Round 56 — the "Needs input" column was silent about 1,116 conversations it could have read
+
+The column exists so one screen can answer "which of my conversations are waiting
+on me". Round 53 made the list walkable and Round 54 made it say what it hid; this
+round found the column itself barely answering. Measured over this machine's 13
+available stores with the parsers' own `load()` as the detail-page truth
+(`scripts/probe_audit.py`, and `D:/tmp-agenthandoff/r56_ab.py` for the probe-vs-probe
+A/B in one process): of **3,352 listed rows, 2,591 carry a Needs-input answer; 1,498
+did before** — 1,093 rows that said nothing now say something.
+
+**What did not move is worth stating first: the ⚠ badge itself went 35 → 36.** The
+newly answered rows are overwhelmingly "not waiting", so this round buys the
+column's *negative* answers, not a longer to-do list. That is still the product
+property: the filter and the ⚠ count only mean anything if the rows they exclude
+were asked, and 1,989 of 3,476 rows at the HTTP layer were `unknown` before this
+change and 887 are after. The one conversation the change *did* surface is the one
+whose answer had been a lie (below). Within the JSONL family it is 1,383 → 2,477 of
+its 2,491 rows.
+
+Three separate mechanisms, each measured before being touched, each with the row
+count it was worth:
+
+* **The window was too small to contain a turn (931 rows).** 16 KB of a qoder
+  transcript is one to three records, because its non-dialogue rows — attachments,
+  history snapshots — run to tens of kilobytes. The newest turn sat just above
+  that. 64 KB reaches it; a line is tested for a role token in bytes before it is
+  parsed, so the four-times larger read does not drag a four-times larger decode
+  with it. A 512 KB window was tried first and rejected on counters, not on feel:
+  opens 2,426 → 3,840 and `os.stat` 2,429 → 7,874 per rebuild to reach a handful of
+  rows, where 64 KB plus one read per companion already reaches all but 6.
+* **A listing that walks the store filled no map the probe could consult (310
+  rows).** `codebuddy` and `workbuddy` build their rows from their own walk and
+  never populate `_index`, which was the only place the probe looked, so 156 + 16
+  rows declined without reading a byte while the listing had opened their file
+  seconds earlier. They record it now, in a map deliberately *not* `_index`: that
+  one is what `load()` merges, and writing a row's sub-agent transcripts into it
+  would change a transcript to answer a column.
+* **An entry that delegates its transcripts asked itself (9 rows).** The wake
+  entries read the shared qoder store through another parser, which holds the index,
+  the fragment merge and the tail probe. `qoderwake-cn` went 0 → 9 of 11 answered
+  by asking the owner instead.
+
+**The order the answer comes from is now measured, not assumed.** Reading the
+canonical transcript first was inherited, and a wider probe made alternatives
+reachable: a split session's companions are usually sub-agent transcripts, whose
+tails end on the task the sub-agent was handed. Reading those first answers 9 of
+this machine's 172 split rows as "needs input" when their own detail page ends on
+an assistant reply. Reading the canonical file first answers all 172 right, so the
+order is written down with that number and pinned by a test — including the opposite
+direction, so a future "fix" cannot quietly trade one for the other.
+
+**A guard for the case where the end of the file is not the newest content.**
+`load()` sorts a session's messages by their recorded timestamp when all of them
+carry one, so what a reader sees last is the *newest* turn, not the last row. Within
+a 64 KB window the two are the same on all 2,485 live rows that have a turn there
+(measured), but a store can append out of order: `codebuddy`'s `5771fa81` has its
+newest turn above the window and its EOF occupied by an older assistant row, and the
+column said "not waiting" about a conversation waiting for the user. The listing
+already dates each row from those records, so a date newer than the turn found is a
+free signal. Applied to the "not waiting" answer only — an `unknown` beside a
+waiting row costs a highlight, `answered` beside one hides the work — it silences 8
+rows, 7 of them answers the window had right, and removes the wrong one.
+**The gate that was supposed to catch this could not have.** `probe_audit.py`
+opens by saying it audits "`peek_status` and `peek_needs_reply`" and judged only
+`peek_status` — since the day it was written (`c173e12`), the column it names first
+has been compared to the detail page and the one it names second never has. It now
+has two columns per store and exits 1 on either, which is how this round's two
+ordering disagreements were found rather than asserted away. Its truth is read from
+the rows, not from `raw.messages`: the rendered text is a different string from the
+one `_row_content` hands the probe, and comparing one representation against the
+other audits the renderer.
+
+Measured today, sampled 40 rows per store where the store is larger, over 3,352
+sessions: **0 rows where either probe contradicts its own detail page.** With the
+probe's answers deliberately inverted the same gate reports 37 and exits 1, so that
+0 is a check that can fail, not a check that cannot.
+
+**The cost of a wider probe is a warm-path problem, and Round 55's doctrine pays
+for it.** 64 KB × 2,491 rows is 144 MB per rebuild against 37 MB before, and the
+poll runs every 30 s. The answer is therefore memoised against the version of every
+file it was read from, plus the listing date it was checked against, plus the window
+and file cap: cold 144.2 MB, **warm 0.1 MB (2 reads)**. Mutating a transcript
+re-derives its row; a second poll reads nothing. Nine mutation-checked behaviours are
+run by `D:/tmp-agenthandoff/r56_mutation.py`, including "turn the memo off and the
+test's assertion stops holding", so none of these are claims about code that cannot
+fail.
+
+What is still not answered is named with counts in `docs/limitations.md`: 745 rows
+in stores that have no probe at all (their transcripts are SQLite, where this is a
+one-row query), 6 rows whose turn is above the window, and the 8 the guard
+silences. The last two cost 0.5 MB to reach, which is a bounded retry worth doing
+next rather than a reason the column stays quiet.
+
 
 ## [S1] Problem
 
