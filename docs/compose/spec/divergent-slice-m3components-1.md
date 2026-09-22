@@ -1982,7 +1982,9 @@ What shipped, in four pieces:
    cursor is then "a row node that did not exist a frame ago", because the
    insertion shifts every index below it.
 3. **The poll holds while the reader is navigating** (`navHeld`, and the badge
-   switches to 自动更新已暂停 rather than keeping its live colour). The delta merge
+   switches to 自动更新已暂停 rather than keeping its live colour — written that way
+   in Round 53; Round 60 gave the same badge the age beside the words, which is
+   what item 35's "a hold is not a queue" was still asking for). The delta merge
    re-sorts by `updated_at`, so a session that gets a turn jumps to the top and
    the row under the cursor moves out from under it. Both `focusin` *and*
    `focusout` recompute the flag.
@@ -2552,6 +2554,202 @@ locally became `conftest.py`'s `statement_counter` fixture, since the wake tests
 ask the same question (does a warm pass read anything?), and the Round 58 file was
 converted to it — 23 of its tests now share the instrument rather than duplicating
 it.
+
+
+### Round 60 — the held list now says how stale it is, in seconds
+
+Item 35's line "**a hold is not a queue**" named the gap in one sentence: while a
+row or a field held focus the badge said 自动更新已暂停 and stopped there, so a
+three-second pause and a three-hour one looked identical. Going after it found a
+second, larger case of the same failure hiding in the *un*paused branch.
+
+**The label was a mechanism claim, not a reading.** The old function had two exits
+past the pause: under a minute it printed the age, and from a minute up it printed
+`每 30 秒自动更新` — "auto-refreshes every 30s", a sentence about the timer, in the
+one place a reader looks to find out how old what they are reading is. `pollDelta`
+swallows a failing request and retries on the next tick, so a poll that had been
+failing for ten minutes showed a badge asserting it refreshes every thirty seconds.
+The number and the claim were never both on screen: past a minute the reader got
+the claim, under a minute the number.
+
+Now the badge is one quantity with a prefix. `ageText()` renders the four buckets
+(`12 秒前` / `3 分钟前` / `2 小时前` / `4 天前`, `12s ago` / `3m ago` / …), the hold
+prefixes them with 自动更新已暂停 rather than replacing them, and past 120 seconds
+the text takes `ah-warn`. The mechanism claim moved to the tooltip, where it is
+derived from `POLL_MS` instead of repeating its value in prose — the string used to
+say "30" in two places and the constant in one of them, so a change to the poll
+interval would have left the label lying. Both locales got the four buckets;
+`updatedAgo` and `autoRefresh` were deleted rather than left behind, and
+TypeScript (`TKey` is the zh key set) is what makes a key missing from `en` a build
+error rather than a silent fallback.
+
+**A semantic fix underneath it.** The clock the age is measured from was set only
+when a delta poll *found* something: `if (!changed.length) return;` came before
+`setUpdatedAt(Date.now())`. For "when did this list last change?" that is right,
+and for the label — "how old is what I'm reading?" — it is wrong in the loud
+direction: an idle machine would age its badge to hours and turn it warn-coloured
+while the poll answered every thirty seconds. So the landing stamp moved ahead of
+the early return: a poll that found nothing is a verification, and the list is as
+current as the check. `data-updated-ms` on the badge is that instant, exposed so a
+reader script compares the prose with the clock instead of parsing two languages.
+
+**The gate is new, and it went red on itself four times before it was trusted.**
+`audit_component_rules.py --app-only --fresh` drives the running cockpit through
+three windows: nothing focused (the timer must be firing and the stamp it writes
+must move — without this window an only-ever-rising label cannot distinguish a
+live poll from a dead one), a row focused for 135 s (the label must name the
+pause, the number must rise across three readings, the last must be past the
+stale threshold, the warning must *paint*, and no delta request may go out), and
+focus released (the timer must come back) — then a short fourth window in zh, the
+locale the reader actually uses. Four defects it reported were its own:
+
+* `label '2 秒前' does not carry 2s` — the sweep wrote `ah-lang=en` into
+  localStorage and called `page.goto` on the same address, whose hash-only
+  difference Chromium treats as a same-document navigation. The app never
+  re-read storage, so the gate compared Chinese labels against English unit
+  strings. A `page.reload()` fixed it. The general form: **a sweep that pins a
+  state has to prove the application re-read it.**
+* an arm that passed. `the stale warning names a class the sheet does not define`
+  (`ah-warnx`) came back green, because the colour assertion only asked "does the
+  colour change when it is supposed to". `.ah-faint` carries `font-size` and
+  `line-height` as well as a colour, so swapping the two classes out of the
+  template left the text the *same* colour and a different size — and the
+  assertion, reading only equality between the two states, called that a pass.
+  Two changes followed: the badge now keeps `.ah-faint` in both states and adds
+  `.ah-warn` on top (the sheet declares it later, so at equal specificity it wins
+  the colour and nothing else moves), and the assertion compares the badge against
+  a **reference probe** — a span carrying the class it names, appended in the
+  badge's own parent — in both directions, plus the font size beside the colour.
+  Three arms now stand behind that one claim, each caught by a different
+  sentence: the class not attached, the class attached but not painted, and the
+  colour right while the type size moves.
+* a control that went red for the wrong reason, twice over. The live window asked
+  "did the stamp move within 80 s", and a wall clock cannot tell *the timer
+  stopped* from *the server was busy* — this machine was concurrently running the
+  user's own gate suite. The window now counts what the page sends and what comes
+  back: a defect when no delta request goes out (the timer is not running), a
+  defect when requests went out and 200 answers came back and the stamp still did
+  not move (the page is ignoring its own poll), and only a **note** when no answer
+  arrived — an ageing badge is the right behaviour against a dead server, not a
+  bug. The same red had a second cause: an earlier sweep launched with `nohup … &`
+  had not died when its launcher returned (it only looked dead, because its log was
+  empty), so two sweeps were patching the same `Dashboard.tsx` and rebuilding the
+  same bundle in alternation, and each arm's page was whichever build the browser
+  happened to fetch. Every reading from that period is discarded, the source was
+  checked back to its intended state by grepping each mutation string, `serve()`
+  now refuses to start if the audit port already answers, and the pass/fail
+  counter in the sweep script counts `rc > 0` after an arm that failed to *build*
+  was tallied as caught — an arm that never reached the badge is not a witness.
+* the zh window reported a defect that was its own reading. It asked the badge once
+  and compared the label's number with the badge's clock, and React repaints on a
+  1 s tick, so a label one tick behind was called wrong:
+  `label '自动更新已暂停 · 4 秒前' does not carry 5`. It now goes through
+  `read_freshness`, the retry the other windows use, with that helper's EN
+  unit-word test switched off — `UNITS` holds EN strings, so a zh reading left to
+  hunt for "s ago" would spend its retries and then be reported for taking them.
+  Two runs of the window were thrown away for this, and the retry it needed is
+  itself counted as a defect, as it is for the other windows.
+
+The reading loop's own tolerance is bounded and reported too: `read_freshness`
+takes up to 3 samples, because React repaints on a 1 s tick and a label can
+legitimately lag its clock across a bucket edge, and a reading that needed more
+than 2 attempts is itself a defect — so the retry corrects a boundary without
+hiding a label stuck a bucket behind. The sweep also records the badge's rendered
+width and whether it overflows the header row it sits in, since the longest form
+the label has ever had is exactly the new one (the pause prefix plus a
+minute-scale age).
+
+**Evidence.**
+
+The delivery sweep ran against the user's own cockpit on `:8620`, output kept
+(`D:/tmp-agenthandoff/r60_delivery3.log`), and reported `defects: []` with eight
+readings: six through the EN windows and the zh pair. The live window sent 1 delta
+request, took 1 answer, and saw the stamp move at 28.3 s; the 135 s hold sent **0**
+requests while the age read 5.8 → 45.8 → 135.8 s; focus released brought 1 request
+in 15.2 s. The badge measured 47–170 px inside its header row with 0 px of overflow
+in every one of the eight readings, none needed a second attempt, the resting text
+carried the colour `.ah-faint` computes and the stale text the colour
+`.ah-faint ah-warn` computes at the same 12 px. In zh: `0 秒前` at rest and
+`自动更新已暂停 · 5 秒前` with a row focused. Five regression arms stand behind those
+sentences — the stamp that ignores its own poll, the hold that never ends, the
+warning never attached, the warning naming a class the sheet does not define, the
+warning taking the type size with it — all five red, the last only after it was made
+non-inert: `text-[14px]` builds clean and changes nothing, because `.ah-faint` is
+declared after the utility layer and wins at equal specificity, so the harness
+(`D:/tmp-agenthandoff/r60_mutation.py`) now compares the files each arm's build
+emitted and calls an arm that reproduces the control's "never reached the badge".
+The zh window has its own witness, a one-string change in `web/src/i18n.ts` that
+drops `{age}` from `zh.pausedAgo` while `en.pausedAgo` keeps it, and it is caught by
+the zh sentences alone — `label '自动更新已暂停' does not carry 7 (numbers read: [],
+after 3 reading(s))`, and the reading counted as one that needed its retries — with
+the six EN readings still green (`D:/tmp-agenthandoff/r60_sweep5b.log`): the half of
+this round that TypeScript's key parity cannot see. `ci_local.py --with-frontend` passed its 10 gates, and its rebuild
+emitted the same bundle the browser had read (`index-DeWkNjLo.js`), so what was
+swept is what ships.
+
+
+### Round 61 — the CherryStudio dialogues answer "Needs input": 8 rows that had no probe
+
+Item 39 listed `cherrystudio` among the stores with no probe — 10 rows, of which the
+audit's own judge said 8 were **silent**: rows whose detail page names an ending and
+whose list cell says nothing. The parser already reads every message row of every
+session it renders, so the answer was in the store and only the asking was missing.
+
+**The trap this store sets is about rows, not sessions.** One `session_messages` row
+is one LLM call and can render several messages: `thinking` and `tool` blocks are
+assistant lines whatever the row's own role says, and only `main_text` carries that
+role. So "the last row" is not the same question as "the last line", and a probe that
+reads `role` off the newest row answers the easy question wrongly. The other half is
+that a row can render *nothing* — an empty tool result, a block that cleans to
+nothing, content that will not decode — so the walk has to go back to the row that
+does. Both rules were lifted out of `load()` rather than restated: `_row`,
+`_row_role` and `_block_turn` are now the one place the file decides what a block
+shows, and `load()` was refactored onto them. Its tool counter and path extraction
+stay outside the render decision on purpose — a tool call that shows nothing is still
+a tool call that happened.
+
+**What the live store actually holds** (全量, its 224 message rows): the envelope
+role equals the column role in every row, all 112 user rows are a lone `main_text`
+block, the other 112 rows are `assistant` and 107 of them carry a tool block, and
+there are **0** `(session, instant)` ties. So three of the rules the probe mirrors are
+not being exercised by today's data. They are pinned by tests and named as such in
+the code, because a rule that only the fixture can violate is exactly the rule a later
+reader deletes as dead. The same census is why `load()`'s `ORDER BY created_at` became
+`ORDER BY created_at, rowid`: not to change an answer, but so the probe's reversed
+order is a mirror of the page's rather than a guess about how a sorter breaks ties.
+
+**The walk is uncapped and lazy.** A 50-row window — what the first draft had — would
+have answered `None` about a session the page can answer, since the largest session
+here holds 108 rows, and `session_messages` has no index leading with `session_id`
+(read from the store's own `sqlite_master`), so the window bought no scan either.
+Reading the cursor until the first rendering row costs one statement per session
+(measured) and parses the blocks of one row in the common case; the worst case is the
+parse `load()` already pays, memoised per store change.
+
+**Evidence.**
+
+18 tests in `tests/test_cherrystudio_peek.py`, every one asserting probe *and* page —
+`_asked()` fails if the probe answers wrongly or if it answers differently from
+`load()`. A mutation sweep (`D:/tmp-agenthandoff/r61_mutation.py`, log kept) ran 9
+plausible regressions against them and all 9 went red on the witness named for it:
+answering with the row's own role, letting `thinking`/`tool` take that role, dropping
+the noise rule, reading the role from the envelope only, letting the column win over
+the envelope, dropping the tie-break the page names, not walking back past a row that
+renders nothing, a memo keyed without the store version, and an unreadable row ending
+the walk instead of being stepped over. On the live store, judged by the shipped
+gate's own `audit()` over all 10 sessions it lists (全量): needs-input `silent` 8 → 0,
+`lying` 0 before and after, 8 rows answered and 2 left unknown because they carry no
+message rows. The gate at its own口径 reports `3360 sessions on this machine; 0
+sampled rows where the status probe and 0 where the needs-input probe contradicts the
+detail page`, with `cherrystudio n=10 sampled=10 … needs: lying=0 silent=0`. Cost,
+counted in statements and blocks rather than seconds: one statement per cold probe
+whatever the session holds, zero on a warm pass, and one block parsed when the newest
+row answers a 301-row session. `ci_local.py --with-frontend`: 10 gates green and 629
+tests passed; the `load()` refactor renders the same bytes (its two existing
+CherryStudio cases are among them). What this does **not** cover: the three rules the
+store does not
+exercise today (role precedence, a user row ending on a tool call, same-instant ties)
+are pinned by fixtures, and the 55 rows item 39 still lists are untouched.
 
 
 ## [S1] Problem

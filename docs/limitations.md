@@ -502,13 +502,19 @@ sampled away.
     file asserts.
 
 35. **The keyboard cursor is real in flat mode and partial in grouped mode, and
-    the productivity-tool research is only 1/12 spent.** Spec Round 53 added
+    the productivity-tool research is three rounds in.** Spec Round 53 added
     `↑`/`↓`/`j`/`k`/`PageUp`/`PageDown`/`Home`/`End`/`Enter`, a shortcut strip, and
     a poll that holds while a row or a field has focus (measured: 0 `/api/sessions`
     requests in a 62.4 s window with a row focused, 2 in the same-length control
     window; `python scripts/audit_component_rules.py --app-only --keys --app
-    http://127.0.0.1:8620` re-asks it). What is still open, in the words the
-    research used:
+    http://127.0.0.1:8620` re-asks it). Round 57 spent the absolute-time item and
+    Round 60 the staleness of a held list, both below. No fraction is claimed for
+    the twelve: two of the three rounds each carried several of the research's
+    bullets, so a count of rounds neither understates nor overstates what landed —
+    the lists below are the claim, item by item. The badge half is re-asked by
+    `--app-only --fresh` on its own (~5 min: it waits out a live poll, holds a row
+    focused for 135 s, waits for the poll that resumes, and re-reads the label in zh).
+    What is still open, in the words the research used:
 
     - **Grouped paging.** `↓` at the end of a truncated group moves to the next
       group rather than paging that group in, so keyboard paging is proven only in
@@ -537,10 +543,23 @@ sampled away.
       its 64 px cell (identical to the old `412d ago`), and the old and new
       functions disagree on exactly those rows — the check that this changed
       anything is the diff, not the build passing.
-    - **A hold is not a queue.** While the pause is on, the list is exactly as
-      stale as it was when focus arrived. The badge says 自动更新已暂停 rather than
-      keeping its live dot, but nothing yet shows *how* stale: the age label only
-      updates when a refresh actually lands.
+    - **A hold is not a queue — closed in Round 60, and what that left open.**
+      The badge used to say 自动更新已暂停 and nothing else, so a reader could not
+      tell a 3-second hold from a 3-hour one; it now says the age beside the words
+      (自动更新已暂停 · 43 秒前), past a minute it says the age *without* the words
+      (`3m ago`), and past two minutes the text takes the warn colour. Two things
+      are still true about it:
+
+      - **The age is the browser's, not the server's.** A tab left in the
+        background throttles its own timers, so returning to it shows a large age
+        — which is honest (the rows on screen *are* that old) but is not a
+        statement about the server, and nothing yet distinguishes "this tab was
+        hidden" from "the poll failed".
+      - **Nothing queues what arrived during the hold.** Releasing focus resumes
+        the poll, and the next tick merges whatever changed; there is no
+        "3 sessions moved while you were reading" counter, and no scroll anchor,
+        so a row can still jump out of view at the moment focus leaves. That is
+        the `overflow-anchor: none` item further down this list, not this one.
     - **Fuzzy matching is substring-only**, so the highlight component shows a
       contiguous run; the character-subsequence highlight the research describes
       would need the matcher to report which characters it used.
@@ -596,22 +615,31 @@ sampled away.
     rebuilds itself pays per rebuild; the pass is a per-window coherence boundary,
     not a cache with a lifetime.
 
-39. **`Needs input` still says nothing for 205 listed rows.** The 745 rows Round 56
-    counted without a probe are down to 65: `zcode` (458 rows) and `opencode` (222)
+39. **`Needs input` still says nothing for 197 listed rows.** The 745 rows Round 56
+    counted without a probe are down to 55: `zcode` (458 rows) and `opencode` (222)
     got their probes in Round 58, and both now answer every row the store lists —
     458/458 and 222/222 agreeing with their own detail page (全量, not sampled).
-    The other 140 are the JSONL family's own declines. What is left, measured on
-    this machine 2026-09-22:
-    * **No probe yet** — `dsh` 51 rows, `cherrystudio` 10, `qoderwork-app` 1,
-      `qoderwork-cn-app` 2, `kimi` 1. Each is a different read: `dsh` stores zstd
+    `cherrystudio`'s 10 joined them in Round 61, leaving the 2 rows of its own that
+    hold no message at all. The other 140 are the JSONL family's own declines. What is
+    left, measured on this machine 2026-09-22:
+    * **No probe yet** — `dsh` 51 rows, `qoderwork-app` 1, `qoderwork-cn-app` 2,
+      `kimi` 1. Each is a different read: `dsh` stores zstd
       rolls, so there is no seekable tail and a probe costs a full decompress of
       the newest roll (~5 ms per row cold, which the version memo makes once per
-      change); `cherrystudio`'s `session_messages` has no index on the
-      conversation key — `EXPLAIN QUERY PLAN` says `SCAN`, so a probe is
-      affordable only behind a memo, and the memo's key must carry SQLite's
-      change counter (see Round 58's note in the spec); `kimi`'s `wire.jsonl`
+      change); `kimi`'s `wire.jsonl`
       holds no dialogue rows on this machine today, so `unknown` is the honest
       answer even with a probe written.
+    * **`cherrystudio`'s 10 rows are closed (Round 61), and none of them is waiting.**
+      The store lists 10 sessions; the probe now answers 8 and the remaining 2 are the
+      rows tagged `empty:no_message_rows`, which the detail page has no ending for
+      either — measured with the gate's own judge: needs-input `silent` 8 → 0, `lying`
+      0 before and after (全量 over that store, not sampled). All 8 answers are "not
+      waiting", so the header's `⚠ 等你回复` count did not move: what this buys is that
+      a waiting CherryStudio dialogue will say so, and that the audit can now tell an
+      answer from a silence. The store's own shape is why the probe is memoised:
+      `EXPLAIN QUERY PLAN` for the probe's query is `SCAN session_messages` +
+      `USE TEMP B-TREE FOR ORDER BY` (no index leads with `session_id`), and the
+      biggest session holds 108 rows over 3.0 MB of JSON.
     * **140 rows inside the JSONL family**, now split by mechanism rather than
       left as one number: **126 of them are the hidden tool-loop transcripts**
       item 36 counts (93 `qodercn-ide`, 14 `qoder-ide`, 19 `codebuddy`) — the
