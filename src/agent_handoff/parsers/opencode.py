@@ -23,7 +23,7 @@ from collections import Counter
 
 from agent_handoff.locations import home
 from agent_handoff.model import Message, RawSession, SessionMeta, TodoItem, ts_to_iso
-from agent_handoff.parsers.base import Parser
+from agent_handoff.parsers.base import Parser, db_version, probe_memo
 
 
 def _opencode_model(raw) -> str | None:
@@ -54,6 +54,10 @@ class OpenCodeParser(Parser):
     def __init__(self, root=None) -> None:
 
         self.root = root or home() / ".local" / "share" / "opencode"
+        # The store version this pass reads at, read once per rebuild rather
+        # than once per row: 222 rows asking the same question of the same file
+        # is 444 stats and 888 header reads for one number.
+        self._probe_version: tuple | None = None
 
     def available(self) -> bool:
         return self._db().is_file()
@@ -66,6 +70,83 @@ class OpenCodeParser(Parser):
     def _connect(self) -> sqlite3.Connection:
         # WAL files can be live; read-only URI avoids locking the app out.
         return sqlite3.connect(f"file:{self._db()}?mode=ro", uri=True)
+
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """Does the rendered transcript end on a user turn?
+
+        Same shape as the zcode probe: the store's newest `message` row is an
+        assistant row for every session on this machine (a call that wrote no
+        text still writes a row), so the question is about the newest row that
+        *carries* text — which is exactly the row `load()` puts last on the page.
+        Rows here are read newest-first by the same key `load()` orders by, so a
+        candidate found inside the window cannot be beaten by a row outside it;
+        when the whole window holds no candidate the probe declines rather than
+        answering from the oldest row it happened to read. That is also why this
+        probe carries no staleness guard — measured over all 222 live sessions,
+        the rule agrees with each session's own detail page (6 waiting, 216 not),
+        and the same guard tried on `zcode` cost 399 right answers to catch
+        nothing (spec Round 58).
+        """
+        if not self.available():
+            return None
+        if self._probe_version is None:
+            self._probe_version = db_version(self._db())
+        version = self._probe_version
+        return probe_memo(
+            str(self._db()), session_id, version, lambda: self._needs_reply(session_id)
+        )
+
+    # Message rows read per session, newest first. A session whose last 50 rows
+    # all carry no visible text is answered "unknown", not guessed from row 51.
+    _PROBE_ROWS = 50
+
+    def _needs_reply(self, session_id: str) -> bool | None:
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT id, data FROM message WHERE session_id=?"
+                    " ORDER BY time_created DESC, id DESC LIMIT ?",
+                    (session_id, self._PROBE_ROWS),
+                ).fetchall()
+                if not rows:
+                    return None
+                marks = ",".join("?" * len(rows))
+                parts: dict[str, list[dict]] = {}
+                for mid, pdata in con.execute(
+                    f"SELECT message_id, data FROM part WHERE message_id IN ({marks})"
+                    " ORDER BY time_created",
+                    [r[0] for r in rows],
+                ):
+                    try:
+                        p = json.loads(pdata)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(p, dict):
+                        parts.setdefault(str(mid), []).append(p)
+        except sqlite3.Error:
+            return None
+
+        for mid, mdata in rows:
+            try:
+                d = json.loads(mdata)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(d, dict):
+                continue
+            role = d.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            for p in parts.get(str(mid), []):
+                if p.get("type") != "text":
+                    continue
+                text = self.clean_text(p.get("text") or "")
+                if text and not self.is_noise(text):
+                    # The newest row that reaches the page decides; `load()`
+                    # drops every row after it that carries no text, so the
+                    # listing's own date (a MAX over all rows, textless included)
+                    # is not a signal of unread conversation here.
+                    return role == "user"
+        return None
 
     # -- discovery ----------------------------------------------------------
 

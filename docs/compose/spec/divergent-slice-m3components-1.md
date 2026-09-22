@@ -2339,6 +2339,110 @@ was backgrounded; `offsetParent` was null and both widths read 0), so it reporte
 come from a measurement that first proved it had a non-zero width to compare.
 
 
+### Round 58 — the two SQLite stores answered the "Needs input" column: 680 rows that had no probe
+
+Round 56 took the JSONL family from 1,383 answered rows to 2,477 and left a
+number behind: **745 listed rows belonged to stores with no probe at all**. 680 of
+them are the two SQLite dialects, `zcode` (458 sessions) and `opencode` (222).
+Both parsers already read every message of a session for the detail page; neither
+could answer the cheap question, so the column said `unknown` about every one of
+them.
+
+**The trap that made this round's whole design.** The obvious probe is one query:
+`SELECT … FROM message WHERE session_id=? ORDER BY … LIMIT 1`, ask whether that
+row's role is `user`. Measured on the live stores, **the newest message row is an
+assistant row for 458 of 458 zcode sessions and 222 of 222 opencode sessions** —
+because both stores write a row for every model call, including the calls that
+produce nothing a reader can see: a bare tool call, a reasoning-only turn, a step
+marker. Ask the naive question and the column answers "not waiting" for every
+single row of two stores, in a machine where 64 of those conversations are
+actually waiting. With the rule "newest row that **carries visible text**", the
+same stores read user-last 58 (zcode) and 6 (opencode), and both figures match
+what their detail page renders.
+
+So the probe mirrors `load()`'s text predicate rather than inventing one —
+including three things that only show up when you read the renderer:
+
+* a `text` part counts only if `clean_text` leaves something and `is_noise`
+  disagrees with it. Two ways a row holds no human words: a bare
+  `<system-reminder>…</system-reminder>` is stripped to nothing, and one written
+  with an attribute survives cleaning so only `is_noise` can reject it. A probe
+  leaning on either one alone passes half the store.
+* a `timeline` part becomes a transcript line (a goal-verification verdict, a
+  model change that actually changed model). A session ending there has been
+  answered.
+* an `Agent` tool part becomes **its own assistant message** on the page, stamped
+  at the call's time and appended after the main rows — so a session whose newest
+  row is a sub-agent spawn ends answered even though that row carries no text, and
+  when a spawn and a user turn share one timestamp, the spawn is what the reader
+  sees last.
+
+**The page had two orderings, and the probe forced the question.** `zcode`'s
+`load()` sorted its messages by timestamp *only inside* the `if agent_msgs:`
+branch: append order for 441 sessions, chronological for the 17 that ran a
+sub-agent. A probe has to pick one to agree with the page, so the page was made
+uniform first — measured at 0 of 458 sessions changing rendering and no message
+lacking a timestamp, i.e. the branch was invisible on this machine and a
+liability on a store that re-appends a row with an older stamp. Then the probe
+reads its window newest-`time_created`-first, the key the page sorts on, so a row
+outside the window can never be newer than the one that decided: no staleness
+guard needed. The guard was in fact built first and **removed after measuring**:
+over all 458 sessions it silenced 399 answers the detail page agreed with and
+caught 0 it disagreed with, because a zcode session record is dated by events that
+add no message. A signal that does not discriminate is coverage lost for nothing.
+
+**Cost, in counters.** Cold (a store that moved): 1,360 statements and 85,707
+rows returned — zcode 916 / 62,527, opencode 444 / 23,180; the zcode windows carry
+~15 MB of JSON blobs (measured 6.7 MB per 200 sessions). Warm: **0 statements**,
+because the answers are memoised per store version like Round 55/56's. Both
+probes are index searches (`message_session_time_created_id_idx`,
+`part_message_id_id_idx`), and the parts of a window are read in one `IN (…)`
+batch, not per row — the pattern this file's own zcode comment warns about. The
+window is 60 rows (zcode) and 50 (opencode); 80 and 21 sessions are longer than
+that, and none of them declined, so the deciding turn sat inside every window
+today. Keeping the explicit `sequence` tie-break in the ORDER BY costs a temp
+b-tree per probe (the index alone returns the same 60 rows — 0 of 200 windows
+differ), which is paid for the reason it is worth: the tie-break is `load()`'s.
+
+**A cache bug found by a test that flaked.** The memo key started as the family's
+`(mtime_ns, size)`. In the CI run the re-derive test went red — not because the
+cache failed to expire in theory, but because an in-place commit had left the db
+**the same length and, inside one clock tick, the same mtime**: 40 rows rewritten,
+16,384 bytes either way. `PRAGMA data_version` was the natural candidate and is
+useless here (measured: a fresh read-only connection reports the same number as
+before another connection's commit). What moved was SQLite's own 4-byte file
+change counter at offset 24, so the key reads it — plus the WAL header's
+checkpoint sequence and salt, since a store in WAL mode commits there and the main
+file's counter only moves at a checkpoint. The tests pin the mechanism without
+leaning on the clock: two copies differing **only** in those 4 bytes, with equal
+size and `os.utime`-pinned equal mtimes, so a stat-only key cannot pass them.
+
+**What the list page ships now** (same build, same 3,481 rows including the
+children nested under a parent, one variable — the two probes):
+`answered 2,594 → 3,274`, `unknown 887 → 207`, i.e. coverage 74.5% → 94.1%. The
+remaining 207 are named in `docs/limitations.md` item 39: 65 rows in four stores
+whose reads are genuinely different (`dsh`'s zstd rolls, `cherrystudio`'s unindexed
+message table, `kimi`'s dialogue-free wire log), and 142 inside the JSONL family
+whose mechanism split is not measured yet — item 39 says so rather than guessing.
+
+**Evidence.** 23 tests in `tests/test_sqlite_peek.py`, and a 22-mutation sweep over
+both probes, the role gate, the noise predicate, the spawn tie-break, the window
+size, the memo, and the three fields of the version key: **every mutation caught**
+(each one is a wrong answer the suite had to notice, not a crash). Full-store
+agreement with each parser's own `load()`: 458/458 and 222/222, 0 contradictions
+(全量). `scripts/probe_audit.py` stays at 0 `needs: lying`; `pytest` 595 green,
+`scripts/ci_local.py --with-frontend` green (10 gates). Verified in the running
+page, where zcode and opencode rows now carry the ⚠ badge they never had (row
+`sess_30a8d88f`, whose `needs_reply: true` is the same value in the API response
+and on screen).
+
+**Also this round:** Round 57 changed `web/src/api.ts` without committing the
+rebuilt bundle, and `src/agent_handoff/server/static` is tracked — every earlier
+frontend round committed its 13 built files beside its source (`faadf3a`,
+`5885fae`). So a checkout of Round 57 still served the old labels. `e58db5c`
+rebuilds and commits them; the served chunk now carries both new branches.
+
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

@@ -21,7 +21,7 @@ from agent_handoff.model import (
     TodoItem,
     ts_to_iso,
 )
-from agent_handoff.parsers.base import Parser
+from agent_handoff.parsers.base import Parser, db_version, probe_memo
 
 
 def _permission_mode(raw) -> str | None:
@@ -68,6 +68,10 @@ class ZcodeParser(Parser):
 
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or home() / ".zcode" / "cli" / "db" / "db.sqlite"
+        # The store version this pass reads at. Per-pass because a fresh parser
+        # is built for each call, so this cannot leak between rebuilds
+        # (answers themselves are memoised across passes; base.probe_memo).
+        self._probe_version: tuple | None = None
 
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=2)
@@ -322,7 +326,15 @@ class ZcodeParser(Parser):
                 # shows them: as calls inside the conversation, in time order.
                 for _, am in sorted(agent_msgs, key=lambda t: t[0] or 0):
                     messages.append(am)
-                messages.sort(key=lambda x: x.at or "")
+            # The transcript is in the order the conversation happened, with or
+            # without a spawn in it. Sorting only in the `agent_msgs` branch made
+            # two orderings for one page: sequence order for most sessions,
+            # timestamp order for the 17 of 458 that ran a sub-agent. Measured
+            # before moving it out: 0 of 458 sessions change rendering on this
+            # machine, and every message carries a timestamp — because the row
+            # the list page reads as newest is the same question, asked twice
+            # under two rules, used to be able to disagree with itself.
+            messages.sort(key=lambda x: x.at or "")
 
             todos = [
                 TodoItem(
@@ -490,6 +502,121 @@ class ZcodeParser(Parser):
         except sqlite3.Error:
             return None
         return None if kind == "unknown" else kind
+
+    # Message rows the needs-input probe reads per session, newest first. The
+    # store keeps a row for every model call, and most of them carry no
+    # human-visible text (a bare tool call, a reasoning-only turn), so the probe
+    # walks back until it finds one that does: 60 rows is the window, and how
+    # far real sessions actually need is measured in docs/limitations.md.
+    _PROBE_ROWS = 60
+
+    def peek_needs_reply(self, session_id: str) -> bool | None:
+        """Does the transcript end on a user turn the model never answered?
+
+        The same question the JSONL family answers by tail-scanning a file,
+        answered here against the store's own rows — and asked the way `load()`
+        answers it, not the way the table looks at first glance. The naive
+        version of this probe (`newest message row`) is wrong for every single
+        zcode session on this machine: the store's last row is an assistant row
+        458 times out of 458, because a call that produced no text still gets a
+        row. Requiring the row to carry visible text brings it to user 59 /
+        assistant 399, which is what the detail page renders.
+
+        "Carries visible text" is `load()`'s own predicate, mirrored:
+        * a `text` part whose `clean_text` survives `is_noise`;
+        * a `timeline` part the page turns into a line (a goal-verification
+          verdict, or a model change that actually changed model);
+        * an `Agent` tool part, which the page renders as its own assistant
+          message stamped at the call's time — so a session whose newest row is
+          a sub-agent spawn ends on assistant even when no text part exists.
+
+        The window is read newest-`time_created`-first, not newest-`sequence`-
+        first, because the timestamp is the key the page sorts on: a row outside
+        the window can then never be newer than the one that decided, which is
+        the whole reason this probe carries no staleness guard. The JSONL
+        family's guard (decline when the listing dates the row later than the
+        turn it read) was tried here over all 458 live sessions and removed 399
+        answers the detail page agreed with while catching 0 it disagreed with:
+        a zcode session record is touched by events that add no message, so its
+        date stops meaning "newest conversation". A guard whose signal does not
+        discriminate is coverage lost for nothing.
+        """
+        if not self.available():
+            return None
+        if self._probe_version is None:
+            self._probe_version = db_version(self.db_path)
+        version = self._probe_version
+        return probe_memo(
+            str(self.db_path), session_id, version, lambda: self._needs_reply(session_id)
+        )
+
+    def _needs_reply(self, session_id: str) -> bool | None:
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT id, data, time_created FROM message WHERE session_id=?"
+                    " ORDER BY time_created DESC, sequence DESC LIMIT ?",
+                    (session_id, self._PROBE_ROWS),
+                ).fetchall()
+                if not rows:
+                    return None
+                marks = ",".join("?" * len(rows))
+                parts: dict[str, list[dict]] = {}
+                for pr in con.execute(
+                    f"SELECT message_id, data FROM part WHERE message_id IN ({marks})"
+                    " ORDER BY sequence",
+                    [r["id"] for r in rows],
+                ):
+                    try:
+                        pdata = json.loads(pr["data"])
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(pdata, dict):
+                        parts.setdefault(pr["message_id"], []).append(pdata)
+        except sqlite3.Error:
+            return None
+
+        # Every message `load()` would place on the page from these rows, with
+        # the stamp that decides where it lands: (at, tie, role). The tie is the
+        # page's own rule — a sub-agent spawn is appended after the main rows, so
+        # among messages sharing one timestamp it is the later one, and it is
+        # always assistant.
+        found: list[tuple[str, int, str]] = []
+        for r in rows:
+            try:
+                mdata = json.loads(r["data"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(mdata, dict):
+                continue
+            role = mdata.get("role", "")
+            if role not in ("user", "assistant"):
+                continue
+            at = ts_to_iso(r["time_created"]) or ""
+            carries = False
+            for pdata in parts.get(r["id"], []):
+                ptype = pdata.get("type")
+                if ptype == "text":
+                    text = self.clean_text(pdata.get("text") or "")
+                    if text and not self.is_noise(text):
+                        carries = True
+                elif ptype == "timeline":
+                    gv = pdata.get("verification") or {}
+                    verdict = str(gv.get("nextAction") or gv.get("reason") or "").strip()
+                    if verdict:
+                        carries = True
+                    elif pdata.get("timelineType") == "model_change":
+                        frm = (pdata.get("fromModel") or {}).get("modelID") or "?"
+                        to = (pdata.get("toModel") or {}).get("modelID") or "?"
+                        carries = carries or frm != to
+                elif ptype == "tool" and (pdata.get("tool") or "") == "Agent":
+                    found.append((at, 1, "assistant"))
+            if carries:
+                found.append((at, 0, role))
+        if not found:
+            return None
+        at, _tie, role = max(found, key=lambda f: (f[0], f[1]))
+        return role == "user"
 
     @staticmethod
     def _interruption(con: sqlite3.Connection, session_id: str) -> Interruption:

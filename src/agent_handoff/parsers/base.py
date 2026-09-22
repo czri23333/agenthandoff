@@ -83,6 +83,77 @@ def json_records_entry(path: str, records: list[tuple[str, dict]]) -> dict:
     }
 
 
+def _change_stamp(path: Path, *, wal: bool) -> bytes | None:
+    """The bytes SQLite itself uses to say "this file has been written".
+
+    For a database that is the 4-byte file change counter at offset 24; for a
+    WAL header the checkpoint sequence and salt at offsets 12..20, which move
+    when the log restarts.
+    """
+    start, stop = (12, 20) if wal else (24, 28)
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            data = f.read(stop - start)
+    except OSError:
+        return None
+    return data or None
+
+
+def db_version(db_path: Path) -> tuple:
+    """A SQLite store's state as of this pass: the db file plus its live WAL.
+
+    Two signals are needed, and neither alone is enough:
+
+    * mtime and size catch a growth — but an in-place commit was measured to
+      leave **both** unchanged (40 rows rewritten inside one clock tick, the
+      file still 16,384 bytes), and a probe memo keyed on them would keep
+      serving the answer from before the conversation moved. That is the whole
+      failure mode of a cache over a database file, and it is why the change
+      counter is part of the key rather than an extra.
+    * the WAL sidecar, because a store in WAL mode commits there and the main
+      file's counter only moves at a checkpoint. A missing sidecar is part of
+      the version too: the WAL appearing is a change.
+    """
+    parts = []
+    for suffix in ("", "-wal"):
+        path = Path(f"{db_path}{suffix}")
+        try:
+            st = path.stat()
+        except OSError:
+            parts.append((None, None, None))
+        else:
+            parts.append((st.st_mtime_ns, st.st_size, _change_stamp(path, wal=bool(suffix))))
+    return tuple(parts)
+
+
+# store -> {session id: (the store version the answer was read at, the answer)}.
+# Module-level because `parsers/__init__.py` builds a fresh parser per call, so
+# instance state cannot outlive the pass that created it.
+_SQL_NEEDS_REPLY_CACHE: dict[str, dict] = {}
+
+
+def probe_memo(store: str, session_id: str, version: tuple, derive):
+    """One probe answer per store version, not one per poll.
+
+    The cockpit re-lists every session every 30 seconds, and a SQLite store is
+    one file holding every conversation: re-deriving means re-querying rows that
+    have not moved since the last answer. The caller passes the store version it
+    read at (see `db_version`), so a row re-derives as soon as the store changes
+    and not before. ``None`` is cached like any other answer — "this store could
+    not say" is itself a per-version fact, and re-asking costs the same.
+    """
+    memo = _SQL_NEEDS_REPLY_CACHE.setdefault(store, {})
+    hit = memo.get(session_id)
+    if hit is not None and hit[0] == version:
+        return hit[1]
+    answer = derive()
+    if len(memo) > 8192:
+        memo.clear()
+    memo[session_id] = (version, answer)
+    return answer
+
+
 class Parser(ABC):
     """A parser turns one CLI's private storage into a RawSession."""
 

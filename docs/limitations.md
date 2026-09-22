@@ -596,63 +596,66 @@ sampled away.
     rebuilds itself pays per rebuild; the pass is a per-window coherence boundary,
     not a cache with a lifetime.
 
-39. **`Needs input` still says nothing for 745 listed rows, and for 14 more it
-    declines on purpose.** Two different gaps, both measured on this machine
-    (2026-09-22, whole store):
-    * **No probe at all** — the stores whose conversations are not JSONL
-      transcripts have no tail to read: `zcode` 458 rows, `opencode` 222, `dsh`
-      51, `cherrystudio` 10, `qoderwork-app` 1, `qoderwork-cn-app` 2, `kimi` 1.
-      Each of those parsers knows how to read its messages (the detail page works);
-      none implements `peek_needs_reply`, so every row is `unknown`. A per-store
-      cheap signal is the fix — `zcode` and `opencode` keep a message sequence in
-      SQLite, where "the last message is a user one" is a one-row query, not a scan.
-    * **A window that cannot reach the turn** — 6 of the JSONL family's 2,491 rows
-      end on a turn further above EOF than 64 KB (5 within 256 KB, 1 needs more
-      than 2 MB), and 8 more are declined by the date guard described below.
-      Answering all 14 looks cheap: the nearest turns sum to 0.5 MB. It is cheap
-      *today, on this machine*, and the same retry on another store's quiet rows is
-      priced by how many rows decline, not by a constant — so the shape worth
-      doing next is a second, larger window (1 MB, head file only, memoised by
-      version like the first) that runs only on rows the 64 KB window gave up on.
-      Reading every row's whole transcript stays off the table: 144 MB per rebuild
-      for the rows already answered. Round 56's memo makes even that a
-      per-store-change price rather than a per-poll one (measured: 2 reads, 0.1 MB
-      on a warm rebuild), which is what makes the smaller retry affordable at all.
-    The guard's own trade is measured against the probe without it: 8 "not waiting"
-    answers silenced, 7 of them ones the window had right, and the 8th is this
-    round's only known contradiction with a detail page. Relative to the probe as
-    it shipped before Round 56, 4 rows that used to answer now decline.
+39. **`Needs input` still says nothing for 207 listed rows.** The 745 rows Round 56
+    counted without a probe are down to 65: `zcode` (458 rows) and `opencode` (222)
+    got their probes in Round 58, and both now answer every row the store lists —
+    458/458 and 222/222 agreeing with their own detail page (全量, not sampled).
+    What is left, measured on this machine 2026-09-22:
+    * **No probe yet** — `dsh` 51 rows, `cherrystudio` 10, `qoderwork-app` 1,
+      `qoderwork-cn-app` 2, `kimi` 1. Each is a different read: `dsh` stores zstd
+      rolls, so there is no seekable tail and a probe costs a full decompress of
+      the newest roll (~5 ms per row cold, which the version memo makes once per
+      change); `cherrystudio`'s `session_messages` has no index on the
+      conversation key — `EXPLAIN QUERY PLAN` says `SCAN`, so a probe is
+      affordable only behind a memo, and the memo's key must carry SQLite's
+      change counter (see Round 58's note in the spec); `kimi`'s `wire.jsonl`
+      holds no dialogue rows on this machine today, so `unknown` is the honest
+      answer even with a probe written.
+    * **142 rows inside the JSONL family** — 95 of them `qodercn-ide`, 22
+      `qoder-ide`, 22 `codebuddy`, and 3 elsewhere. Not yet split by mechanism,
+      and the split matters: item 39's earlier "14 declines" counted *listed*
+      rows at the parser, while this number is the list page's own rows, which
+      include the `hidden_sessions()` transcripts Round 54 started shipping. A
+      tool-loop transcript that ends on its delegated task row is the shape that
+      Round 56 measured as unreadable-by-design, so some part of these 142 is
+      that, and some may be the 64 KB window. Measure before choosing between a
+      second, larger window (1 MB, head file only, memoised by version) and
+      nothing at all. Reading every row's whole transcript stays off the table:
+      144 MB per rebuild for the rows already answered. Round 56's memo makes
+      even that a per-store-change price rather than a per-poll one (measured: 2
+      reads, 0.1 MB on a warm rebuild), which is what makes the smaller retry
+      affordable at all.
+    Round 56's date guard stays: 8 "not waiting" answers silenced, 7 of them ones
+    the window had right, and the 8th is that round's only known contradiction
+    with a detail page. The same guard was tried on `zcode` in Round 58 and
+    **rejected**: it removed 399 answers the detail page agreed with and caught
+    none it disagreed with, because a zcode session record is dated by events that
+    add no message.
 
 40. **One row per store shape can still be answered wrongly, and only the detail
-    page knows.** `load()` sorts a session's messages by their recorded timestamp
-    when every message carries one, so "what the reader sees last" is the *newest*
-    turn, not the last row in the file. The probe reads the end of the file.
-    Measured across 2,485 live rows: a window's newest turn is its last physical
-    turn in every case (0 divergences), so the two definitions agree *inside* a
-    window — but the newest turn can sit above the window entirely, which is how
-    `codebuddy`'s `5771fa81` produced this round's only known contradiction. The
-    guard catches that instance; it cannot catch a store that both appends out of
-    order and keeps its newest turn beyond 64 KB. `scripts/probe_audit.py` is the
-    check that would notice: `scripts/probe_audit.py` reports 0 contradictions for
-    either probe over 3,352 sessions today, sampled 40 per store where the store is
-    larger — and inverting the probe on purpose makes it report 37 and exit 1, so
-    the 0 is reachable-but-not-hit, not unreachable.
-
-41. **The probe reads the last turn in the window; the page reads the newest turn.**
-    `load()` sorts a session's messages by their recorded timestamp when every one
-    of them carries one, so its last row is the *newest*, while the probe stops at
-    the last row *in the file*. Measured on the 2,485 live rows that have a turn
-    inside their window, those two are the same row in every case — the stores
-    append in order — so nothing is paid today for the difference, and reading every
-    candidate row in the window to find the newest would raise rows-parsed per
-    rebuild for 0 changed answers. It is therefore left as an alignment that the
-    gate checks rather than the code enforces: `scripts/probe_audit.py` judges the
-    probe against the whole transcript with `load()`'s ordering rule mirrored
-    (including its stable tie-break, which one row of this machine's stores needs —
-    two turns in the same second), and reports a `needs: lying` count that must stay
-    0. Two things the gate cannot catch are named by that sentence: a wrong turn
-    predicate (it is the probe's own), and a store whose messages arrive without
-    timestamps, where `load()` skips its sort and the two definitions coincide again.
+    page knows.** `load()` sorts a session's messages by their recorded timestamp,
+    so "what the reader sees last" is the *newest* turn, not the last row in the
+    file or in the store's append order. The probes read the end of their window.
+    Measured across 2,485 live JSONL rows: a window's newest turn is its last
+    physical turn in every case (0 divergences), so the two definitions agree
+    *inside* a window — but the newest turn can sit above the window entirely,
+    which is how `codebuddy`'s `5771fa81` produced Round 56's only known
+    contradiction. The guard catches that instance; it cannot catch a store that
+    both appends out of order and keeps its newest turn beyond 64 KB.
+    Round 58 removed one way this could bite silently: `zcode`'s `load()` sorted
+    its messages **only when the session ran a sub-agent** (`if agent_msgs:`), so
+    one page had two orderings — append order for 441 sessions, chronological for
+    17. Measured before the sort was made uniform: 0 of 458 sessions change
+    rendering, and no message lacks a timestamp, so the branch was invisible here
+    and load-bearing on a store that re-appends a row with an older stamp.
+    `scripts/probe_audit.py` is the check that notices either way: it reports 0
+    contradictions for either probe today (sampled 40 per store; the two stores
+    this round added were checked over all 680 of their rows), and inverting a
+    probe on purpose makes it report 37 `needs: lying` and exit 1 — so the 0 is
+    reachable-but-not-hit, not unreachable. Two things the gate cannot catch are
+    named by that sentence: a wrong turn predicate (it is the probe's own, so its
+    tests carry that), and a store whose messages arrive without timestamps, where
+    the two definitions coincide again.
 
 ## How to check any of this yourself
 
