@@ -2294,6 +2294,15 @@ one-row query), 6 rows whose turn is above the window, and the 8 the guard
 silences. The last two cost 0.5 MB to reach, which is a bounded retry worth doing
 next rather than a reason the column stays quiet.
 
+**Delivery state at commit time:** this round's commits (`8efcfed` and the doc
+follow-ups after it) are local. The
+push did not go out — this machine had no external network in the window this round
+was committed (07:07–07:19 UTC: `github.com`, `pypi.org` and `google.com` all fail
+to connect both directly and through the configured `127.0.0.1:7892` proxy), so
+`origin` still points at Round 55. Retry `git push origin HEAD` with the proxy
+variables stripped, and confirm with `git ls-remote` rather than trusting the
+push's own exit line.
+
 
 ## [S1] Problem
 
