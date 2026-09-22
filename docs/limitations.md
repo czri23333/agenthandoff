@@ -611,16 +611,25 @@ sampled away.
       change counter (see Round 58's note in the spec); `kimi`'s `wire.jsonl`
       holds no dialogue rows on this machine today, so `unknown` is the honest
       answer even with a probe written.
-    * **142 rows inside the JSONL family** — 95 of them `qodercn-ide`, 22
-      `qoder-ide`, 22 `codebuddy`, and 3 elsewhere. Not yet split by mechanism,
-      and the split matters: item 39's earlier "14 declines" counted *listed*
-      rows at the parser, while this number is the list page's own rows, which
-      include the `hidden_sessions()` transcripts Round 54 started shipping. A
-      tool-loop transcript that ends on its delegated task row is the shape that
-      Round 56 measured as unreadable-by-design, so some part of these 142 is
-      that, and some may be the 64 KB window. Measure before choosing between a
-      second, larger window (1 MB, head file only, memoised by version) and
-      nothing at all. Reading every row's whole transcript stays off the table:
+    * **142 rows inside the JSONL family**, now split by mechanism rather than
+      left as one number: **126 of them are the hidden tool-loop transcripts**
+      item 36 counts (93 `qodercn-ide`, 14 `qoder-ide`, 19 `codebuddy`) — the
+      same rows, whose audit reads `0 msgs, none a user turn`, so `unknown` is
+      the honest answer and the header's `⊘ 无用户消息` badge already counts
+      them; **14 are the listed declines Round 56 measured** (6 turns above the
+      64 KB window, 8 silenced by the date guard — re-counted here over all four
+      family stores: `codebuddy` 3, `qoder-ide` 8, `qodercn-ide` 2, `workbuddy`
+      1); and **2 are `qoderwake-cn` rows whose transcripts the shared store does
+      not index at list time**, so the delegated probe has no address to read
+      while `load()` — which falls back to a scan — still finds 11 messages and
+      ends on a user turn. Those 2 are the only ones in the 142 that are silent
+      about something the page can answer, and the fix is the one Round 56
+      built for the walking listing: record the resolved path during the pass so
+      the probe never has to scan per row.
+      What that leaves worth doing: the 6 window misses cost 0.5 MB to reach and
+      one of them (`codebuddy`'s) sits 14.8 MB above EOF — a second, larger
+      window answers 5 of the 6 and the sixth argues for a byte cap rather than a
+      bigger constant. Reading every row's whole transcript stays off the table:
       144 MB per rebuild for the rows already answered. Round 56's memo makes
       even that a per-store-change price rather than a per-poll one (measured: 2
       reads, 0.1 MB on a warm rebuild), which is what makes the smaller retry
