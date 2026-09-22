@@ -533,6 +533,31 @@ sampled away.
       contiguous run; the character-subsequence highlight the research describes
       would need the matcher to report which characters it used.
 
+36. **The hidden-row chip counts by a rule that is a title, not a fact.** Spec
+    Round 54 made the cockpit's silent drops countable: `hidden_sessions()`
+    receipts, the server shipping them with `hidden_reason`, and a chip that says
+    126 on this machine (93 `qodercn-ide`, 14 `qoder-ide`, 19 `codebuddy`) and
+    reveals them on click. Three things are still true:
+
+    - **The rule is `title == "工具循环会话（无用户消息）"`.** A conversation whose
+      title happens to be exactly that string would be dropped from the list. It
+      would then also appear on the receipt, so it is countable and revealable
+      rather than gone — but the rule should ask whether the transcript holds a
+      user turn, not what its label says. No such session exists on this machine:
+      the audit classifies all 126 as `EMPTY`, and every one of those 126 lines
+      reads `0 msgs, none a user turn`.
+    - **The number is not the number of rows that appear.** Revealing 126 added
+      19 rendered rows in grouped mode and left flat mode at its 50-row page
+      while 4 revealed rows moved into it, because a group renders 50 at a time.
+      The tooltip says so; a reader who expects +126 will think the chip lies.
+    - **The census was blind to 19 of them until this round.** The gate that
+      asks "is any conversation invisible?" built its id universe from each
+      parser's file index, and codebuddy keeps its tool loops outside that index
+      — so it reported 107 where the truth is 126. It now reads the receipts and
+      fails if any hidden id is neither listed elsewhere nor classified. That is
+      the same failure shape as everything else in this file: a check whose
+      producer cannot see the thing it names passes green while saying nothing.
+
 ## How to check any of this yourself
 
 ```bash

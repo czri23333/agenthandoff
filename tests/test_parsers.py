@@ -7,6 +7,7 @@ from pathlib import Path
 from agent_handoff.parsers.codex import CodexParser
 from agent_handoff.parsers.dsh import DshParser
 from agent_handoff.parsers.jsonl_family import (
+    _TOOLLOOP_TITLE,
     ClaudeCodeParser,
     CodebuddyParser,
     QodercnIdeParser,
@@ -415,6 +416,21 @@ def test_qoder_tool_loop_hidden_but_loadable(tmp_path):
     raw = p.load("bbb222")
     assert raw is not None  # hidden from the list, still loadable by id
     assert raw.messages == []  # and it is honestly empty: nothing to pretend
+
+    # The drop has a receipt (spec Round 54). Hiding 107 of a store's 2,638
+    # conversations was invisible, and from a row count "hidden" and "lost" are
+    # the same observable — so the parser keeps what it dropped and says why.
+    hidden = p.hidden_sessions()
+    assert [m.session_id for m in hidden] == ["bbb222"], hidden
+    assert hidden[0].hidden_reason == "tool-loop"
+    assert hidden[0].title == _TOOLLOOP_TITLE
+    # Re-listing replaces the receipt instead of accumulating a second copy of
+    # the same row, which is what would make a count of them lie.
+    p.list_sessions()
+    assert len(p.hidden_sessions()) == 1
+    # A parser that hides nothing says so, rather than being asked a question it
+    # cannot answer.
+    assert QodercnIdeParser(tmp_path / ".qoder-cn").hidden_sessions() == []
 
 
 def test_qoder_shared_store_splits_families(tmp_path):

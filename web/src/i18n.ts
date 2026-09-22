@@ -205,6 +205,11 @@ const dict = {
     refreshPaused: "自动更新已暂停",
     refreshPausedWhy:
       "输入框或列表行持有焦点时暂停轮询，免得你正在看的那一行被重排；点「刷新」立即更新",
+    hiddenChip: "无用户消息",
+    hiddenHint:
+      "这些转录没有一条属于自己的用户消息（工具循环 / 自动化子代理运行），产品自己的界面也不列它们。"
+      + "数字按当前筛选计算；打开后它们进入列表，但每组每次仍只渲染 50 行，所以行数不一定多出这些。"
+      + "每条本来就仍可按 id 直接打开。",
     groupBy: "分组方式",
     groupDomain: "按项目",
     groupActivity: "按活跃",
@@ -461,6 +466,12 @@ const dict = {
     refreshPaused: "auto-refresh paused",
     refreshPausedWhy:
       "Polling holds while an input or a row has focus, so the row you are reading cannot move out from under you; Refresh reloads now",
+    hiddenChip: "no user turn",
+    hiddenHint:
+      "These transcripts carry no user message of their own (tool loops / automation sub-agent runs), "
+      + "and the product's own UI does not list them either. The number follows the filters you have on. "
+      + "Revealing puts them into the list, but a group still renders 50 rows at a time, so the row count "
+      + "need not grow by all of them. Each was always loadable by id.",
     groupBy: "grouping",
     groupDomain: "project",
     groupActivity: "activity",

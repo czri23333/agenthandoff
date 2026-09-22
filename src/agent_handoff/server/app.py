@@ -442,7 +442,11 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
     for p in all_parsers():
         if cli and p.cli != cli:
             continue
-        for m in p.list_sessions():
+        # Listed rows plus the ones this parser deliberately did not list
+        # (tool-loop transcripts): the cockpit hides them by default and says
+        # how many, instead of shipping a store of 2,638 conversations whose
+        # real size the reader cannot check (spec Round 54).
+        for m in [*p.list_sessions(), *p.hidden_sessions()]:
             if cwd and cwd.lower() not in m.cwd.lower():
                 continue
             if q and q.lower() not in m.title.lower():
@@ -472,6 +476,10 @@ def _build_session_roots(cli: str | None, cwd: str | None, q: str | None) -> lis
                     # Task-panel entry whose session the readable snapshot no
                     # longer lists (archived or deleted) — the product's own tag.
                     **({"archived": True} if "snapshot_archived" in m.notes else {}),
+                    # Set on a row the parser did not list (a tool-loop
+                    # transcript). Absent otherwise, so the frontend's filter is
+                    # `!s.hidden_reason` and the count it shows is this many rows.
+                    **({"hidden_reason": m.hidden_reason} if m.hidden_reason else {}),
                     # proven end-state where the store has a cheap signal;
                     # null means unknown (never faked as clean)
                     "status": p.peek_status(m.session_id),

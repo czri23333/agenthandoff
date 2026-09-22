@@ -80,6 +80,14 @@ class QoderwakeParser(Parser):
             return []
         return self._shared.list_sessions()
 
+    def hidden_sessions(self) -> list[SessionMeta]:
+        """The wake transcripts the shared store dropped, which this entry owns.
+
+        The listing and the hiding both happen on the shared parser (it reads
+        that store), so the receipt has to be read from there too.
+        """
+        return [] if self._shared is None else self._shared.hidden_sessions()
+
     def available(self) -> bool:
         return self._db().is_file()
 
@@ -258,4 +266,4 @@ class _WakeShared(QodercnIdeParser):
                 ("You name the current internal session", "You are the Leader for a temporary")
             ) and "team-groups" in (m.cwd or ""):
                 m.title = "团队工作会话 (QoderWake)"
-        return out
+        return self._split_toolloops(out)

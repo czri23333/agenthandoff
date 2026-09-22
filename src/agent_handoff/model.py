@@ -90,6 +90,13 @@ class SessionMeta:
     # Files the user attached to the conversation (zcode file parts:
     # filename + path). Distinct from files a tool touched mid-run.
     attachments: list[str] = field(default_factory=list)
+    # Why this conversation is not in ``list_sessions()``. A transcript with no
+    # user turn of its own is an internal tool loop rather than a conversation,
+    # and the product's own UI does not list those — but "this store holds 107
+    # rows we did not show you" is a fact a surface has to be able to state, so
+    # the dropped rows are kept and tagged instead of vanishing. ``None`` means
+    # listed; see ``Parser.hidden_sessions``.
+    hidden_reason: str | None = None
 
 
 @dataclass

@@ -84,6 +84,23 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
     }
   }, [collapsed]);
   const [needsReplyOnly, setNeedsReplyOnly] = useState(false);
+  const [showHidden, setShowHidden] = useState(() => {
+    // Refresh-safe, like the fold state: revealing the tool loops is a reading
+    // choice, not a per-page-load one.
+    try {
+      return sessionStorage.getItem("ah-showhidden") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (showHidden) sessionStorage.setItem("ah-showhidden", "1");
+      else sessionStorage.removeItem("ah-showhidden");
+    } catch {
+      /* storage full/blocked: the reveal just won't survive a reload */
+    }
+  }, [showHidden]);
   const [groupMode, setGroupMode] = useState<GroupMode>(() => {
     // Refresh-safe like the fold state below.
     try {
@@ -339,8 +356,22 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
   const visible = sorted.filter(
     (s) =>
       (!domainFilter || s.domain === domainFilter) &&
-      (!needsReplyOnly || s.needs_reply === true),
+      (!needsReplyOnly || s.needs_reply === true) &&
+      (!s.hidden_reason || showHidden),
   );
+  /* How many conversations the parsers dropped, counted over the rows the list
+     is already showing (domain and needs-reply filters applied) so it answers
+     "hidden from *what you are looking at*", not a store-wide total this view
+     cannot reproduce. It is deliberately NOT the number of rows that appear when
+     revealed: a group renders 50 at a time, so revealing 126 added 19 rendered
+     rows in grouped mode, and in flat mode left the page at 50 while 4 of the
+     revealed rows moved into it -- measured, spec Round 54. The tooltip says so. */
+  const hiddenInView = sorted.filter(
+    (s) =>
+      !!s.hidden_reason &&
+      (!domainFilter || s.domain === domainFilter) &&
+      (!needsReplyOnly || s.needs_reply === true),
+  ).length;
   const grouped = useMemo(() => {
     if (groupMode === "flat") return [["", visible] as [string, SessionMeta[]]];
     if (groupMode === "activity") {
@@ -517,6 +548,24 @@ export default function Dashboard({ onOpen }: { onOpen: (cli: string, sid: strin
             )}
           </button>
         </Tooltip>
+        {/* The store holds more conversations than this list shows, and the only
+            honest way to say that is a number the list can reproduce (spec
+            Round 54). Tool loops are not conversations — the product's own UI
+            does not list them either — but "hidden" and "lost" look identical
+            from a row count, so the chip both states and undoes it. */}
+        {hiddenInView > 0 && (
+          <Tooltip title={t("hiddenHint")}>
+            <button
+              type="button"
+              className="ah-filterchip"
+              aria-pressed={showHidden}
+              onClick={() => setShowHidden((v) => !v)}
+            >
+              ⊘ {t("hiddenChip")}
+              <span className="ah-num">{hiddenInView}</span>
+            </button>
+          </Tooltip>
+        )}
         <div className="ml-auto flex items-center gap-3">
           {indexLine()}
           {showHits && !building && (

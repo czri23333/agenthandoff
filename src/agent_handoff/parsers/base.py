@@ -88,6 +88,16 @@ class Parser(ABC):
     @abstractmethod
     def list_sessions(self) -> list[SessionMeta]: ...
 
+    def hidden_sessions(self) -> list[SessionMeta]:
+        """The rows ``list_sessions()`` drops, kept and tagged rather than gone.
+
+        The default is "this parser hides nothing", which is also the honest
+        answer for most dialects. A surface that counts conversations has to be
+        able to say how many it did not show, so the hiding is a filter with a
+        receipt, not a deletion (spec Round 54).
+        """
+        return []
+
     @abstractmethod
     def load(self, session_id: str) -> RawSession | None: ...
 

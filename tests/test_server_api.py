@@ -254,12 +254,22 @@ def test_sessions_delta_and_etag(client, monkeypatch):
         M.SessionMeta(cli="zcode", session_id="s-new", title="new", cwd="D:/d",
                       updated_at="2026-09-03T00:00:00+00:00"),
     ]
+    # A row the parser did not list. It must reach the cockpit with its reason,
+    # so the list can say how much of the store it is not showing (Round 54).
+    hidden = [
+        M.SessionMeta(cli="zcode", session_id="s-loop", title="工具循环会话（无用户消息）",
+                      cwd="D:/d", updated_at="2026-01-02T00:00:00+00:00",
+                      hidden_reason="tool-loop"),
+    ]
 
     class FakeParser:
         cli = "zcode"
 
         def list_sessions(self):
             return metas
+
+        def hidden_sessions(self):
+            return hidden
 
         def peek_status(self, sid):
             return None
@@ -272,7 +282,10 @@ def test_sessions_delta_and_etag(client, monkeypatch):
     r = client.get("/api/sessions")
     assert r.status_code == 200
     assert r.headers.get("etag")
-    assert isinstance(r.json(), list) and len(r.json()) == 2
+    rows = {s["session_id"]: s for s in r.json()}
+    assert isinstance(r.json(), list) and len(r.json()) == 3, "listed rows plus the receipt"
+    assert "hidden_reason" not in rows["s-new"], "a listed row must not carry a reason"
+    assert rows["s-loop"]["hidden_reason"] == "tool-loop"
     r304 = client.get("/api/sessions", headers={"If-None-Match": r.headers["etag"]})
     assert r304.status_code == 304
     d = client.get("/api/sessions", params={"since": "2026-06-01T00:00:00+00:00"}).json()

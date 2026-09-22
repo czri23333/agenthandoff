@@ -2062,6 +2062,74 @@ contextual action zone, ⌘K, a preview pane, `overflow-anchor: none` under
 virtualisation, "Today/This week" absolute buckets — are listed in
 `docs/limitations.md` and unshipped.
 
+### Round 54 — the list said nothing about the conversations it dropped
+
+The rule this round answers to is the one that calls a silently-discarded input
+P0. The listing has always dropped rows: a transcript that carries no user
+message of its own is an internal tool loop, and the product's own UI does not
+list those either. On this machine that rule removes **126 rows of 3,476** —
+93 `qodercn-ide`, 14 `qoder-ide`, 19 `codebuddy` — and no surface could answer
+"how many conversations does this store hold that you did not show me?". From a
+row count, *hidden* and *lost* are the same observable.
+
+The gate written an hour earlier for exactly that question
+(`scripts/audit_hidden_sessions.py`, commit `df45c70`) reported **107**. It was
+19 short, and the reason is the same class of bug the gate exists to catch: its
+id universe came from each parser's `_index`, and codebuddy keeps its tool loops
+outside that index. So the census was blind to the rows it was supposed to be
+worried about. It now reads the parsers' receipts too, and **fails** if a hidden
+id is neither listed elsewhere nor classified — a coverage check on the checker.
+Chip and audit agree at 126, with `EMPTY=126, MERGED=5, ABSORBED=2, LOST=0`.
+
+What changed:
+
+1. `SessionMeta.hidden_reason` and `Parser.hidden_sessions()` (default `[]`:
+   *a parser that hides nothing says so*), with `_split_toolloops` on the jsonl
+   base keeping the dropped rows on the parser that dropped them.
+2. The split moved **out of `_list_all` and to after each family filter**,
+   because four entries read two shared stores — a stash made before the split
+   would report the same 93 rows once per entry. Verified rather than argued:
+   the payload has **0 duplicate `(cli, session_id)`** pairs, and the listed set
+   is byte-for-byte the set the parsers list (3,350 rows in the tree, 0 missing,
+   0 extra).
+3. The server ships the hidden rows with their reason; the dashboard keeps them
+   out of the list by default behind a chip that carries the count, is
+   `aria-pressed`, survives a reload, and reveals on click.
+
+The cost, stated as work rather than seconds: **14,894 vs 14,796 jsonl opens**
+per rebuild (two runs of each arm, spread of 7 within an arm) — **+0.7 %** for
+126 more rows. Seconds cannot carry this claim on this machine: the same arm
+measured 9.4 s and 10.7 s, and the *first* control measured slower than the arm
+it was controlling, because the patch was applied to instances from a separate
+`all_parsers()` call while the builder made its own. A control that differs from
+its arm by nothing is not a control.
+
+**What the chip's number is not.** The comment that went in first claimed it was
+"the number of rows that appear". Measured, it is not: revealing 126 added **19
+rendered rows** in grouped mode, and in flat mode left the page at its 50-row
+cap while **4** revealed rows moved into it — because a group renders 50 at a
+time and the revealed rows are old. The number is "how many conversations are
+hidden from what you are looking at", the tooltip now says so in both languages,
+and the code comment records the measurement that corrected it.
+
+**One more instrument trap, same family as the dead v5 selectors this file has
+already recorded twice:** the tooltip probe asked for `.ant-tooltip-inner` and
+reported *not painted*. That is antd v5's class name; v6 renders `.ant-tooltip`,
+and re-measured with `[role=tooltip]` the caveat text is there — and it also
+opens on keyboard focus, which the pointer-only probe could not have seen.
+
+Coverage added with the change: the parser test that already proved a tool loop
+is hidden-but-loadable now also asserts the receipt (`hidden_sessions()`, the
+reason, no accumulation across listings, and an empty receipt from a parser that
+hid nothing), and the API test asserts a hidden row ships with its reason while
+a listed row carries no such key.
+
+What is still true and still uncomfortable: the hide rule is *title equality*
+with the sentinel, so a session a user named
+`工具循环会话（无用户消息）` would be dropped from the list — it is on the receipt
+now, so it is at least countable, but the rule should key off a fact about the
+turns. Recorded in `docs/limitations.md`.
+
 ## [S1] Problem
 
 Four slices have made the cockpit's *tokens* official: the palette is Google's 49

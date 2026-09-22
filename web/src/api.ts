@@ -46,6 +46,9 @@ export interface SessionMeta {
   automation?: string;
   /** Task-panel session the readable snapshot no longer lists (archived or deleted). */
   archived?: boolean;
+  // Set on a row the parser did not list — a transcript with no user turn of
+  // its own. The dashboard hides these by default and shows how many there are.
+  hidden_reason?: string | null;
 }
 
 export interface UsageModel {

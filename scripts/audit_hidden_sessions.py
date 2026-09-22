@@ -9,8 +9,8 @@ A conversation is only *lost* when it is removed by a rule and nothing else
 shows it: no listed row contains its turns.
 
 This script asks that question end to end and exits 1 when the answer is not
-"nothing is lost", so the claim is checked rather than argued. Three ways this
-measurement goes wrong are designed out, because all three were walked into while
+"nothing is lost", so the claim is checked rather than argued. Four ways this
+measurement goes wrong are designed out, because all four were walked into while
 writing it:
 
 * `listed` must come from **every** available entry, not only the stores that
@@ -23,6 +23,10 @@ writing it:
   absorbed fragments have to be read from the machinery, not from the listing's
   output -- an absorbed fragment is by construction absent from the list it was
   removed from, so a checker that reads only that list classifies nothing.
+* The id universe must include what each parser says it *hid*, not only what its
+  files index. The first version missed 19 codebuddy tool loops that way and
+  reported 107 hidden conversations where the cockpit's own chip says 126; the
+  script now fails if any hidden id is neither listed elsewhere nor classified.
 
 Usage: python scripts/audit_hidden_sessions.py
 """
@@ -40,7 +44,7 @@ from agent_handoff.parsers.base import read_jsonl  # noqa: E402
 
 
 def reported_ids(parsers) -> dict:
-    """session id -> the parsers whose *files* report it."""
+    """session id -> the parsers whose *files or receipts* report it."""
     owners: dict[str, list] = {}
     for p in parsers:
         ids: set[str] = set()
@@ -52,6 +56,14 @@ def reported_ids(parsers) -> dict:
                 ids |= {p._thread_of(r.path, r.header) for r in p._rollouts()}
             except Exception:  # noqa: BLE001 - a store that will not enumerate is news, not a crash
                 print(f"  NOTE: {p.cli} could not enumerate its own files")
+        # A parser's own receipt for what it hid. Without this the census is
+        # blind to exactly the rows the listing removed by rule: codebuddy keeps
+        # its 19 tool loops outside `_index`, so a file-scan-only universe
+        # reported 107 hidden ids while the cockpit's chip said 126.
+        try:
+            ids |= {m.session_id for m in p.hidden_sessions()}
+        except Exception:  # noqa: BLE001 - same: a parser that cannot answer is news
+            print(f"  NOTE: {p.cli} could not report what it hides")
         for sid in ids:
             owners.setdefault(sid, []).append(p)
     return owners
@@ -132,6 +144,21 @@ def main() -> int:
 
     tally = ", ".join(f"{k}={v}" for k, v in sorted(kinds.items()))
     print("\nsummary:", tally or "nothing to classify")
+
+    # The census's own coverage: every row a parser says it hid must be either
+    # listed by some other entry or classified here. A hidden id in neither set
+    # means this script is blind, which is the failure it exists to catch -- and
+    # the shape of the bug it had before the receipts existed (codebuddy's 19
+    # tool loops live outside `_index`, so 107 of 126 were counted).
+    receipts = {m.session_id for p in parsers for m in p.hidden_sessions()}
+    unseen = sorted(receipts - set(orphans) - listed)
+    print(
+        f"hidden receipts: {len(receipts)} rows, "
+        f"{len(receipts & set(orphans))} of them classified here"
+    )
+    if unseen:
+        print(f"FAIL: {len(unseen)} hidden ids are listed by nobody and classified by nothing")
+        return 1
     if lost:
         print(
             f"\nFAIL: {len(lost)} conversations are reported by a store and shown by no entry"

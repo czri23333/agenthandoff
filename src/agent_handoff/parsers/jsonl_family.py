@@ -402,6 +402,37 @@ class JsonlSessionParser(Parser):
         # pass that filled it; a parser whose `_iter_jsonl` is overridden simply
         # has none, and every reader below falls back to a stat.
         self._dirfacts: dict[str, tuple[float, int]] = {}
+        # The rows the last `list_sessions()` did not list, with the reason on
+        # each one. See `_split_toolloops`.
+        self._hidden: list[SessionMeta] = []
+
+    def _split_toolloops(self, metas: list[SessionMeta]) -> list[SessionMeta]:
+        """Keep the conversations; park the tool loops on ``self._hidden``.
+
+        The rule is unchanged from the one this file has always applied — a row
+        whose title is the tool-loop sentinel is not a conversation, exactly as
+        the product's own UI does not list them. What is new is the receipt:
+        dropping 107 rows from a store of 2,638 was invisible, and "invisible"
+        and "lost" look the same from the outside (spec Round 54).
+
+        Call it *after* any family filtering: four entries read two shared
+        stores, and a stash made before the split would carry the same rows for
+        each of them.
+        """
+        keep: list[SessionMeta] = []
+        hidden: list[SessionMeta] = []
+        for m in metas:
+            if m.title == _TOOLLOOP_TITLE:
+                m.hidden_reason = "tool-loop"
+                hidden.append(m)
+            else:
+                keep.append(m)
+        self._hidden = hidden
+        return keep
+
+    def hidden_sessions(self) -> list[SessionMeta]:
+        """What the last ``list_sessions()`` of this parser did not list."""
+        return list(self._hidden)
 
     def available(self) -> bool:
         return self.root.is_dir()
@@ -1530,9 +1561,9 @@ class _CodebuddyHybridParser(JsonlSessionParser):
         metas.sort(key=lambda m: m.updated_at or "", reverse=True)
         # Pure tool loops (edit-and-resend orphans: zero real user messages)
         # are not conversations — the product UI never lists them, so neither
-        # do we. Still loadable by id for debugging.
-        metas = [m for m in metas if m.title != _TOOLLOOP_TITLE]
-        return metas
+        # do we. Still loadable by id for debugging, and kept on the shelf so
+        # a surface can say how many it did not show (`hidden_sessions`).
+        return self._split_toolloops(metas)
 
     def _job_dirs(self) -> list:
         """Candidate jobs/ dirs: own store plus the codebuddy shared one.
@@ -2407,10 +2438,10 @@ class QodercnIdeParser(JsonlSessionParser):
         flush()
 
         out = reals + merged
-        # A transcript with zero real user messages is an internal tool loop
-        # (browser/automation sub-agent run), not a conversation — the product
-        # UI never lists them, so neither do we. Still loadable by id.
-        out = [m for m in out if m.title != _TOOLLOOP_TITLE]
+        # Tool loops are *not* filtered out here: this pipeline serves the whole
+        # shared store, and four entries read two stores. Each family's
+        # `list_sessions` splits them after its own family filter, so a row is
+        # reported hidden by exactly one entry (see `_split_toolloops`).
         # Quest-task transcripts live under <project>/transcript/ and surface
         # in the product's task panel, not its chat list. Tag them so the
         # cockpit can group/filter like the product does.
@@ -2439,7 +2470,7 @@ class QodercnIdeParser(JsonlSessionParser):
         """The IDE's own chats only: wake/work families leave the shared store
         for their own CLI entries (still deep-linkable by id via load())."""
         out = [m for m in self._list_all() if _family_of_path(self.root, m.source_path) is None]
-        return out
+        return self._split_toolloops(out)
 
     def _within_gap(self, a: SessionMeta, b: SessionMeta) -> bool:
         ta = _parse_iso_local(a.started_at or a.updated_at)
