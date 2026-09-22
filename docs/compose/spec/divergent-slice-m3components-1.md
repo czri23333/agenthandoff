@@ -2303,6 +2303,41 @@ to connect both directly and through the configured `127.0.0.1:7892` proxy), so
 variables stripped, and confirm with `git ls-remote` rather than trusting the
 push's own exit line.
 
+### Round 57 — the time column said "now" about the future, and "412d ago" about the past
+
+The productivity-tool list in `docs/limitations.md` item 35 had one line left that
+was both small and load-bearing: make the time labels absolute past a while. Going
+after it turned up a defect first — `relTime()` is used for two directions. The
+Inbox renders a lease's `lease_until` with it, and the function's first branch was
+`if (mins < 1) return "now"`, so **every future timestamp read as "now"**: a lease
+with 40 minutes left looked already expired, in a column whose whole job is saying
+how long. The past direction had the opposite problem — a list of 2,500 rows is
+scanned, not hovered, and `63d ago` / `86d ago` / `412d ago` ask the reader to do
+arithmetic to find out when something happened.
+
+Both are fixed in one function: the future gets `in 40m` / `in 10h` / `in 2d`, and
+past 30 days the label becomes the date itself (`07-21`, and `25-03-09` across a
+year boundary) with the exact instant still in the row's tooltip. Deliberately not
+the research's "Today / This week" wording: the cell is 64 px of 12 px mono, and a
+scanning list does not need prose, it needs a shape that is obviously not a relative
+count.
+
+Verified in the running page rather than by the build: 246 rendered rows, **123 of
+them change label** and all 123 become dates (`63d ago → 07-21`, oldest row
+`86d ago → 06-28`), the diff computed by running the old implementation beside the
+new one over the live timestamps — so "this changed what a reader sees" is measured,
+not asserted. The longest new form measures **52.8 px against its 64 px cell**, the
+same width as the old `412d ago`, and 0 of the 246 cells overflow. The lease case is
+verified by the same old/new comparison (`now → in 40m`), because no lease is live
+on this machine right now — stated so the future branch is not mistaken for
+traffic-proven. `tsc -b` and `npm run build` cover types, not behaviour.
+
+**The gate lesson from Round 56 applied to itself here:** the first width check I
+wrote measured `scrollWidth > clientWidth` on cells with no layout at all (the tab
+was backgrounded; `offsetParent` was null and both widths read 0), so it reported
+"0 clipped" for a reason that had nothing to do with the design. The numbers above
+come from a measurement that first proved it had a non-zero width to compare.
+
 
 ## [S1] Problem
 

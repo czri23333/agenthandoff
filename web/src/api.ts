@@ -378,14 +378,36 @@ export const api = {
   },
 };
 
+/**
+ * One label for a past *and* a future timestamp, because the cockpit shows both:
+ * a session's last turn behind us, a lease's expiry ahead of us. A future time is
+ * not "now" — the Inbox row that says `leased · in 40m` must not read as if it had
+ * already run out.
+ */
 export function relTime(iso: string | null, now = Date.now()): string {
   if (!iso) return "?";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso.slice(0, 10);
   const mins = Math.round((now - then) / 60000);
+  if (mins < 0) {
+    const ahead = -mins;
+    if (ahead < 60) return `in ${ahead}m`;
+    const hrs = Math.round(ahead / 60);
+    if (hrs < 48) return `in ${hrs}h`;
+    return `in ${Math.round(hrs / 24)}d`;
+  }
   if (mins < 1) return "now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.round(mins / 60);
   if (hrs < 48) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
+  const days = Math.round(hrs / 24);
+  if (days <= 30) return `${days}d ago`;
+  // A list of 2,500 rows is scanned, not hovered, and "412d ago" makes the reader
+  // do arithmetic to learn anything: past a month the date itself is the shorter
+  // answer. The exact value stays in the row's tooltip.
+  const d = new Date(then);
+  const md = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return d.getFullYear() === new Date(now).getFullYear()
+    ? md
+    : `${String(d.getFullYear() % 100).padStart(2, "0")}-${md}`;
 }

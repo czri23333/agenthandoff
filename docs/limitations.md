@@ -522,9 +522,21 @@ sampled away.
       toggle with `tabular-nums`, column
       visibility and sort persistence, the contextual action zone (Tab through
       per-row buttons), ⌘K with multi-select cross-CLI handoff, the preview pane
-      (Space / ⌘Y), ⌘1-9 source switch, undo toasts, "Today/This week" absolute
-      time buckets, and `overflow-anchor: none` with a self-managed scroll offset
-      once the list is virtualised.
+      (Space / ⌘Y), ⌘1-9 source switch, undo toasts, and `overflow-anchor: none`
+      with a self-managed scroll offset once the list is virtualised.
+    - **Shipped from the twelve, differently: absolute time.** The research's
+      "Today/This week" buckets became a cutoff in `relTime()` — 30 days and under
+      keep the relative label, older rows show `07-21` (`25-03-09` across a year
+      boundary), because the column is 64 px of mono in a list that is scanned
+      rather than hovered and "Today 14:07" does not fit. What the same look found
+      is a bug rather than a nicety: `relTime()` was also used for a *future*
+      timestamp — the Inbox lease expiry — and returned "now" for anything ahead of
+      us, so a lease with 40 minutes left read as already up. It says `in 40m`
+      now. Measured on the 246 rows rendered in the browser at the time of writing:
+      123 labels changed to a date, the longest new form measures 52.8 px against
+      its 64 px cell (identical to the old `412d ago`), and the old and new
+      functions disagree on exactly those rows — the check that this changed
+      anything is the diff, not the build passing.
     - **A hold is not a queue.** While the pause is on, the list is exactly as
       stale as it was when focus arrived. The badge says 自动更新已暂停 rather than
       keeping its live dot, but nothing yet shows *how* stale: the age label only
