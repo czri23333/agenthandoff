@@ -1760,17 +1760,36 @@ shape, or who carries its text without its size or mtime changing:
 
 | Steady-state build | Before | After |
 |---|---|---|
-| transcript files opened | **4,599** | **16** |
+| distinct files opened through the reader | **4,599** | **16** |
 | store walks | 15 | 9 |
-| rows JSON-parsed | 168,896 | 130,830 |
+| rows JSON-parsed by the reader | 168,896 | 130,830 |
 | wall clock | 11.29 s | 8.26 s |
 | `_peek_id` over `qoder-ide`, warm | 1.138 s | **0.070 s** |
 
+Row 1's scope has to be stated, because a second instrument disagrees with it
+until it is: that counter wraps `read_jsonl` and counts distinct paths. Tracing
+`open()` itself finds **2,411** calls on the same steady rebuild (2,390 distinct
+files), of which **37** are the reader and **2,323** are `_tail_rows` — the two
+per-row probes reading a transcript's last 16 KB. So the reader's work is gone
+and the tail probes are what remains of the file traffic; they are not, however,
+what costs the time, and a profile of the rebuilt steady state says where that
+goes:
+
+| Steady rebuild, after this round (cProfile, one build) | |
+|---|---|
+| `nt.stat` | **123,534 calls, 3.2 s** — rglob's per-directory selects (36,471), `_group_files` ranking, and the same file stat'd again by `_peek`, `_peek_id` and the absorb signature |
+| `qoderwake`/`qoderwake-cn` `_family_transcripts` | **3.35 s for 2 calls** — each re-derives the shared store's whole listing, because the answer lives on the instance and `all_parsers()` builds fresh instances per rebuild |
+| `_absorbed_fragment_ids` | 1.87 s (was 4.13 s) — now the per-file version stats, not the re-globs |
+| codex `_rollouts` | 2.06 s over 207 calls |
+| `json.loads` | 135,673 calls, 1.35 s |
+
+That is the next round's target list, in the order the profile puts it: share one
+store's derived listing between the parsers that read it, and stop stat'ing the
+same path five times per rebuild.
+
 The seconds are the noisy part (the store is being written by the session doing
-the measuring, and this machine runs six other python processes); the open count
-is the one to believe. The rows still parsed are now dominated by the two
-per-row probes and by the sessions that really did grow — the remaining target,
-named by measurement rather than by guess.
+the measuring, and this machine runs six other python processes); the counters are
+the part that means something.
 
 **What this round nearly shipped.** Two things, and both are why the tests are
 shaped as they are.
